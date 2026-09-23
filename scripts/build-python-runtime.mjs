@@ -15,7 +15,8 @@ import {
 const rootDir = dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const binariesDir = join(rootDir, "src-tauri", "binaries");
 const outputDir = join(binariesDir, "python-runtime");
-const targetTriple = process.env.TAURI_ENV_TARGET_TRIPLE ?? hostTargetTriple();
+// 同 build-node-runtime.mjs：出包脚本给的优先，其次是 Tauri 自己导出的，最后才是构建机自己。
+const targetTriple = process.env.PI_DESKTOP_TARGET_TRIPLE?.trim() || process.env.TAURI_ENV_TARGET_TRIPLE?.trim() || hostTargetTriple();
 const sourceDir = resolvePythonSourceDir(targetTriple);
 
 mkdirSync(binariesDir, { recursive: true });

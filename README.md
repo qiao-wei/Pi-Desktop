@@ -126,28 +126,51 @@ Two independent choices: **host** (Tauri or Electron) and **runtime mode** (`bun
 
 The mode is **inferred, not baked into the artifact**: both shells report `bundled` when *both*
 runtime directories are present in the bundle and `system` otherwise, so the packaging config and the
-running app read the same fact and cannot disagree. `PI_DESKTOP_RUNTIME_MODE=bundled|system` overrides
-it for diagnosis.
+running app read the same fact and cannot disagree. The packaging chain sets
+`PI_DESKTOP_RUNTIME_MODE=bundled|system` from the entry you chose - that is the single switch that
+reaches `electron-builder`, the bridge pruner and the capability gate; the same variable overrides the
+running app for diagnosis.
 
-| Host | bundled | slim |
+The naming rule is one line: **`pack:<shell>:<target>[:<arch>][:slim]`** - the target is always
+named, `:slim` is always the last segment, and no suffix means `bundled`. Every entry is a one-liner
+over `scripts/pack.mjs`, which owns the chain; there is no second place where the steps are written
+down.
+
+| Shell / target | bundled | slim |
 | --- | --- | --- |
-| Electron | `npm run electron:build` | `npm run electron:build:slim` |
-| Tauri, macOS | `npm run package:mac` | `npm run package:mac:slim` |
-| Tauri, Windows | `npm run package:windows` / `package:windows:cross` | `npm run package:windows:slim` / `package:windows:cross:slim` |
+| Electron, macOS arm64 | `npm run pack:electron:mac:arm64` | `npm run pack:electron:mac:arm64:slim` |
+| Electron, macOS x64 | `npm run pack:electron:mac:x64` | `npm run pack:electron:mac:x64:slim` |
+| Electron, Windows (x64) | `npm run pack:electron:windows` | `npm run pack:electron:windows:slim` |
+| Tauri, macOS arm64 | `npm run pack:tauri:mac:arm64` | `npm run pack:tauri:mac:arm64:slim` |
+| Tauri, macOS x64 | `npm run pack:tauri:mac:x64` | `npm run pack:tauri:mac:x64:slim` |
+| Tauri, Windows (x64) | `npm run pack:tauri:windows` | `npm run pack:tauri:windows:slim` |
+
+Flags for one-off runs: `--arch arm64|x64`, `--mode bundled|slim`, `--cross`, `--dry-run` (print the plan
+and exit without building) - and anything after `--` is handed to the final packager
+(`npm run pack:electron:mac:arm64 -- --dry-run`). Windows targets are x64 today; add `arm64` to
+`PACK_ARCHES` in `scripts/lib/packPlan.mjs` when you want Windows on ARM.
+
+**The old names are gone on purpose** (`electron:build`, `package:mac`, `package:windows:cross`, …):
+an entry without a target cannot say what it builds, and the same command has to produce the same
+artifact on anyone's machine. The table above is the mapping.
 
 ### What the pipeline does
 
-The Electron chain (`electron:build`, and its `:slim` variant):
+Both shells run the same chain, defined once in `scripts/pack.mjs`:
 
 ```
-vite build → python:build + node:build (bundled only) → bridge:build → sidecar:verify → bridge:sync
-           → electron-builder
+tsc -b → vite build → python:build + node:build (bundled only) → bridge:build → sidecar:verify → packager
 ```
 
-Tauri's `beforeBuildCommand` runs `vite build`, the runtime builds and `bridge:build`, then
-`tauri build`. It has no hook for `sidecar:verify`, so **that gate currently only guards the Electron
-bundles** - add `&& npm run sidecar:verify` to `beforeBuildCommand` in `src-tauri/tauri.conf.json`
-(and the slim overlay) if you want the Tauri bundles held to the same bar.
+`sidecar:verify` now guards **both** shells. It is skipped - loudly, with the reason printed - only
+for a cross build, where the bridge has already been pruned for the target platform and could not
+boot on the build machine anyway. Tauri reaches the same chain through
+`beforeBuildCommand: npm run tauri:prepare`, which is a no-op when `pack.mjs` already ran it (its slim
+overlay is now only the two resource nulls, no second copy of the step list).
+
+`bridge:sync` left the chain: it re-ran the assembly with `--skip-install`, produced a
+byte-identical tree, and skipped the only strong check in the process. It stays as the offline dev
+entry (see "Judging packaged behaviour" above).
 
 The bridge is assembled, never compiled into a single file: unpacked `server/` and `src/` sources plus
 a real production `node_modules`, executed by the bundled Node through the `pi-desktop-server`
@@ -162,9 +185,11 @@ described by an `npm-shrinkwrap.json`, and pi ships one: esbuild - which pi reac
 `@earendil-works/chord` - arrives as one package per platform, for every platform, when exactly one
 of them can run here. `npm install --os/--cpu` does not change that; removing the others after the
 install does, using npm's own rule (a package declaring a matching `os`/`cpu` is kept, `any` and `!`
-negations included). The platform comes from `TAURI_ENV_TARGET_TRIPLE` when Tauri sets it during a
-cross-build, and from the build machine otherwise - so a Windows cross-build keeps the `win32`
-builds rather than the Mac ones.
+negations included). The platform comes from `PI_DESKTOP_TARGET_TRIPLE` (set by `scripts/pack.mjs`
+from the target/arch you asked for), falling back to `TAURI_ENV_TARGET_TRIPLE` for a direct
+`tauri build` and to the build machine otherwise - so a Windows build keeps the `win32` packages
+rather than the Mac ones. `node:build` and `python:build` read the same variable, which is why
+"pruned for" and "packaged for" cannot drift apart again.
 
 The manifest records the versions **installed in the repo's `node_modules`**, not the ranges
 `package.json` declares. A commit that bumps a dependency does not touch `node_modules` until someone
@@ -190,14 +215,30 @@ no `pi-desktop-server.exe` exists in any bundle.
 - **`slim`** needs neither: no runtime sources, no network beyond `npm install`, just Node 22+ on the
   build machine.
 
-Cross-building the Windows installer from an Apple Silicon Mac:
+### Cross-builds
+
+Only each target's own machine can build a **`bundled`** package: `python:build` and `node:build`
+execute the interpreter they just copied, and a Windows `python.exe` does not run on macOS. `--cross`
+refuses that combination up front, with the three ways out, instead of failing halfway through.
+**`slim` cross-builds fine**: it ships no runtimes.
+
+| Build machine | macOS target | Windows target |
+| --- | --- | --- |
+| macOS | bundled + slim | **slim only** |
+| Windows | not possible | bundled + slim |
+| Linux | not possible | **slim only** |
+
+macOS is never a cross target: dmg, signing and notarisation are all bound to a Mac.
+
+Cross-building the Windows installer from an Apple Silicon Mac (slim only):
 
 ```bash
 brew install nsis llvm
 rustup target add x86_64-pc-windows-msvc
 cargo install --locked cargo-xwin
 export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
-npm run package:windows:cross          # or package:windows:cross:slim
+npm run pack:tauri:windows:slim -- --cross      # Tauri: cargo-xwin
+npm run pack:electron:windows:slim -- --cross   # Electron: needs wine (the plan warns when it is missing)
 ```
 
 ### What ends up in the bundle
@@ -238,9 +279,12 @@ modes.
 
 ### Outputs
 
-- Electron: `dist-electron/mac-arm64/Pi Desktop.app`, `dist-electron/Pi Desktop-<version>-arm64.dmg`.
-  macOS signing is handled by `scripts/electron-sign-adhoc.mjs` (the `afterPack` hook).
-- Tauri: `src-tauri/target/release/bundle/{macos,dmg,nsis}/`.
+- Electron: `dist-electron/mac-arm64/Pi Desktop.app` + `dist-electron/Pi Desktop-<version>-arm64.dmg`
+  (x64 lands in `dist-electron/mac/`, Windows in `dist-electron/win-unpacked/` plus the NSIS
+  installer). macOS signing is handled by `scripts/electron-sign-adhoc.mjs` (the `afterPack` hook).
+- Tauri: `src-tauri/target/<target-triple>/release/bundle/{macos,dmg,nsis}/` - the pack entries always
+  pass an explicit `--target`, so artifacts are separated per triple (a bare `npm run tauri:build`
+  without one writes to `src-tauri/target/release/`).
 
 ## Environment variables
 
@@ -262,6 +306,8 @@ modes.
 | `VITE_PI_DESKTOP_PERF=1`, `VITE_PI_DESKTOP_DIAGNOSTICS_ENABLED=1` | renderer-side perf probes, for `scripts/diag-scan.mjs` |
 | `PI_DESKTOP_COMPACTION_RESERVE_TOKENS`, `PI_DESKTOP_COMPACTION_KEEP_RECENT_TOKENS` | compaction thresholds (defaults 2200 / 1400) |
 | `PI_DESKTOP_PYTHON_SOURCE_DIR`, `PI_DESKTOP_NODE_SOURCE_DIR` | runtime sources for `bundled` builds |
+| `PI_DESKTOP_TARGET_TRIPLE` | target triple the packing chain hands to `node:build` / `python:build` / `bridge:build` (outranks Tauri's own `TAURI_ENV_TARGET_TRIPLE`) |
+| `PI_DESKTOP_PACK_PREPARED=1` | set by `scripts/pack.mjs`; makes `tauri:prepare` a no-op so the prep steps run once per package |
 | `UV_PYTHON_INSTALL_DIR` | where `uv` keeps the managed CPython used for `bundled` builds |
 | `PI_DESKTOP_SIDECAR_BIN`, `PI_DESKTOP_GATE_NODE_RUNTIME`, `PI_DESKTOP_GATE_PYTHON_RUNTIME`, `PI_DESKTOP_GATE_CWD`, `PI_DESKTOP_GATE_TIMEOUT_MS` | what `sidecar:verify` boots and where |
 
