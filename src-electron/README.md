@@ -36,19 +36,21 @@ npm run electron:dev             # 自动起 bridge(6474) + vite(5176)，再挂�
   分开后 dev 的偏好能跨重启保留，也不会踩到正式版的用户数据。
 - 连不上 dev 服务时会弹一个带“先跑 npm run dev”提示的错误框，而不是一句 ERR_CONNECTION_REFUSED。
 
-打包：
+打包（入口与另一条外壳完全同形，规则见根 `README.md` 的 “Packaging”）：
 
 ```bash
-npm run electron:build            # = build + python/node:build + bridge:build + gate + electron-builder（自带运行时）
-npm run electron:build:slim       # 精简版：不带 node/python，用机器上已有的（需要 Node 22+）
-npm run electron:build -- --mac   # 只出 mac；产物在 dist-electron/
-CSC_IDENTITY_AUTO_DISCOVERY=false npm run electron:build -- --mac   # 本地不出签名包
+npm run pack:electron:mac:arm64          # 自带运行时（bundled），Apple Silicon
+npm run pack:electron:mac:x64:slim       # 精简版：不带 node/python，用机器上已有的（需 Node 22+）
+npm run pack:electron:windows:slim -- --cross   # 从 mac 交叉出 Windows 包（仅 slim；需要 wine）
+CSC_IDENTITY_AUTO_DISCOVERY=false npm run pack:electron:mac:arm64   # 本地不出签名包
 ```
 
-两种变体的开关是 `PI_DESKTOP_RUNTIME_MODE`（`bundled` 缺省 / `system`），产物清单只在
+目标平台/架构/模式都由 `scripts/pack.mjs` 翻译成参数与 env（`npm run pack:electron:mac:arm64 -- --dry-run`
+可以先看一遍它要跑什么；产物在 `dist-electron/`）。两种模式的开关是 `PI_DESKTOP_RUNTIME_MODE`
+（`bundled` / `system`，由出包脚本下发，不再内联在 npm 脚本里），产物清单只在
 `src-electron/electron-builder.config.cjs` 里派生出差异；运行期由 `paths.js` 自己从“有没有那两个
-directory”推出模式，不需要把模式烘进包里。详见仓库根 `README.md` 的 “Packaging without the
-embedded runtimes”。
+directory”推出模式，不需要把模式烘进包里。bundled 不能交叉构建（内置 runtime 必须由目标原生
+解释器组装并验收），详见根 `README.md`。
 
 > **macOS 签名不是可选项**：本机没有证书时 electron-builder 会跳过签名，产物 `.app` 保留 Electron 自带的
 > linker 签名（`Identifier=Electron`），macOS 会拒绝它的一切**系统通知**（`UNErrorDomain error 1`，还不弹权限框），
@@ -63,7 +65,8 @@ embedded runtimes”。
   `invoke` 本身只是 `window.__TAURI_INTERNALS__.invoke(cmd, args, options)` 的一行转发，
   preload 实现这一个入口就能让同一份 `dist/` 在两个外壳里跑。未知命令直接 reject，不会静默。
 - **资源布局与 Tauri 打包一致**：sidecar 和内置 python/node runtime 直接复用
-  `src-tauri/binaries/*` 里 `npm run sidecar:build` 等脚本的产物，不另建一套构建。
+  `src-tauri/binaries/*` 下 `bridge:build` / `node:build` / `python:build` 的产物，不另建一套构建
+  （这四个步骤由 `scripts/pack.mjs` 统一编排，两条外壳共用）。
 - **生产用自定义协议伺服 dist**：vite 的 `base` 是默认的 `/`，`file://` 下绝对资源路径会 404；
   自定义协议 `app://pi-desktop/` 既有稳定的 origin（`localStorage` 里的主题 / 面板宽度 / 侧栏折叠 /
   语言等偏好才能跨重启保留），又是可信安全上下文（`crypto.subtle` 可用），绝对资源路径也正常。
@@ -78,5 +81,7 @@ embedded runtimes”。
   `-webkit-app-region: drag` 生效（双击最大化走 OS 原生行为）。
 - 只支持请求/响应式的 `invoke`，Tauri 的 streaming channel（`transformCallback`）会显式抛错，
   目前前端没用到了。
-- Windows 打包前需要先用 `TAURI_ENV_TARGET_TRIPLE=x86_64-pc-windows-msvc` 跑
-  `sidecar:build` / `node:build` / `python:build` 产出 win 版 runtime（与 Tauri 交叉编译同样的前置条件）。
+- Windows 目标的 **bundled** 包必须在 Windows 上打：`node:build` / `python:build` 要执行目标原生的
+  解释器来验收，macOS 上跑不了 `node.exe` / `python.exe`。从 mac 只能交叉出 **slim** 包：
+  `npm run pack:electron:windows:slim -- --cross`（目标三元组由出包脚本经 `PI_DESKTOP_TARGET_TRIPLE`
+  下发，不需要手动设；electron-builder 会用到 wine）。详见根 `README.md` 的 “Cross-builds”。

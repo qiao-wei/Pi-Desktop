@@ -118,28 +118,44 @@ node scripts/diag-scan.mjs --since=30m     # 在日志里找异常窗口
   装了 Node 22+。此时不再有隔离：`npm i -g` 装到用户的全局 prefix。
 
 模式**不烘进产物，而是推断**：只要产物里那两个 runtime 目录都在，两个外壳都判成 `bundled`，
-否则判成 `system` —— 于是打包配置和运行期读的是同一个事实，不可能互相矛盾。排障时可以用
-`PI_DESKTOP_RUNTIME_MODE=bundled|system` 显式覆盖。
+否则判成 `system` —— 于是打包配置和运行期读的是同一个事实，不可能互相矛盾。打包链会按你选
+的入口下发 `PI_DESKTOP_RUNTIME_MODE=bundled|system`，它就是同时作用到 electron-builder、bridge
+剪包和门禁的那一个开关；运行期也可以用同一个变量覆盖，便于排障。
 
-| 外壳 | bundled | slim |
+命名规则就一行：**`pack:<外壳>:<目标>[:<架构>][:slim]`** —— 目标必须写出来，`:slim` 永远是最后一段，
+不带就是 `bundled`。每个入口都是 `scripts/pack.mjs` 的一行包装，步骤只在它里面写一遍。
+
+| 外壳 / 目标 | bundled | slim |
 | --- | --- | --- |
-| Electron | `npm run electron:build` | `npm run electron:build:slim` |
-| Tauri（macOS） | `npm run package:mac` | `npm run package:mac:slim` |
-| Tauri（Windows） | `npm run package:windows` / `package:windows:cross` | `npm run package:windows:slim` / `package:windows:cross:slim` |
+| Electron，macOS arm64 | `npm run pack:electron:mac:arm64` | `npm run pack:electron:mac:arm64:slim` |
+| Electron，macOS x64 | `npm run pack:electron:mac:x64` | `npm run pack:electron:mac:x64:slim` |
+| Electron，Windows（x64） | `npm run pack:electron:windows` | `npm run pack:electron:windows:slim` |
+| Tauri，macOS arm64 | `npm run pack:tauri:mac:arm64` | `npm run pack:tauri:mac:arm64:slim` |
+| Tauri，macOS x64 | `npm run pack:tauri:mac:x64` | `npm run pack:tauri:mac:x64:slim` |
+| Tauri，Windows（x64） | `npm run pack:tauri:windows` | `npm run pack:tauri:windows:slim` |
+
+一次性参数：`--arch arm64|x64`、`--mode bundled|slim`、`--cross`、`--dry-run`（只打印计划不构建）；
+`--` 之后的参数原样转交打包器（`npm run pack:electron:mac:arm64 -- --dry-run`）。Windows 目前只出
+x64；要出 Windows on ARM 时在 `scripts/lib/packPlan.mjs` 的 `PACK_ARCHES` 里加 `arm64`。
+
+**旧名字是故意删掉的**（`electron:build`、`package:mac`、`package:windows:cross` …）：不带目标的
+入口说不清它到底出什么包，也不能保证别人机器上跑出同样的东西。对照就是上面那张表。
 
 ### 流水线做了什么
 
-Electron 那条链（`electron:build` 及其 `:slim` 变体）：
+两条外壳走同一条链，只在 `scripts/pack.mjs` 里定义一次：
 
 ```
-vite build → python:build + node:build（仅 bundled）→ bridge:build → sidecar:verify → bridge:sync
-           → electron-builder
+tsc -b → vite build → python:build + node:build（仅 bundled）→ bridge:build → sidecar:verify → 打包器
 ```
 
-Tauri 的 `beforeBuildCommand` 跑的是 `vite build`、两个运行时构建和 `bridge:build`，然后
-`tauri build`。它没有地方挂 `sidecar:verify`，所以**那道自检目前只守 Electron 产物** —— 想让
-Tauri 产物也过同样的门，在 `src-tauri/tauri.conf.json`（以及 slim overlay）的
-`beforeBuildCommand` 后面加上 `&& npm run sidecar:verify`。
+`sidecar:verify` 现在**两条外壳都守**。只有交叉构建才跳过它，而且会把原因打印出来 —— 那种情况
+下 bridge 已按目标平台剪过平台包，在构建机上本来也起不来。Tauri 通过
+`beforeBuildCommand: npm run tauri:prepare` 接入同一条链；`pack.mjs` 已经跑过时它是空转（slim 的
+overlay 现在只剩两个资源 null，不再抄一份步骤链）。
+
+`bridge:sync` 从链里去掉了：它带 `--skip-install` 又跑一遍组装，产物字节级完全一样，却跳过了唯一
+那道强校验。作为离线开发入口它还在（见上面“判断打包版行为”那段）。
 
 桥是**组装**出来的、从不编译成单文件：未打包的 `server/` 与 `src/` 源码 + 一份真实的生产
 `node_modules`，由内置 Node 通过 `pi-desktop-server` launcher 执行。pi 的运行时扩展是按它
@@ -152,8 +168,10 @@ Tauri 产物也过同样的门，在 `src-tauri/tauri.conf.json`（以及 slim o
 描述的树不生效，而 pi 正好自带一个：pi 通过 `@earendil-works/chord` 用到的 esbuild，是以
 "每个平台一个包"的形式来的 —— 每个平台都有，而这里只有一个跑得了。`npm install --os/--cpu`
 改不了这一点，装完再删就可以；判定规则就是 npm 自己那套（声明了匹配的 `os`/`cpu` 就留，含
-`any` 和 `!` 否定式）。平台取 `TAURI_ENV_TARGET_TRIPLE`（Tauri 交叉构建时会设置），没有就用
-构建机自己的 —— 所以从 Mac 交叉构建 Windows 包时留下的是 `win32` 那套，而不是 Mac 的。
+`any` 和 `!` 否定式）。平台取 `PI_DESKTOP_TARGET_TRIPLE`（`scripts/pack.mjs` 按你指定的目标/
+架构下发），直接跑 `tauri build` 时退回它自己导出的 `TAURI_ENV_TARGET_TRIPLE`，都没有才用构建机
+自己的 —— 所以 Windows 包留下的是 `win32` 那套，而不是 Mac 的。`node:build` 与 `python:build` 读
+的是同一个变量，“按哪个平台剪包”和“给哪个平台打包”因此不可能再漂开。
 
 清单里记的版本来自**仓库 `node_modules` 里实际装的**，而不是 `package.json` 声明的范围。一次
 提交把依赖升了级，但没人跑 `npm install` 的话，`node_modules` 还是旧的 —— 用这棵过期树装出来的桥
@@ -177,14 +195,29 @@ Windows 没有 launcher 脚本：两个外壳都是 `node-runtime\node.exe` + `b
     Linux 上是必须的。
 - **`slim`** 两样都不需要：不用运行时源、不用额外的网络，打包机上只要有 Node 22+。
 
-在 Apple Silicon Mac 上交叉构建 Windows 安装包：
+### 交叉构建
+
+**`bundled`** 只有目标平台自己的机器能出：`python:build` 和 `node:build` 要执行它们刚拷过去的
+解释器，而 Windows 的 `python.exe` 在 macOS 上跑不起来。这种组合 `--cross` 会在动手之前就拒掉，
+并把三条出路一起打出来。**`slim` 交叉没问题**：它不带 runtime。
+
+| 打包机 | macOS 目标 | Windows 目标 |
+| --- | --- | --- |
+| macOS | bundled + slim | **仅 slim** |
+| Windows | 不可能 | bundled + slim |
+| Linux | 不可能 | **仅 slim** |
+
+macOS 永远不能作为交叉目标：dmg、签名、公证都绑在 Mac 上。
+
+在 Apple Silicon Mac 上交叉构建 Windows 安装包（仅 slim）：
 
 ```bash
 brew install nsis llvm
 rustup target add x86_64-pc-windows-msvc
 cargo install --locked cargo-xwin
 export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
-npm run package:windows:cross          # 或 package:windows:cross:slim
+npm run pack:tauri:windows:slim -- --cross      # Tauri：cargo-xwin
+npm run pack:electron:windows:slim -- --cross   # Electron：需要 wine（计划里缺 wine 会先提示）
 ```
 
 ### 产物里都有什么
@@ -221,7 +254,12 @@ macOS 和 Linux 上会回读登录 shell 的 PATH，因为 GUI 启动的应用�
 - Electron：`dist-electron/mac-arm64/Pi Desktop.app`、
   `dist-electron/Pi Desktop-<version>-arm64.dmg`。macOS 签名由 `scripts/electron-sign-adhoc.mjs`
   （`afterPack` 钩子）处理。
-- Tauri：`src-tauri/target/release/bundle/{macos,dmg,nsis}/`。
+- Electron：`dist-electron/mac-arm64/Pi Desktop.app` + `dist-electron/Pi Desktop-<版本>-arm64.dmg`
+  （x64 在 `dist-electron/mac/`，Windows 在 `dist-electron/win-unpacked/` 加 NSIS 安装器）。macOS 签名由
+  `scripts/electron-sign-adhoc.mjs`（`afterPack` 钩子）处理。
+- Tauri：`src-tauri/target/<目标三元组>/release/bundle/{macos,dmg,nsis}/` —— 出包入口总显式传
+  `--target`，产物按三元组分目录（不带三元组的裸 `npm run tauri:build` 才写在
+  `src-tauri/target/release/`）。
 
 ## 环境变量
 
@@ -242,6 +280,8 @@ macOS 和 Linux 上会回读登录 shell 的 PATH，因为 GUI 启动的应用�
 | `VITE_PI_DESKTOP_PERF=1`、`VITE_PI_DESKTOP_DIAGNOSTICS_ENABLED=1` | 渲染层性能探针，供 `scripts/diag-scan.mjs` 使用 |
 | `PI_DESKTOP_COMPACTION_RESERVE_TOKENS`、`PI_DESKTOP_COMPACTION_KEEP_RECENT_TOKENS` | 压缩阈值（默认 2200 / 1400） |
 | `PI_DESKTOP_PYTHON_SOURCE_DIR`、`PI_DESKTOP_NODE_SOURCE_DIR` | `bundled` 构建用的运行时源 |
+| `PI_DESKTOP_TARGET_TRIPLE` | 出包链下发给 `node:build` / `python:build` / `bridge:build` 的目标三元组（优先于 Tauri 自己的 `TAURI_ENV_TARGET_TRIPLE`） |
+| `PI_DESKTOP_PACK_PREPARED=1` | 由 `scripts/pack.mjs` 设置，让 `tauri:prepare` 空转，准备步骤每个包只跑一次 |
 | `UV_PYTHON_INSTALL_DIR` | `uv` 存放受管 CPython 的位置（`bundled` 构建用） |
 | `PI_DESKTOP_SIDECAR_BIN`、`PI_DESKTOP_GATE_NODE_RUNTIME`、`PI_DESKTOP_GATE_PYTHON_RUNTIME`、`PI_DESKTOP_GATE_CWD`、`PI_DESKTOP_GATE_TIMEOUT_MS` | `sidecar:verify` 起什么、在哪起 |
 

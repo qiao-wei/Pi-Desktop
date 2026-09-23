@@ -13,7 +13,9 @@ import {
 const rootDir = dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const binariesDir = join(rootDir, "src-tauri", "binaries");
 const outputDir = join(binariesDir, "node-runtime");
-const targetTriple = process.env.TAURI_ENV_TARGET_TRIPLE ?? hostTargetTriple();
+// 目标三元组的来源顺序：出包脚本（scripts/pack.mjs）→ Tauri 自己导出的（直接跑 tauri build 时）
+// → 构建机自己。两条外壳（Electron / Tauri）的交叉打包都走同一条路径。
+const targetTriple = process.env.PI_DESKTOP_TARGET_TRIPLE?.trim() || process.env.TAURI_ENV_TARGET_TRIPLE?.trim() || hostTargetTriple();
 const sourceDir = resolveNodeSourceDir(targetTriple);
 
 mkdirSync(binariesDir, { recursive: true });
