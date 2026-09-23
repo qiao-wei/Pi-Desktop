@@ -1,0 +1,76 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-electron/
+build/
+coverage/
+
+# TypeScript/Vite generated files
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# Tauri/Rust generated files
+src-tauri/target/
+src-tauri/gen/
+src-tauri/binaries/
+
+# Local package archives
+*.tgz
+*.tar.gz
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+._*
+.Spotlight-V100
+.Trashes
+Desktop.ini
+
+# Local debugging scratch space: one-off Playwright/probe scripts and .bak snapshots.
+# They only run against a live dev app, so they are not CI runnable and not shipped.
+/.scratch/
+
+# Python caches. Repo ships .py files that are executed in place (skills/*/scripts, scripts/*.py),
+# so __pycache__ appears inside tracked directories.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Playwright output (the scratch scripts drive a headless browser)
+playwright-report/
+blob-report/
+test-results/
+.playwright/
+
+# Agent-app local state. NOTE: <project>/.pi is a real resource root (README),
+# only the auto-generated version backups next to an installed skill are local.
+.pi/skill-versions/
+
+# Local runtime junk
+.cache/
+.eslintcache
+*.pid
+*.local

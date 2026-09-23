@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json.schemastore.org/electron-builder",
+  "appId": "com.pi.desktop",
+  "productName": "Pi Desktop",
+  "directories": {
+    "app": "src-electron",
+    "output": "dist-electron"
+  },
+  "files": [
+    "*.js",
+    "package.json",
+    "!node_modules/**/*",
+    "!**/node_modules/**/*"
+  ],
+  "npmRebuild": false,
+  "nodeGypRebuild": false,
+  "afterPack": "scripts/electron-sign-adhoc.mjs",
+  "asar": true,
+  "extraResources": [
+    {
+      "from": "dist",
+      "to": "renderer"
+    },
+    {
+      "from": "skills",
+      "to": "skills"
+    },
+    {
+      "from": "capabilities.defaults.json",
+      "to": "capabilities.defaults.json"
+    },
+    {
+      "from": "src-tauri/binaries/python-runtime",
+      "to": "python-runtime"
+    },
+    {
+      "from": "src-tauri/binaries/node-runtime",
+      "to": "node-runtime"
+    },
+    {
+      "from": "src-tauri/binaries/bridge/node_modules",
+      "to": "bridge/node_modules"
+    },
+    {
+      "from": "src-tauri/binaries/bridge/package.json",
+      "to": "bridge/package.json"
+    },
+    {
+      "from": "src-tauri/binaries/bridge/package-lock.json",
+      "to": "bridge/package-lock.json"
+    },
+    {
+      "from": "src-tauri/binaries/bridge/server",
+      "to": "bridge/server"
+    },
+    {
+      "from": "src-tauri/binaries/bridge/src",
+      "to": "bridge/src"
+    }
+  ],
+  "mac": {
+    "category": "public.app-category.education",
+    "target": [
+      "dir",
+      "dmg"
+    ],
+    "icon": "src-tauri/icons/icon.png",
+    "extraResources": [
+      {
+        "from": "src-tauri/binaries/pi-desktop-server",
+        "to": "pi-desktop-server"
+      }
+    ]
+  },
+  "win": {
+    "target": [
+      "nsis"
+    ],
+    "icon": "src-tauri/icons/icon.png",
+    "extraResources": []
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false
+  }
+}
