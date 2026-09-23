@@ -1,0 +1,2073 @@
+:root {
+  background: transparent;
+  --titlebar-height: 40px;
+  --window-radius: 12px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow: hidden;
+  background: transparent;
+}
+
+button,
+textarea,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.titlebar {
+  position: relative;
+  z-index: 100;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
+  align-items: center;
+  flex: 0 0 var(--titlebar-height);
+  height: var(--titlebar-height);
+  padding: 0 10px;
+  border-bottom: 1px solid #dedfe0;
+  color: #3f4543;
+  background: #f0f1f2;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.titlebar-icon-button:hover,
+.titlebar-icon-button.is-active {
+  color: #1c6850;
+  background: #e0f1e9;
+}
+
+.sidebar-section-heading svg.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.sidebar-nav-button:hover,
+.sidebar-nav-button.is-active {
+  border-color: #dedede;
+  background: #e8e8e8;
+}
+
+.project-row.is-active {
+  border-color: #d8d0c3;
+  background: #efede6;
+}
+
+.session-row.is-active {
+  color: #18231f;
+  background: #e3e5e4;
+}
+
+.session-row.is-streaming {
+  color: #1f5a4b;
+}
+
+@keyframes session-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.session-row:hover .session-actions,
+.session-row:focus-within .session-actions,
+.session-row.is-active .session-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.extension-web-notice.is-error {
+  border-color: #f0c8c4;
+  color: #8a3832;
+  background: #fff3f1;
+}
+
+.extension-web-status.is-error {
+  color: #8c3d36;
+  background: #ffe8e5;
+}
+
+.extension-notification.is-error {
+  border-color: #e2b8b1;
+  border-left-color: #b94a3f;
+  color: #963b31;
+}
+
+.settings-tab.is-active {
+  color: #15221d;
+  background: #e8e4dd;
+}
+
+.settings-tab.is-active svg {
+  color: #1f7a5b;
+}
+
+.settings-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 8px;
+  color: #656d68;
+  background: transparent;
+  cursor: pointer;
+}
+
+.settings-close:hover {
+  color: #1c2723;
+  background: #f0efeb;
+}
+
+.capability-page-tab.is-active {
+  color: #ffffff;
+  background: #3d3d3d;
+}
+
+.mcp-adapter-state.is-unavailable,
+.mcp-adapter-state.is-error {
+  color: #8b3d35;
+}
+
+.capability-category-strip button:hover,
+.capability-category-strip button.is-active {
+  color: #111;
+  background: #e8e8e8;
+}
+
+.capability-card strong,
+.capability-picker-row strong {
+  display: block;
+  min-width: 0;
+  color: #111111;
+  font-size: 1.02rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+.capability-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  color: #ffffff;
+  background: #cef9de;
+  color: #079445;
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.capability-dot.mcp {
+  color: #6f3ef7;
+  background: #e6d7ff;
+}
+
+/* The slash menu renders narrower rows than the old dialog: keep its dot small. */
+.slash-menu .capability-dot {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+}
+
+.skill-import-scope button:hover,
+.skill-import-scope button.is-active {
+  border-color: #248261;
+  background: #edf7f2;
+}
+
+.capability-form input,
+.capability-form textarea,
+.capability-form select,
+.capability-picker input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #d8d8d8;
+  border-radius: 8px;
+  color: #17231e;
+  background: #ffffff;
+}
+
+.capability-form input,
+.capability-form select,
+.capability-picker input {
+  height: 40px;
+  padding: 0 11px;
+}
+
+.composer {
+  position: relative;
+}
+
+/*
+ * The only place compaction shows up. It hovers over the top edge of the
+ * composer, so a run that starts, succeeds, or fails never reflows the thread
+ * underneath - the message list keeps its own scroll position while the model
+ * is busy rewriting the context it will be sent next.
+ */
+.composer > .compaction-notice {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: calc(100% - 6px);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid #e5d8b8;
+  border-radius: 8px;
+  background: #fdf8ec;
+  box-shadow: 0 8px 22px rgba(18, 22, 20, 0.08);
+  color: #6b5320;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.composer > .compaction-notice[data-tone="failed"] {
+  border-color: #e6c3bd;
+  background: #fdf1ef;
+  color: #8c2f22;
+}
+
+.composer > .compaction-notice .compaction-notice-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.composer > .compaction-notice .compaction-notice-spin {
+  flex: none;
+  animation: compaction-notice-spin 1s linear infinite;
+}
+
+.composer > .compaction-notice .compaction-notice-close {
+  flex: none;
+  margin-left: auto;
+  color: inherit;
+}
+
+@keyframes compaction-notice-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer > .compaction-notice .compaction-notice-spin {
+    animation: none;
+  }
+}
+
+.capability-picker {
+  position: absolute;
+  left: 28px;
+  right: 28px;
+  bottom: 98px;
+  z-index: 35;
+  max-height: min(420px, 55svh);
+  overflow: hidden;
+  border: 1px solid #d8d0c3;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgba(18, 22, 20, 0.2);
+}
+
+/* Slash autocomplete popup: sections scroll together, rows keep to one line. */
+.capability-picker.slash-menu {
+  overflow-y: auto;
+  padding: 4px 0 6px;
+}
+
+/* Slash rows are flex (dot · name+description · package), single line each.
+   The shared dialog row is a 2-column grid and must not leak in here. */
+.slash-menu .capability-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+
+.slash-menu-section {
+  display: grid;
+  gap: 2px;
+  padding: 2px 8px 0;
+}
+
+.slash-menu-section-label {
+  padding: 8px 9px 2px;
+  color: #8a938e;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.capability-picker.slash-menu .slash-menu-row-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.capability-picker.slash-menu .slash-menu-row-text strong {
+  display: inline;
+  flex: none;
+  color: #111111;
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+.capability-picker.slash-menu .slash-menu-row-text small {
+  display: inline;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #68756f;
+  font-size: 0.85rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.capability-picker.slash-menu .slash-menu-package {
+  display: inline;
+  flex: none;
+  max-width: 30%;
+  color: #9aa39d;
+  font-size: 0.75rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.capability-dot.skill {
+  color: #079445;
+  background: #cef9de;
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.capability-dot.command {
+  color: #6f3ef7;
+  background: #e6d7ff;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.capability-picker-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid #eee8dd;
+}
+
+.capability-picker-list {
+  display: grid;
+  gap: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.capability-picker-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.capability-picker-row:hover,
+.capability-picker-row:focus-visible {
+  background: #f2f6f3;
+  outline: none;
+}
+
+.capability-picker-row.is-active {
+  background: #e8e8e8;
+}
+
+.capability-picker-row small {
+  display: block;
+  color: #68756f;
+}
+
+p {
+  margin-top: 0;
+}
+
+.icon-button,
+.send-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  border: 1px solid #d8d0c3;
+  border-radius: 8px;
+  color: #26312d;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.icon-button.is-active {
+  border-color: #1f7a5b;
+  color: #1f7a5b;
+  background: #e7f4ee;
+}
+
+.icon-button:disabled,
+.send-button:disabled,
+.primary-action:disabled {
+  color: #929a96;
+  background: #efede7;
+  cursor: not-allowed;
+}
+
+.send-button,
+.primary-action {
+  border-color: #1f7a5b;
+  color: #ffffff;
+  background: #1f7a5b;
+}
+
+.stop-button {
+  border-color: #bf3f3f;
+  color: #ffffff;
+  background: #bf3f3f;
+}
+
+.stop-button:hover {
+  border-color: #9e3030;
+  background: #9e3030;
+}
+
+/* assistant-ui thread surface */
+.aui-thread {
+  position: relative;
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fbfaf7;
+}
+
+.aui-thread-viewport {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 22px 20px 30px;
+  scroll-behavior: smooth;
+}
+
+.aui-thread-viewport [data-message-id] {
+  width: 100%;
+  min-width: 0;
+  /*
+   * No `content-visibility: auto` here, deliberately. It looked like free money
+   * on long threads (only lay out what is on screen), but the placeholder box it
+   * substitutes is the *last remembered* height, and message rows mount empty -
+   * measured: offscreen rows reported 0px and 30px where they are really 41px and
+   * 270px, so a thread whose true height is 12149px presented a scroll range of
+   * 1738px. Wheeling up then forced the real layout of everything above the fold
+   * at once, the range grew several-fold under the reader, and the content moved
+   * 1400-2600px per 300px gesture ("加载历史对话，往上滚乱跳"). Chrome's own scroll
+   * anchoring cannot paper over it here because the viewport sets
+   * `overflow-anchor: none` while our code drives the position.
+   *
+   * The geometry also has to mean the same thing on both sides of a session
+   * switch: `viewportStates` stores a raw `scrollTop`, and entry clamps it into
+   * `scrollHeight`, which is only safe while that height is the real one.
+   */
+}
+
+.aui-scroll-to-bottom {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  z-index: 2;
+  border: 1px solid #d8d0c3;
+  border-radius: 999px;
+  padding: 8px;
+  color: #405149;
+  background: #ffffff;
+  box-shadow: 0 5px 18px rgba(18, 22, 20, 0.12);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateX(-50%);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease;
+}
+.aui-scroll-to-bottom[data-visible="false"] {
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, 10px);
+  pointer-events: none;
+}
+.aui-scroll-to-bottom:hover { background: #edf3ef; }
+
+.markdown {
+  display: grid;
+  gap: 10px;
+  color: #17231e;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown blockquote,
+.markdown ul,
+.markdown ol,
+.markdown table,
+.markdown pre,
+.markdown hr,
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin: 0;
+}
+
+.markdown p,
+.markdown li,
+.markdown blockquote {
+  line-height: 1.56;
+  white-space: pre-wrap;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  line-height: 1.25;
+}
+
+.markdown h1 {
+  font-size: 1.1rem;
+}
+
+.markdown h2 {
+  font-size: 1rem;
+}
+
+.markdown h3 {
+  font-size: 0.96rem;
+}
+
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 0.92rem;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 20px;
+}
+
+.markdown li + li {
+  margin-top: 6px;
+}
+
+.markdown li > p:first-child {
+  display: inline;
+}
+
+.markdown li > p + p {
+  margin-top: 6px;
+}
+
+.markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  border-spacing: 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.markdown th,
+.markdown td {
+  padding: 7px 10px;
+  border: 1px solid #d8d0c3;
+  vertical-align: top;
+  white-space: normal;
+}
+
+.markdown th {
+  color: #17231e;
+  background: #f1ece2;
+  font-weight: 700;
+}
+
+.markdown tr:nth-child(even) td {
+  background: #faf8f3;
+}
+
+.markdown input[type="checkbox"] {
+  margin-right: 6px;
+}
+
+.markdown hr {
+  width: 100%;
+  height: 1px;
+  border: 0;
+  background: #ded7ca;
+}
+
+.markdown blockquote {
+  padding-left: 12px;
+  border-left: 3px solid #d8d0c3;
+  color: #51605a;
+}
+
+.markdown pre {
+  overflow-x: auto;
+  padding: 10px 12px;
+  border: 1px solid #dfd7ca;
+  border-radius: 8px;
+  background: #f8f6f1;
+}
+
+.markdown code {
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+  background: #efe9de;
+  font-size: 0.92em;
+}
+
+.markdown pre code {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 0.9rem;
+  white-space: pre;
+}
+
+.markdown a {
+  color: #176a50;
+  text-decoration: underline;
+}
+
+.attachment-badge {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, auto) auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: min(220px, 100%);
+  height: 22px;
+  padding: 1px 4px 1px 3px;
+  border: 1px solid #d8d3ca;
+  border-radius: 6px;
+  color: #26312d;
+  background: #f5f3ee;
+  vertical-align: middle;
+}
+
+.attachment-badge.is-openable {
+  cursor: pointer;
+  text-align: left;
+}
+
+.attachment-badge.is-openable:hover,
+.attachment-badge.is-openable:focus-visible {
+  border-color: #8da79b;
+  background: #edf3ef;
+  outline: none;
+}
+
+.attachment-badge img,
+.attachment-badge-icon {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+.attachment-badge img {
+  object-fit: cover;
+  background: #e8e5de;
+}
+
+.attachment-badge-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #4f665d;
+  background: #e4ebe7;
+}
+
+.attachment-badge-copy {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  line-height: 1.1;
+}
+
+.attachment-badge-copy strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #25302c;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-badge-copy small {
+  flex: none;
+  margin-top: 0;
+  color: #7a827e;
+  font-size: 0.6rem;
+}
+
+.attachment-badge button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1;
+  color: #707975;
+  background: transparent;
+  cursor: pointer;
+}
+
+.attachment-badge button:hover {
+  color: #27312d;
+  background: #e1ded7;
+}
+
+.aui-user-message-content .inline-message-text {
+  line-height: 1.6;
+}
+
+.aui-user-message-content .attachment-badge {
+  height: 20px;
+  margin: 1px 5px 1px 0;
+  padding: 1px 4px 1px 2px;
+  vertical-align: middle;
+}
+
+.aui-user-message-content .attachment-badge img,
+.aui-user-message-content .attachment-badge-icon {
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+}
+
+.aui-user-message-content .attachment-badge-copy strong {
+  font-size: 0.68rem;
+}
+
+.aui-user-message-content .attachment-badge-copy small {
+  margin-top: 0;
+  font-size: 0.58rem;
+}
+
+.attachment-hover-card {
+  position: fixed;
+  z-index: 80;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  min-height: 74px;
+  padding: 10px;
+  border: 1px solid #d5cec2;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(40, 50, 45, 0.18);
+  pointer-events: none;
+}
+
+.attachment-hover-card.place-above {
+  transform: translateY(-100%);
+}
+
+.attachment-hover-card.is-image {
+  grid-template-columns: 1fr;
+  width: min(300px, calc(100vw - 24px));
+}
+
+.attachment-hover-card.is-image img {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 5px;
+  background: #f0eee9;
+}
+
+.attachment-hover-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  color: #4f665d;
+  background: #e4ebe7;
+}
+
+.attachment-hover-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.attachment-hover-copy strong,
+.attachment-hover-copy span,
+.attachment-hover-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.attachment-hover-copy strong {
+  color: #25302c;
+  font-size: 0.8rem;
+}
+
+.attachment-hover-copy span {
+  color: #4e5e56;
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.attachment-hover-copy small {
+  color: #7a827e;
+  font-size: 0.66rem;
+}
+
+/* Composer 的自适应档位看聊天列自身宽度（container query）：
+   conversation-surface 的 inline size = 窗口 − 左侧栏 − 右侧面板，面板拖动实时生效。 */
+.conversation-surface {
+  container-type: inline-size;
+}
+
+.composer {
+  flex: 0 0 auto;
+  padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+  background: #fbfaf7;
+}
+
+.composer-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.composer-surface {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #d8d0c3;
+  border-radius: 8px;
+  background: #ffffff;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+.composer-surface:focus-within {
+  border-color: #1f7a5b;
+  box-shadow: 0 0 0 3px rgba(31, 122, 91, 0.14);
+}
+
+.composer-surface.is-dragging {
+  border-color: #1f7a5b;
+  background: #edf8f2;
+  box-shadow: inset 0 0 0 1px #1f7a5b, 0 0 0 3px rgba(31, 122, 91, 0.12);
+}
+
+.composer-editor {
+  display: block;
+  min-height: 36px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 3px 4px;
+  color: #17231e;
+  line-height: 1.5;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+
+.composer-editor:empty::before {
+  content: attr(data-placeholder);
+  color: #87908b;
+  pointer-events: none;
+}
+
+.composer-editor .attachment-badge {
+  /* 左侧留 4px：否则光标停在徽标前时紧贴徽标边框（左右各 4/5px 也顺手对齐了）。 */
+  margin: 0 5px 3px 4px;
+}
+
+.capability-badge {
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  max-width: min(200px, 100%);
+  padding: 1px 5px 1px 3px;
+  border-color: #dedede;
+  border-radius: 999px;
+  background: #efefef;
+}
+
+.capability-badge .attachment-badge-icon {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  color: #ffffff;
+  font-size: 0.56rem;
+  font-weight: 700;
+}
+
+.capability-badge.skill .attachment-badge-icon {
+  background: #1f7a5b;
+}
+
+.capability-badge.mcp .attachment-badge-icon {
+  background: #5f5aa2;
+}
+
+.capability-badge .attachment-badge-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.capability-badge .attachment-badge-copy strong {
+  font-size: 0.74rem;
+}
+
+.capability-badge .attachment-badge-copy small {
+  display: none;
+}
+
+.capability-badge button {
+  width: 15px;
+  min-width: 15px;
+  height: 15px;
+  border-radius: 50%;
+}
+
+/* 聊天用户消息里的技能徽标比编辑器里再小一档，和 14px 正文处在同一视觉层。 */
+.aui-user-message-content .capability-badge .attachment-badge-icon {
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  border-radius: 4px;
+}
+
+.aui-user-message-content .capability-badge .attachment-badge-copy strong {
+  font-size: 0.68rem;
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* 单行是硬约束：不够放的内容按档位收进 ⋯ 菜单（ComposerOverflowMenu），不折行。 */
+  gap: 10px;
+  min-width: 0;
+}
+
+.composer-tools,
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.composer-tool-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: #5a6560;
+  background: transparent;
+  cursor: pointer;
+}
+
+.composer-tool-button:hover {
+  color: #1f5f49;
+  background: #edf2ef;
+}
+
+.composer-tool-button:disabled {
+  color: #a2a8a5;
+  cursor: not-allowed;
+}
+
+/* 行内消息编辑：复用 composer 的表面/徽章样式，只改尺寸与菜单定位。 */
+.message-edit-surface {
+  gap: 6px;
+}
+
+.message-edit-surface .capability-picker.slash-menu {
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
+  max-height: min(320px, 45svh);
+}
+
+.message-edit-editor {
+  min-height: 52px;
+  max-height: 240px;
+}
+
+.message-edit-footer {
+  min-height: 32px;
+}
+
+.aui-user-message-footer time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 收纳菜单按钮：默认隐藏，≤380px 档显示，同时 Thinking 下拉收进去。 */
+.composer-tool-overflow {
+  display: none;
+}
+
+.composer-tool-overflow[data-state="open"] {
+  color: #1f5f49;
+  background: #edf2ef;
+}
+
+.usage-popover-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.usage-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #1f7a5b;
+  background: transparent;
+  cursor: pointer;
+}
+
+.usage-trigger:hover,
+.usage-trigger.is-open {
+  background: #edf7f1;
+}
+
+.usage-trigger:focus-visible {
+  outline: 2px solid #1f7a5b;
+  outline-offset: 2px;
+}
+
+.usage-ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: conic-gradient(#1f7a5b var(--usage-percent), #dfe5e1 0);
+}
+
+.usage-ring::before {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: #ffffff;
+  content: "";
+}
+
+.usage-ring span {
+  position: relative;
+  color: #1c5f48;
+  font-size: 0.52rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.thinking-level-trigger:focus-visible,
+.thinking-level-control.is-open .thinking-level-trigger {
+  border-color: #1f7a5b;
+  box-shadow: 0 0 0 3px rgba(31, 122, 91, 0.12);
+}
+
+.composer-error {
+  min-width: 0;
+  overflow: hidden;
+  color: #9a3c33;
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel {
+  padding: 0 0 18px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid #e5dfd3;
+}
+
+.context-meter span,
+.empty-text {
+  color: #69756f;
+  font-size: 0.86rem;
+}
+
+.skill-modal-body .markdown {
+  color: #202724;
+}
+
+/* Keep chrome boundaries quiet and make the content plane lighter than the
+   navigation surface, matching the reference layout in both themes. */
+.app-titlebar {
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--app-header-border);
+  background: var(--app-sidebar-surface);
+}
+
+.app-main,
+.conversation-surface,
+.context-panel-surface {
+  background: var(--app-content-surface);
+}
+
+.project-sidebar-surface {
+  background: var(--app-sidebar-surface);
+}
+
+/* 侧栏滚动区：隐藏原生滚动条，自绘一个只在滚动/拖动时出现的 overlay 滑块
+   （移植自 codex-ui 的 AutoHideScroll）。原生 ::-webkit-scrollbar 会在
+   Chrome 里占一条 classic gutter 并把行宽挤窄，所以整条隐藏掉。 */
+.autohide-scroll {
+  position: relative;
+  min-height: 0;
+  /* 列方向 flex + 下面那条 flex 填充，是为了让 `.autohide-box` 的高度真的等于容器高度：
+     `height: 100%` 在「高度由 max-height 定出来的 flex 盒」里（Radix popover 的面板）会解析成 auto，
+     实测滚动容器反而被内容撑到 576px、根本不滚。侧栏那种高度明确的父级本来就能解析，改完行为不变。 */
+  display: flex;
+  flex-direction: column;
+}
+
+.autohide-box {
+  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.autohide-box::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.autohide-thumb {
+  position: absolute;
+  top: 0;
+  right: 3px;
+  width: 6px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--foreground) 30%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.autohide-thumb.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.conversation-header {
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--app-header-border);
+  background: var(--app-content-surface);
+}
+
+.settings-dialog {
+  border-color: var(--app-header-border);
+  background: var(--app-content-surface);
+}
+
+.settings-sidebar {
+  border-right-color: var(--app-header-border);
+  background: var(--app-sidebar-surface);
+}
+
+.settings-header {
+  border-bottom-color: var(--app-header-border);
+  background: var(--app-content-surface);
+}
+
+.settings-modal [data-slot="tabs-trigger"]::after {
+  width: 1px;
+  background: var(--app-header-border);
+}
+
+/* 设置 → 模型：自定义模型卡片。颜色只用主题变量，深浅两套都要能读。 */
+.settings-card {
+  border: 1px solid var(--app-header-border);
+  border-radius: 12px;
+  background: var(--app-content-surface);
+}
+
+.settings-card-header {
+  display: flex;
+  /* 标题 + 说明可能是多行，右侧动作组要垂直居中，不然会贴在标题那一行上。 */
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+}
+
+.settings-card-body {
+  display: grid;
+  gap: 12px;
+  padding: 12px 18px 18px;
+  border-top: 1px solid var(--app-header-border);
+}
+
+/* 卡片、列表、行都可能在 grid/flex 里被内容撑破：长 URL 的 min-content 就是它自己，
+   所以每一层都要显式允许收缩，否则窄窗口里整行会顶出弹窗边界。 */
+.settings-card,
+.settings-card-body,
+.settings-card-header,
+.settings-groups,
+.settings-group,
+.settings-group-header,
+.settings-list,
+.settings-row,
+.settings-row > div,
+.provider-picker-body,
+.provider-picker-list,
+.provider-picker-row,
+.provider-picker-current,
+.provider-picker,
+.provider-picker-trigger,
+.provider-picker-trigger-name,
+.provider-picker-trigger-meta,
+.add-model-title,
+.add-model-option > span,
+.add-model-option > span > span {
+  min-width: 0;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px;
+  border-radius: 8px;
+  color: var(--foreground);
+}
+
+.settings-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-group {
+  display: grid;
+  gap: 2px;
+}
+
+.settings-group + .settings-group {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--app-header-border);
+}
+
+/* 组头与模型行同一套左内边距/间距，折叠箭头占和云图标一样的 16px 槽位，
+   所以「供应商名」和「模型名」永远在同一列。 */
+.settings-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 8px;
+  border-radius: 8px;
+}
+
+/* 整条 provider 栏都是折叠开关，悬停高亮与模型行同款（不然点上去看不出能点）。 */
+.settings-group-header:hover {
+  background: var(--accent);
+}
+
+/* 整条 provider 栏都是折叠开关：按钮只负责排版，不另起一层背景/边框。 */
+.settings-group-toggle {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 箭头不参与基线对齐（align-self: center），否则 svg 的基线是它的底边，图标会偏下。
+   margin-right 补上尺寸差，让箭头→组名的距离 = 模型行「云图标 → 模型名」的距离（10px）。 */
+.settings-group-chevron {
+  display: flex;
+  flex: none;
+  align-self: center;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+}
+
+.settings-group-toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.settings-group-name {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.settings-group-meta {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+}
+
+/* 端点太长时只让 URL 截断，「· N 个模型」永远露着（窄窗口里最能说明问题的那截）。 */
+.settings-group-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-group-count {
+  flex: none;
+  white-space: nowrap;
+}
+
+.settings-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  min-width: 0;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+}
+
+.settings-row-chip {
+  flex: none;
+  white-space: nowrap;
+}
+
+.settings-row-id {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+}
+
+/* 添加模型弹窗里的候选列表：一屏滚，标题和 id 各自截断。 */
+.add-model-options {
+  display: grid;
+  gap: 2px;
+  max-height: 240px;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  list-style: none;
+  margin: 0;
+}
+
+.add-model-options > li {
+  min-width: 0;
+}
+
+.add-model-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.add-model-option:hover {
+  background: var(--accent);
+}
+
+.add-model-option > span {
+  min-width: 0;
+}
+
+/* 行内的删除按钮：原生 button 会给自己带边框/背景，不先清一遍就是个灰色块；
+   它又在 <label> 里，得 stopPropagation 否则会连带切勾选。 */
+.add-model-option button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+}
+
+.provider-model-remove {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.provider-model-remove:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.provider-model-remove:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* 价格阶梯的一档：自带边框成块，否则四排输入框会跟上面的顶层价糊成一片。 */
+.cost-tier {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--muted) 35%, transparent);
+}
+
+.cost-tier-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cost-tier-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  color: var(--muted-foreground);
+}
+
+.cost-tier-remove:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+/* 下拉宽度跟着视窗收，窄窗口里不再被裁掉一半。 */
+.composer-model-content {
+  width: min(360px, calc(100vw - 24px));
+}
+
+/* 供应商 dropdown：trigger 显示已选项，展开后第一排是搜索、下面才是列表。 */
+.provider-picker-trigger {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
+  cursor: pointer;
+}
+
+.provider-picker-trigger:hover,
+.provider-picker-trigger:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+
+.provider-picker-trigger:disabled {
+  color: var(--muted-foreground);
+  cursor: default;
+}
+
+.provider-picker-trigger-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.provider-picker-trigger-meta {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+}
+
+/* 面板走 portal（Radix Popover）：弹窗里的 overflow-y-auto 会裁掉绝对定位的子元素。
+   宽度跟着 trigger，列表自己滚，搜索那排钉在顶上。 */
+.provider-picker-content {
+  /* 宽度由 className 上的 w-(--radix-popover-trigger-width) 定：
+     写在这里会被 shadcn 的 `w-72` 工具类按顺序盖掉。 */
+  display: flex;
+  flex-direction: column;
+  max-height: min(320px, 60vh);
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 14px 34px rgba(18, 22, 20, 0.18);
+}
+
+.provider-picker-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+}
+
+.provider-picker-search {
+  position: relative;
+  flex: 0 0 auto;
+  padding: 2px 2px 4px;
+}
+
+.provider-picker-list {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 auto;
+  max-height: 216px;
+  overflow-y: auto;
+  padding: 0 2px 2px;
+}
+
+.provider-picker-empty {
+  padding: 8px 9px;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+}
+
+.provider-picker-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
+  cursor: pointer;
+}
+
+.provider-picker-row:hover,
+.provider-picker-row:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+
+.provider-picker-row[data-state="checked"] {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.provider-picker-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.provider-picker-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+}
+
+.provider-picker-current {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.78rem;
+}
+
+.provider-picker-url {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+}
+
+.add-model-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.add-model-id {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+}
+
+.settings-row:hover {
+  background: var(--accent);
+}
+
+.settings-row-flag {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.settings-card-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--destructive);
+  background: var(--accent);
+  font-size: 0.78rem;
+}
+
+/* 输入框旁的模型切换器：平时不带底色，只在悬停/展开时给出可点提示。 */
+.composer-model-trigger {
+  color: var(--foreground);
+  background: transparent;
+}
+
+.composer-model-trigger:hover:not(:disabled),
+.composer-model-trigger[data-state="open"] {
+  background: var(--accent);
+}
+
+.composer-model-trigger:disabled {
+  color: var(--muted-foreground);
+}
+
+/* The grid track is narrow, while this invisible overflow area preserves an
+   easy drag target without drawing a full-height divider. */
+.panel-resize-handle {
+  position: relative;
+  background: transparent;
+}
+
+.panel-resize-handle::after {
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 11px;
+  content: "";
+  transform: translateX(-50%);
+}
+
+.panel-resize-handle::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1px;
+  height: 34px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--border) 72%, transparent);
+  content: "";
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  transition: opacity 140ms ease, background 140ms ease;
+}
+
+.panel-resize-handle:hover::before,
+.panel-resize-handle:focus-visible::before,
+.panel-resize-handle[data-resizing="true"]::before {
+  background: var(--ring);
+  opacity: 1;
+}
+
+.dark .panel-resize-handle::before {
+  background: color-mix(in oklab, var(--border) 88%, transparent);
+}
+
+/* 右侧 context 面板（skills & packages）和聊天列共用 --app-content-surface，
+   界面里没有任何边界线索，所以这里给这条手柄一条常显的 1px 分隔线：
+   ::before 平时只是 hover 时的 34px 短滑块，data-divider="true" 时拉满整列并常显，
+   hover / 拖动时换成 --ring 高亮（[data-resizing] 由 pointer capture 期间的显式状态驱动，
+   否则指针拖离手柄后 :hover 失效、线会中途变回细色）。 */
+.panel-resize-handle[data-divider="true"]::before {
+  inset-block: 0;
+  height: auto;
+  /* 常显时不再垂直居中，-50% 的 Y 位移会把线顶到上半截。 */
+  transform: translateX(-50%);
+  opacity: 1;
+  background: var(--border);
+}
+
+.panel-resize-handle[data-divider="true"]:hover::before,
+.panel-resize-handle[data-divider="true"]:focus-visible::before,
+.panel-resize-handle[data-divider="true"][data-resizing="true"]::before {
+  background: var(--ring);
+  opacity: 1;
+}
+
+.dark .aui-thread,
+.dark .composer {
+  background: var(--app-content-surface);
+}
+
+.dark .markdown th {
+  background: color-mix(in oklab, var(--muted) 82%, var(--background));
+}
+
+.dark .markdown tr:nth-child(even) td,
+.dark .markdown pre,
+.dark .markdown code {
+  background: color-mix(in oklab, var(--muted) 58%, var(--background));
+}
+
+.dark .capability-card strong,
+.dark .capability-picker-row strong,
+.dark .attachment-badge-copy strong,
+.dark .attachment-hover-copy strong,
+.dark .settings-tab.is-active,
+.dark .session-row.is-active,
+.dark .composer-editor,
+.dark .markdown,
+.dark .markdown th {
+  color: var(--foreground);
+}
+
+.dark .attachment-badge,
+.dark .capability-badge {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.dark .attachment-badge-icon,
+.dark .attachment-hover-file-icon {
+  color: var(--muted-foreground);
+  background: color-mix(in oklab, var(--muted) 75%, var(--background));
+}
+
+.dark .usage-ring::before {
+  background: var(--card);
+}
+
+/* Normalize the legacy surface rules to the neutral palette in both themes. */
+.titlebar {
+  border-bottom-color: var(--border);
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.aui-thread,
+.composer {
+  background: var(--app-content-surface);
+}
+
+/* The composer sits on the thread surface with no divider of its own. */
+.panel {
+  border-color: var(--border);
+}
+
+.composer-surface,
+.capability-picker,
+.attachment-hover-card {
+  border-color: var(--border);
+  background: var(--card);
+}
+
+/*
+ * Composer buttons are painted on `--card`, so the hardcoded #ffffff glyphs from
+ * the legacy accent rules above must be re-declared here as well: white-on-white
+ * made the stop/send icons invisible in the light theme (the accent fills had
+ * already been normalised away, only the text colour was left behind).
+ */
+.icon-button,
+.send-button {
+  border-color: var(--border);
+  color: var(--foreground);
+  background: var(--card);
+}
+
+.icon-button:hover:not(:disabled):not(.is-active),
+.send-button:hover:not(:disabled) {
+  border-color: var(--accent-foreground);
+  color: var(--accent-foreground);
+  background: var(--accent);
+}
+
+/* "Stop" stays red, but as a glyph on the neutral surface rather than a red fill.
+ * The `.icon-button` prefix keeps this rule at the specificity of the hover rule above. */
+.icon-button.stop-button {
+  border-color: color-mix(in oklab, var(--destructive) 40%, var(--border));
+  color: var(--destructive);
+}
+
+.icon-button.stop-button:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--destructive) 78%, #000);
+  color: var(--destructive-foreground);
+  background: color-mix(in oklab, var(--destructive) 78%, #000);
+}
+
+.icon-button:disabled,
+.send-button:disabled,
+.primary-action:disabled {
+  border-color: var(--border);
+  color: var(--muted-foreground);
+  background: var(--muted);
+}
+
+.capability-form input,
+.capability-form textarea,
+.capability-form select,
+.capability-picker input {
+  border-color: var(--border);
+  color: var(--foreground);
+  background: var(--card);
+}
+
+.markdown th {
+  background: var(--muted);
+}
+
+.markdown tr:nth-child(even) td,
+.markdown pre,
+.markdown code {
+  background: color-mix(in oklab, var(--muted) 62%, var(--background));
+}
+
+.markdown th,
+.markdown td {
+  border-color: var(--border);
+}
+
+@media (max-width: 920px) {
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  .project-sidebar.is-open {
+    transform: translateX(0);
+  }
+
+  .app-shell.is-left-collapsed .project-sidebar.is-open {
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  
+  .side-panel.is-open {
+    transform: translateX(0);
+  }
+
+  
+  .titlebar {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    padding: 0 8px;
+  }
+
+  
+  
+  
+  
+  }
+
+/* Composer 的窄档改用 container query：聊天列本身是 inline-size container，
+   拖侧栏/右侧面板把 composer 压窄时同样生效（媒体查询只看窗口宽，面板一拖就失效）。 */
+@container (max-width: 600px) {
+  .composer {
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .composer-editor {
+    min-height: 28px;
+  }
+
+  .attachment-badge {
+    max-width: min(220px, 100%);
+  }
+
+  /* "Thinking" 文字标签先收，档位下拉本身已表达含义。 */
+  .thinking-level-label {
+    display: none;
+  }
+}
+
+@container (max-width: 460px) {
+  .composer-actions {
+    gap: 8px;
+  }
+
+  .composer-model-trigger {
+    max-width: 132px;
+  }
+
+  /* 语音按钮（disabled 占位）收进 ⋯ 菜单；usage ring（上下文占用）保留。 */
+  .composer-tool-mic {
+    display: none;
+  }
+
+  .icon-button,
+  .send-button {
+    width: 38px;
+    min-width: 38px;
+    height: 38px;
+  }
+}
+
+@container (max-width: 380px) {
+  /* Thinking 下拉收进 ⋯ 菜单，模型名再压一档：工具行保持单行。 */
+  .thinking-level-select {
+    display: none;
+  }
+
+  .composer-tool-overflow {
+    display: inline-flex;
+  }
+
+  .composer-model-trigger {
+    max-width: 110px;
+  }
+}
+
+/* 每一家供应商那组的动作区（Add / Edit / Delete）：贴右，不参与标题截断。 */
+.settings-group-actions {
+  margin-left: auto;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}

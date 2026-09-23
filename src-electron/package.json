@@ -1,0 +1,9 @@
+{
+  "name": "pi-desktop-electron",
+  "productName": "Pi Desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron shell for Pi Desktop (thin host layer, mirrors src-tauri)",
+  "author": "Pi Desktop",
+  "main": "main.js"
+}
