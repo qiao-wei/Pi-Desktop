@@ -86,8 +86,11 @@ function gitEnv() {
  * 存在的唯一理由是避坑：`execFileResult` 有 4 个参数，`execImpl` 是最后一个，直接调很容易
  * 漏传（漏了就是 undefined 被当函数调）。这里建一次、后面只传 argv，漏不掉；测试注入的
  * 假 execFile 也只会通过这一个口子生效。
+ *
+ * 导出给 `gitWorktree.mjs`（worktree 的 add/remove/list 是另一组写操作，不能混进本模块的
+ * 只读白名单），共用同一套 env / timeout / maxBuffer 设置。
  */
-function gitRunner({ execImpl = execFile, timeoutMs = GIT_TIMEOUT_MS } = {}) {
+export function createGitRunner({ execImpl = execFile, timeoutMs = GIT_TIMEOUT_MS } = {}) {
   return (args, options = {}) =>
     execFileResult(
       "git",
@@ -112,7 +115,7 @@ export async function runReadOnlyGit(cwd, args, options = {}) {
     throw new Error(`refusing to run non read-only git command: git ${args.join(" ")}`);
   }
 
-  return gitRunner(options)(args, { cwd });
+  return createGitRunner(options)(args, { cwd });
 }
 
 /** 空载荷：没装 git，或项目不是仓库。UI 靠 `gitInstalled` / `isRepo` 决定显示什么。 */
@@ -454,7 +457,7 @@ export function parseGitVersion(text) {
  */
 export async function readGitInfo(cwd, { execImpl = execFile, timeoutMs = GIT_TIMEOUT_MS } = {}) {
   // `--version` 不是子命令，走 gitRunner 直接调；其余全部经过只读白名单。
-  const git = gitRunner({ execImpl, timeoutMs });
+  const git = createGitRunner({ execImpl, timeoutMs });
   const options = { execImpl, timeoutMs };
 
   // 真正的"没装"只有 spawn 失败（ENOENT / EACCES）这一种；`git --version` 退出码非零
@@ -552,7 +555,7 @@ export async function initGitRepo(cwd, { execImpl = execFile, timeoutMs = GIT_TI
     throw new Error("Cannot initialize git without a project folder");
   }
 
-  const result = await gitRunner({ execImpl, timeoutMs })(["init"], { cwd: project });
+  const result = await createGitRunner({ execImpl, timeoutMs })(["init"], { cwd: project });
 
   if (!result.ok) {
     const reason = result.stderr.trim() || (result.killed ? "git init timed out" : `git init failed (${result.code})`);
@@ -584,7 +587,7 @@ export async function switchGitBranch(cwd, branch, { execImpl = execFile, timeou
   }
 
   const options = { execImpl, timeoutMs };
-  const git = gitRunner(options);
+  const git = createGitRunner(options);
 
   const listed = await runReadOnlyGit(project, ["for-each-ref", `--format=${BRANCH_FORMAT}`, "refs/heads"], options);
   const branches = parseBranches(listed.ok ? listed.stdout : "");
@@ -629,7 +632,7 @@ export async function createGitBranch(cwd, name, { execImpl = execFile, timeoutM
   }
 
   const options = { execImpl, timeoutMs };
-  const git = gitRunner(options);
+  const git = createGitRunner(options);
 
   const listed = await runReadOnlyGit(project, ["for-each-ref", `--format=${BRANCH_FORMAT}`, "refs/heads"], options);
   const branches = parseBranches(listed.ok ? listed.stdout : "");
@@ -676,7 +679,7 @@ export async function renameGitBranch(cwd, name, { execImpl = execFile, timeoutM
   }
 
   const options = { execImpl, timeoutMs };
-  const git = gitRunner(options);
+  const git = createGitRunner(options);
 
   const listed = await runReadOnlyGit(project, ["for-each-ref", `--format=${BRANCH_FORMAT}`, "refs/heads"], options);
   const branches = parseBranches(listed.ok ? listed.stdout : "");
@@ -725,7 +728,7 @@ export async function commitGitChanges(cwd, { message, paths } = {}, { execImpl 
   }
 
   const options = { execImpl, timeoutMs };
-  const git = gitRunner(options);
+  const git = createGitRunner(options);
 
   const status = await runReadOnlyGit(
     project,

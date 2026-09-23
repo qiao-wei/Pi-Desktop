@@ -165,6 +165,8 @@ export interface ProjectSessionSummary {
   messageCount: number;
   firstMessage: string;
   pinned?: boolean;
+  /** 这条会话建在应用托管的 Git worktree 里（侧栏会话行末尾显示一枚 worktree 徽标）。 */
+  inWorktree?: boolean;
 }
 
 /**
@@ -174,6 +176,22 @@ export interface ProjectSessionSummary {
 export interface ArchivedSessionSummary extends ProjectSessionSummary {
   projectId: string;
   projectName?: string;
+}
+
+/**
+ * 一条会话的托管 worktree 状态（会话头部那枚 Worktree 徽标的载荷）。
+ * `isWorktree: false` 表示这条会话跑在项目主检出里，UI 不显示徽标。
+ */
+export interface SessionWorktreeInfo {
+  isWorktree: boolean;
+  path?: string;
+  displayName?: string;
+  /** worktree 目录是否还在（被外部删掉时 false）。 */
+  exists?: boolean;
+  /** 在 worktree 里新建的分支名；空串 = 还是 detached HEAD。 */
+  branch?: string;
+  detached?: boolean;
+  changes?: { changed: number; untracked: number; ignored: number };
 }
 
 export interface ProjectSummary {

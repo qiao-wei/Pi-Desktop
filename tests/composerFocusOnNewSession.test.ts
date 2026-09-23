@@ -28,14 +28,15 @@ test("侧栏新建会话后把焦点交回 composer（.then(onFocusComposer)）"
   const fn = region(appTsx, "function createSessionFromSidebar", "async function selectSessionFromSidebar");
   // 必须挂在 onCreateSession 完成之后：createSession 里 replaceBootstrap 落地才算就绪，
   // 提前 focus 会被「capabilities → chat」的切换/inert 状态吃掉。
+  // （第三个参数是 worktree 选项：普通新任务传 undefined，行为与之前一致。）
   assert.match(
     fn,
-    /void onCreateSession\(projectId\)\.then\(\(\) => onFocusComposer\(\)\)/,
+    /void onCreateSession\(projectId, undefined, options\)\.then\(\(\) => onFocusComposer\(\)\)/,
     "createSessionFromSidebar 应在 onCreateSession 完成后调用 onFocusComposer",
   );
   // onOpenChat 必须先于创建调用：capabilities 页开着时会话区是 inert，focus 无效。
   assert.ok(
-    fn.indexOf("onOpenChat()") < fn.indexOf("onCreateSession(projectId)"),
+    fn.indexOf("onOpenChat()") < fn.indexOf("onCreateSession(projectId"),
     "onOpenChat() 应在 onCreateSession 之前调用",
   );
 });
