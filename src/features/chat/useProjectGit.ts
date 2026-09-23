@@ -7,6 +7,11 @@ import type { GitInfo } from "../../shared/gitStatusBadge";
 interface UseProjectGitOptions {
   /** 当前项目 id；空串时徽标不显示也不请求。 */
   projectId: string;
+  /**
+   * 当前会话路径。带上它之后，git 读和写都落在**会话自己的 workspace** 上：worktree 会话
+   * 看到、提交的就是 worktree，而不是项目主检出。
+   */
+  sessionPath?: string;
   /** 会话是否在流式输出。agent 刚改完文件，一轮结束时刷新一次。 */
   isStreaming: boolean;
   /** "初始化仓库"失败时把原因交给会话的错误横幅（读失败不在这里）。 */
@@ -61,7 +66,7 @@ function messageOf(error: unknown): string {
  * 失败一律静默：徽标退回"不显示"（`info = null`），不往会话头部塞错误横幅 —— 一个可选
  * 的装饰不该打断提问。只有"初始化仓库"失败会留下 `error`，因为它由用户主动触发。
  */
-export function useProjectGit({ projectId, isStreaming, onError }: UseProjectGitOptions): ProjectGitController {
+export function useProjectGit({ projectId, sessionPath = "", isStreaming, onError }: UseProjectGitOptions): ProjectGitController {
   const [info, setInfo] = useState<GitInfo | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
@@ -84,7 +89,11 @@ export function useProjectGit({ projectId, isStreaming, onError }: UseProjectGit
     setIsRefreshing(true);
 
     try {
-      const next = await fetchJson<GitInfo>(`/api/projects/git?projectId=${encodeURIComponent(projectId)}`);
+      const query = new URLSearchParams({ projectId });
+      if (sessionPath) {
+        query.set("sessionPath", sessionPath);
+      }
+      const next = await fetchJson<GitInfo>(`/api/projects/git?${query.toString()}`);
       if (seq === requestSeq.current) {
         setInfo(next);
         setError("");
@@ -98,9 +107,9 @@ export function useProjectGit({ projectId, isStreaming, onError }: UseProjectGit
         setIsRefreshing(false);
       }
     }
-  }, [projectId]);
+  }, [projectId, sessionPath]);
 
-  // 切项目：先清空再拉，不能让上一个项目的分支名短暂留在新项目头上。
+  // 切项目 / 切会话：先清空再拉，不能让上一个 workspace 的分支名短暂留在头上。
   useEffect(() => {
     requestSeq.current += 1;
     setInfo(null);
@@ -108,7 +117,7 @@ export function useProjectGit({ projectId, isStreaming, onError }: UseProjectGit
     if (projectId) {
       void refresh();
     }
-  }, [projectId, refresh]);
+  }, [projectId, sessionPath, refresh]);
 
   const wasStreaming = useRef(isStreaming);
   useEffect(() => {
@@ -158,7 +167,7 @@ export function useProjectGit({ projectId, isStreaming, onError }: UseProjectGit
       setError("");
 
       try {
-        const next = await postJson<GitInfo>("/api/projects/git/switch", { projectId, branch });
+        const next = await postJson<GitInfo>("/api/projects/git/switch", { projectId, sessionPath, branch });
         setInfo(next);
         return true;
       } catch (switchError) {
@@ -170,7 +179,7 @@ export function useProjectGit({ projectId, isStreaming, onError }: UseProjectGit
         setSwitchingTo("");
       }
     },
-    [projectId, switchingTo, onError],
+    [projectId, sessionPath, switchingTo, onError],
   );
 
   /**
@@ -187,7 +196,7 @@ export function useProjectGit({ projectId, isStreaming, onError }: UseProjectGit
       setError("");
 
       try {
-        const next = await postJson<GitInfo>("/api/projects/git/create-branch", { projectId, name });
+        const next = await postJson<GitInfo>("/api/projects/git/create-branch", { projectId, sessionPath, name });
         setInfo(next);
         return true;
       } catch (createError) {
@@ -199,7 +208,7 @@ export function useProjectGit({ projectId, isStreaming, onError }: UseProjectGit
         setIsCreatingBranch(false);
       }
     },
-    [projectId, isCreatingBranch, onError],
+    [projectId, sessionPath, isCreatingBranch, onError],
   );
 
   /**
@@ -245,7 +254,7 @@ export function useProjectGit({ projectId, isStreaming, onError }: UseProjectGit
       setError("");
 
       try {
-        const next = await postJson<GitInfo>("/api/projects/git/commit", { projectId, message, paths });
+        const next = await postJson<GitInfo>("/api/projects/git/commit", { projectId, sessionPath, message, paths });
         setInfo(next);
         return true;
       } catch (commitError) {
@@ -257,7 +266,7 @@ export function useProjectGit({ projectId, isStreaming, onError }: UseProjectGit
         setIsCommitting(false);
       }
     },
-    [projectId, isCommitting, onError],
+    [projectId, sessionPath, isCommitting, onError],
   );
 
   /**
@@ -302,6 +311,7 @@ export function useProjectGit({ projectId, isStreaming, onError }: UseProjectGit
       try {
         const result = await postJson<{ message: string }>("/api/projects/git/commit-message", {
           projectId,
+          sessionPath,
           paths,
           locale: getLocale(),
         });
@@ -315,7 +325,7 @@ export function useProjectGit({ projectId, isStreaming, onError }: UseProjectGit
         setIsGeneratingMessage(false);
       }
     },
-    [projectId, isGeneratingMessage, onError],
+    [projectId, sessionPath, isGeneratingMessage, onError],
   );
 
   return { info, isRefreshing, isInitializing, switchingTo, isCreatingBranch, isRenamingBranch, isCommitting, isGeneratingMessage, error, refresh, initRepo, switchBranch, createBranch, renameBranch, commitChanges, openDiff, generateCommitMessage };

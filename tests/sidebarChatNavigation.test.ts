@@ -66,9 +66,10 @@ test("the project row's new-session button goes through the sidebar handler", ()
   // end of the project section instead of the first expansion check.
   const rowBlock = appSource.slice(rowStart, appSource.indexOf("</section>", rowStart));
   assert.match(rowBlock, /aria-label=\{t\("sidebar\.newSession"\)\}/, "new-session button markup changed");
+  // 「＋」一次点击就建会话（会先把主区域切到 chat）；⌥/Alt 点击才是 worktree。
   assert.match(
     rowBlock,
-    /onClick=\{\(\) => createSessionFromSidebar\(project\.id\)\}/,
+    /onClick=\{\(event\) => createSessionFromSidebar\(project\.id, event\.altKey \? \{ worktree: true \} : undefined\)\}/,
     "the new-session button must route through the handler that switches the view",
   );
 });
@@ -84,13 +85,14 @@ test("opening a conversation from the sidebar flips the view before awaiting the
 
     // 只数语句行，不数注释里的 `onOpenChat()` —— 下面的注释会提到它（自 363c473
     // composer-focus 起把注释也数进去了，测试一直是红的，实现是对的）。
+    const calls = [...body.matchAll(/^\s*onOpenChat\(\);/gm)];
     assert.equal(
-      [...body.matchAll(/^\s*onOpenChat\(\);/gm)].length,
+      calls.length,
       1,
       `${handler} should switch to chat exactly once`,
     );
 
-    const openAt = body.indexOf("onOpenChat()");
+    const openAt = calls[0].index ?? -1;
     const actionAt = body.indexOf(action);
     assert.ok(openAt >= 0, `${handler} never switches to the chat view`);
     assert.ok(actionAt >= 0, `${handler} lost its ${action} call`);

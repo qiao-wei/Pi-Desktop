@@ -16,6 +16,17 @@ import { openSqliteDatabase } from "./sqlite.mjs";
 import { ensureSessionArchiveColumn, listArchivedSessionRows, listProjectSessionRows } from "./sessionArchive.mjs";
 import { revealFolder } from "./revealFolder.mjs";
 import { commitGitChanges, createGitBranch, initGitRepo, readCommitDiff, readGitInfo, renameGitBranch, switchGitBranch } from "./gitInfo.mjs";
+import {
+  createManagedWorktree,
+  isManagedWorktreePath,
+  listManagedWorktrees,
+  managedWorktreeId,
+  readWorktreeChanges,
+  removeManagedWorktree,
+  worktreeDisplayName,
+  worktreeRootFor,
+} from "./gitWorktree.mjs";
+import { resolveSessionWorkspaceCwd } from "./sessionWorkspace.mjs";
 import { openGitFileDiff } from "./openDiff.mjs";
 import { buildCommitMessagePrompt, normalizeGeneratedCommitMessage } from "./commitMessage.mjs";
 import { oneShotModelError, oneShotThinkingEffort } from "./oneShotModel.mjs";
@@ -154,6 +165,9 @@ const authFile = join(agentDir, "auth.json");
 // pi 自己的自定义模型文件：桥里的 modelRuntime 和命令行 pi 读同一份，Pi Desktop 的设置页只是它的编辑器。
 const modelsJsonFile = join(agentDir, "models.json");
 const projectSessionRoot = agentSessionsDir;
+// 托管 worktree 的根目录：`~/.pi/agent/worktrees`。只有落在这个目录下的 cwd 才被当成
+// 应用自己建的 worktree（见 `isManagedWorktreePath`），用户手写的 worktree 不受影响。
+const worktreesRoot = worktreeRootFor(agentDir);
 const projectAttachmentRoot = join(agentDir, "attachments");
 const diagnosticLogFile = process.env.PI_DESKTOP_DIAGNOSTIC_LOG?.trim() || join(agentDir, "pi-desktop-runtime.ndjson");
 // Diagnostic logging is opt-in so normal runs stay quiet.
@@ -1371,10 +1385,12 @@ undefined
     }
 
     // 会话头部右侧的 git 徽标：只读，`projectId` 由服务端自己的项目表解析成 cwd
-    // （渲染层拿不到、也不该传任意路径）。
+    // （渲染层拿不到、也不该传任意路径）。带 `sessionPath` 时读的是会话自己的 workspace ——
+    // worktree 会话的徽标必须显示 worktree 的头部状态，而不是主检出。
     if (req.method === "GET" && url.pathname === "/api/projects/git") {
       const project = findProject(String(url.searchParams.get("projectId") ?? ""));
-      sendJson(res, 200, await readGitInfo(project.cwd));
+      const sessionPath = String(url.searchParams.get("sessionPath") ?? "").trim();
+      sendJson(res, 200, await readGitInfo(requestWorkspaceCwd(project, { sessionPath })));
       return;
     }
 
@@ -1388,12 +1404,13 @@ undefined
     }
 
     // 弹层里点某个分支 → 切过去（写操作）。目标分支必须是本地分支列表里的名字，
-    // 由 `switchGitBranch` 自己再校验一次。
+    // 由 `switchGitBranch` 自己再校验一次。带 `sessionPath` 时在会话的 worktree 里切。
     if (req.method === "POST" && url.pathname === "/api/projects/git/switch") {
       const body = await readJson(req);
       const project = findProject(String(body?.projectId ?? ""));
-      await switchGitBranch(project.cwd, String(body?.branch ?? ""));
-      sendJson(res, 200, await readGitInfo(project.cwd));
+      const cwd = requestWorkspaceCwd(project, body);
+      await switchGitBranch(cwd, String(body?.branch ?? ""));
+      sendJson(res, 200, await readGitInfo(cwd));
       return;
     }
 
@@ -1402,8 +1419,9 @@ undefined
     if (req.method === "POST" && url.pathname === "/api/projects/git/create-branch") {
       const body = await readJson(req);
       const project = findProject(String(body?.projectId ?? ""));
-      await createGitBranch(project.cwd, String(body?.name ?? ""));
-      sendJson(res, 200, await readGitInfo(project.cwd));
+      const cwd = requestWorkspaceCwd(project, body);
+      await createGitBranch(cwd, String(body?.name ?? ""));
+      sendJson(res, 200, await readGitInfo(cwd));
       return;
     }
 
@@ -1421,8 +1439,9 @@ undefined
     if (req.method === "POST" && url.pathname === "/api/projects/git/commit") {
       const body = await readJson(req);
       const project = findProject(String(body?.projectId ?? ""));
-      await commitGitChanges(project.cwd, { message: body?.message, paths: body?.paths });
-      sendJson(res, 200, await readGitInfo(project.cwd));
+      const cwd = requestWorkspaceCwd(project, body);
+      await commitGitChanges(cwd, { message: body?.message, paths: body?.paths });
+      sendJson(res, 200, await readGitInfo(cwd));
       return;
     }
 
@@ -1440,8 +1459,9 @@ undefined
     if (req.method === "POST" && url.pathname === "/api/projects/git/commit-message") {
       const body = await readJson(req);
       const project = findProject(String(body?.projectId ?? ""));
-      const context = await readCommitDiff(project.cwd, body?.paths);
-      const model = runtime.session.model;
+      const cwd = requestWorkspaceCwd(project, body);
+      const context = await readCommitDiff(cwd, body?.paths);
+      const model = getRuntimeForRequest(body).session.model;
       if (!isUsableModel(model)) {
         throw new Error("请先选择 provider 和 model。");
       }
@@ -1478,8 +1498,45 @@ undefined
     }
     if (req.method === "POST" && url.pathname === "/api/sessions") {
       const body = await readJson(req);
-      const result = await createProjectSession(String(body?.projectId ?? activeProjectId), body?.name);
+      const result = await createProjectSession(String(body?.projectId ?? activeProjectId), body?.name, body?.worktree);
       sendJson(res, 200, result);
+      return;
+    }
+
+    // worktree 徽标的数据源（只读）。不在托管 worktree 里就回 `{ isWorktree: false }`。
+    if (req.method === "GET" && url.pathname === "/api/sessions/worktree") {
+      const project = findProject(String(url.searchParams.get("projectId") ?? ""));
+      sendJson(res, 200, await readSessionWorktreeInfo(project, String(url.searchParams.get("sessionPath") ?? "")));
+      return;
+    }
+
+    // 「在这里新建分支」：把 worktree 里 detached HEAD 上的提交落到一条真分支上，
+    // 之后就算 worktree 被删，提交也不会变成孤儿。
+    if (req.method === "POST" && url.pathname === "/api/sessions/worktree/branch") {
+      const body = await readJson(req);
+      const project = findProject(String(body?.projectId ?? ""));
+      const sessionPath = String(body?.sessionPath ?? "");
+      const cwd = requireSessionWorktreeCwd(project, sessionPath);
+      await createGitBranch(cwd, String(body?.name ?? ""));
+      sendJson(res, 200, await readSessionWorktreeInfo(project, sessionPath));
+      return;
+    }
+
+    // 删除 worktree 并把会话退回主检出（写操作）。返回一份完整 bootstrap，客户端整体替换。
+    if (req.method === "POST" && url.pathname === "/api/sessions/worktree/remove") {
+      const body = await readJson(req);
+      const project = findProject(String(body?.projectId ?? ""));
+      sendJson(res, 200, await removeSessionWorktree(project, String(body?.sessionPath ?? ""), body?.force));
+      return;
+    }
+
+    // 「在访达中显示 worktree」：路径由服务端从会话解析，和项目的 reveal 一样不接受
+    // 渲染层传任意路径。
+    if (req.method === "POST" && url.pathname === "/api/sessions/worktree/reveal") {
+      const body = await readJson(req);
+      const project = findProject(String(body?.projectId ?? ""));
+      await revealFolder(requireSessionWorktreeCwd(project, String(body?.sessionPath ?? "")));
+      sendJson(res, 200, { ok: true });
       return;
     }
 
@@ -1665,9 +1722,32 @@ async function createRuntime(project, sessionPath, trace = {}) {
     retry: { enabled: true, maxRetries: 2, baseDelayMs: 500 },
   });
 
-  const sessionManager = sessionPath
-    ? SessionManager.open(sessionPath, getProjectSessionDir(project), project.cwd)
+  let sessionManager = sessionPath
+    ? SessionManager.open(sessionPath, getProjectSessionDir(project))
     : SessionManager.continueRecent(project.cwd, getProjectSessionDir(project));
+  // 会话头里的 cwd 已经不在了（worktree 被移除、目录被外部删掉）：pi 的 runtime 会拿
+  // `sessionManager.getCwd()` 断言目录存在，不存在就抛 "Stored session working directory
+  // does not exist"，于是移除 worktree 后立刻重开这条会话就失败。这里用解析出的 workspace
+  // （规则见 sessionWorkspace.mjs，已退回项目目录）把会话重开一次，让它看到一个真实目录。
+  // worktree 还在时 workspace 就是 worktree 路径、与会话头一致，行为不变，所以只在
+  // 真的失效时才重开。
+  if (sessionPath && !existsSync(sessionManager.getCwd())) {
+    sessionManager = SessionManager.open(
+      sessionPath,
+      getProjectSessionDir(project),
+      sessionWorkspaceCwd(project, sessionManager),
+    );
+  }
+  // 会话自己的工作目录：托管 worktree 会话跑在 worktree 里，其余一律是项目目录。
+  // SettingsManager / 能力清单（package、skill 目录）仍然锚在项目根 —— 那是仓库级配置，
+  // 不属于某一个 worktree（Codex 的 linked worktree 也是回主检出读项目配置）。
+  const workspaceCwd = sessionWorkspaceCwd(project, sessionManager);
+  diagnosticLog("session.switch.runtime.workspace_resolved", {
+    ...trace,
+    sessionPath: sessionManager.getSessionFile(),
+    workspaceCwd,
+    isWorktree: workspaceCwd !== project.cwd,
+  });
   diagnosticLog("session.switch.runtime.session_loaded", {
     ...trace,
     sessionPath: sessionManager.getSessionFile(),
@@ -1730,7 +1810,7 @@ async function createRuntime(project, sessionPath, trace = {}) {
         }),
         appendSystemPromptOverride: (base) => [...base, hostSystemPrompt],
         extensionFactories: [
-          createPiDesktopRuntimeExtension(project),
+          createPiDesktopRuntimeExtension(project, workspaceCwd),
         ],
       },
       resourceLoaderReloadOptions: {
@@ -1789,7 +1869,7 @@ async function createRuntime(project, sessionPath, trace = {}) {
       modelFallbackMessage: created.modelFallbackMessage,
     };
   }, {
-    cwd: project.cwd,
+    cwd: workspaceCwd,
     agentDir,
     sessionManager,
     sessionStartEvent: { type: "session_start", reason: "startup" },
@@ -1813,6 +1893,9 @@ async function createRuntime(project, sessionPath, trace = {}) {
     projectId: project.id,
     runtime,
     uiBridge,
+    // 会话的工作目录（worktree 会话就是 worktree 路径）。所有“这台会话现在在哪”的
+    // 判断都读这里，而不是再回到 project.cwd。
+    workspaceCwd,
     get session() {
       return runtime.session;
     },
@@ -2159,7 +2242,7 @@ function basePiDesktopResourceLoaderOptions(project, settingsManager) {
   };
 }
 
-function createPiDesktopRuntimeExtension(project) {
+function createPiDesktopRuntimeExtension(project, workspaceCwd = project.cwd) {
   return {
     name: "pi-desktop-runtime",
     hidden: true,
@@ -2168,7 +2251,7 @@ function createPiDesktopRuntimeExtension(project) {
         return {
           systemPrompt: [
             event.systemPrompt,
-            projectContextInstruction(project),
+            projectContextInstruction(project, workspaceCwd),
             personalizationInstruction(),
           ].filter(Boolean).join("\n\n"),
         };
@@ -5198,12 +5281,15 @@ async function revealProject(projectId) {
   return refreshSnapshot();
 }
 
-async function createProjectSession(projectId, nameValue) {
+async function createProjectSession(projectId, nameValue, worktreeRequest) {
   const project = findProject(projectId);
   activeProjectId = project.id;
   saveProjects();
 
-  const sessionManager = SessionManager.create(project.cwd, getProjectSessionDir(project));
+  // worktree 必须在建会话之前建好：会话文件头里的 cwd 就是 worktree 路径（pi 的
+  // `SessionManager.create(cwd, dir)` 会写进去），所以建失败就不建会话，不留半条记录。
+  const worktree = worktreeRequest?.enabled ? await createSessionWorktree(project, worktreeRequest) : null;
+  const sessionManager = SessionManager.create(worktree?.path ?? project.cwd, getProjectSessionDir(project));
   const name = String(nameValue ?? "").trim();
   if (name) {
     sessionManager.appendSessionInfo(name);
@@ -5213,6 +5299,34 @@ async function createProjectSession(projectId, nameValue) {
   persistSessionShell(sessionManager);
   updateSessionStoreFromSession(project, sessionManager, { includeEmpty: true });
   return replaceRuntime(project, sessionManager.getSessionFile());
+}
+
+/**
+ * 给新会话建一个托管 worktree（参考 Codex 桌面端：一个会话一个隔离检出、detached HEAD）。
+ *
+ * `baseRef` 默认 `HEAD`（当前分支的当前提交），非 Git 仓库 / 空仓库都给可读错误；
+ * 建之前先 `readGitInfo` 查一次仓库，是为了把“不是仓库”和“还没有提交”分开说清楚。
+ */
+async function createSessionWorktree(project, request = {}) {
+  const info = await readGitInfo(project.cwd);
+  if (!info.isRepo) {
+    throw new Error("只有 Git 仓库才能创建 worktree：先在这个项目里初始化仓库。");
+  }
+
+  const baseRef = String(request?.baseRef ?? "").trim() || "HEAD";
+  const created = await createManagedWorktree(project.cwd, {
+    root: worktreesRoot,
+    id: managedWorktreeId(project.name, randomUUID().slice(0, 8)),
+    baseRef,
+  });
+  diagnosticLog("worktree.created", {
+    projectId: project.id,
+    worktreePath: created.path,
+    base: created.base,
+    includedFiles: created.included.copied.length,
+    skippedIncludeFiles: created.included.skipped,
+  });
+  return created;
 }
 
 async function selectProjectSession(projectId, sessionPath, requestId, clientTraceId) {
@@ -5267,7 +5381,7 @@ async function updateProjectSession(projectId, sessionPath, nameValue) {
     persistSessionShell(openRuntime.session.sessionManager);
     updateSessionStoreFromRuntime(openRuntime);
   } else {
-    const sessionManager = SessionManager.open(resolvedPath, getProjectSessionDir(project), project.cwd);
+    const sessionManager = SessionManager.open(resolvedPath, getProjectSessionDir(project));
     sessionManager.appendSessionInfo(name);
     persistSessionShell(sessionManager);
     updateSessionStoreFromSession(project, sessionManager);
@@ -5324,7 +5438,9 @@ async function archiveProjectSession(projectId, sessionPath, archived = true) {
   if (openRuntime) {
     updateSessionStoreFromRuntime(openRuntime);
   } else if (existsSync(resolvedPath)) {
-    const sessionManager = SessionManager.open(resolvedPath, getProjectSessionDir(project), project.cwd);
+    // 不传 cwdOverride：会话文件头里的 cwd 才是它真正的工作目录（worktree 会话不能在这里
+    // 被改回项目目录）。
+    const sessionManager = SessionManager.open(resolvedPath, getProjectSessionDir(project));
     updateSessionStoreFromSession(project, sessionManager);
   }
   sessionStore.setArchived(project.id, resolvedPath, archived);
@@ -5376,6 +5492,7 @@ async function deleteArchivedSessions(projectId = "") {
  * either way, otherwise unarchiving later would resurrect a stale pin).
  */
 function removeSessionRecord(project, resolvedPath) {
+  scheduleWorktreeCleanup(project, resolvedPath);
   disposeRuntime(resolvedPath);
 
   if (existsSync(resolvedPath)) {
@@ -6178,7 +6295,8 @@ async function buildSnapshot(targetRuntime = runtime, options = {}) {
         updatedAt: visibleMessages.at(-1)?.createdAt ?? Date.now(),
         messages: visibleMessages,
         projectId: project.id,
-        workingDirectory: project.cwd,
+        // worktree 会话这里就是 worktree 路径，前端靠它区分“会话在哪个检出里跑”。
+        workingDirectory: targetRuntime.workspaceCwd ?? project.cwd,
         sessionFile: targetRuntime.session.sessionFile,
       },
       project,
@@ -6966,6 +7084,12 @@ async function createSessionStore(projectList) {
         .get(projectId, resolve(path));
       return Boolean(row?.archived);
     },
+    /** 会话索引里的 cwd（会话可能没打开，但 worktree 清理需要知道它当时在哪）。 */
+    findCwd(projectId, path) {
+      const row = db.query("SELECT cwd FROM session_index WHERE project_id = ? AND path = ?")
+        .get(projectId, resolve(path));
+      return String(row?.cwd ?? "");
+    },
     deleteProject(projectId) {
       db.query("DELETE FROM session_index WHERE project_id = ?").run(projectId);
     },
@@ -7006,7 +7130,7 @@ function sessionRecordFromManager(project, sessionManager) {
     id: sessionManager.getSessionId() || basename(path, extname(path)),
     name,
     title: name || (firstMessage ? deriveSessionTitle({ text: firstMessage }) : "New session") || "New session",
-    cwd: sessionManager.getCwd?.() || project.cwd,
+    cwd: sessionWorkspaceCwd(project, sessionManager),
     createdAt,
     updatedAt,
     messageCount: messageEntries.length,
@@ -7042,11 +7166,156 @@ function listArchivedSessions() {
 }
 
 function listProjectSessions(project) {
-  return sessionStore.list(project);
+  // 侧栏会话行末尾那枚 worktree 徽标：摘要里带一个布尔即可，不必逐会话再去问一次 git。
+  // 判定复用「这条会话跑在哪个目录」的唯一规则（`resolveSessionWorkspaceCwd`，reason
+  // `worktree` = 落在托管根目录里且目录还在）—— 目录已被移除/外部删掉时会话已经退回项目
+  // 目录，列表徽标必须跟着消失，否则移除后还会留着一个点不掉的标记。
+  return sessionStore.list(project).map((session) => ({
+    ...session,
+    inWorktree:
+      resolveSessionWorkspaceCwd({
+        projectCwd: project.cwd,
+        worktreeRoot: worktreesRoot,
+        sessionCwd: session.cwd,
+      }).reason === "worktree",
+  }));
 }
 
 function getProjectSessionDir(project) {
   return join(projectSessionRoot, project.id);
+}
+
+/**
+ * 会话自己的工作目录，唯一判定口（规则本身在 `sessionWorkspace.mjs`，可测）。
+ *
+ * 只有同时满足「落在托管 worktree 根目录里」+「目录还在」才采信 worktree 路径；否则退回
+ * 项目目录 —— 项目被移动、会话文件被手改、worktree 被外部删掉时都不会让 agent 跑错地方。
+ */
+function sessionWorkspaceCwd(project, sessionManager) {
+  const resolved = resolveSessionWorkspaceCwd({
+    projectCwd: project.cwd,
+    worktreeRoot: worktreesRoot,
+    sessionCwd: sessionManager?.getCwd?.(),
+  });
+  if (resolved.reason === "missing") {
+    diagnosticLog("worktree.missing", { projectId: project.id, worktreePath: String(sessionManager?.getCwd?.() ?? "") });
+  }
+  return resolved.cwd;
+}
+
+/** 按会话路径解析 workspace：优先已打开的 runtime，其次会话索引里的 cwd。 */
+function sessionWorkspaceCwdForPath(project, sessionPath) {
+  const resolvedPath = resolve(String(sessionPath ?? ""));
+  const openRuntime = openRuntimes.get(sessionRuntimeKey(resolvedPath));
+  if (openRuntime?.workspaceCwd) {
+    return openRuntime.workspaceCwd;
+  }
+
+  const stored = sessionStore.findCwd(project.id, resolvedPath);
+  if (stored && isManagedWorktreePath(worktreesRoot, stored) && existsSync(stored)) {
+    return stored;
+  }
+  return project.cwd;
+}
+
+/** 请求体里带了 sessionPath 就按会话的 workspace 干活，没带就是项目目录。 */
+function requestWorkspaceCwd(project, body) {
+  const sessionPath = String(body?.sessionPath ?? "").trim();
+  return sessionPath ? sessionWorkspaceCwdForPath(project, sessionPath) : project.cwd;
+}
+
+/** 要求这条会话现在确实跑在一个活着的托管 worktree 里（建分支 / 删除的入口闸）。 */
+function requireSessionWorktreeCwd(project, sessionPath) {
+  const cwd = sessionWorkspaceCwdForPath(project, sessionPath);
+  if (!isManagedWorktreePath(worktreesRoot, cwd) || !existsSync(cwd)) {
+    throw new Error("这条会话不在托管 worktree 里。");
+  }
+  return cwd;
+}
+
+/**
+ * 读取一条会话的 worktree 信息（会话头部那枚 worktree 徽标的数据源）。
+ * 不在托管 worktree 里就是 `{ isWorktree: false }`，UI 据此不显示徽标。
+ */
+async function readSessionWorktreeInfo(project, sessionPath) {
+  const resolvedPath = assertProjectSessionPath(project, sessionPath);
+  const cwd = sessionWorkspaceCwdForPath(project, resolvedPath);
+  if (!isManagedWorktreePath(worktreesRoot, cwd)) {
+    return { isWorktree: false };
+  }
+
+  const exists = existsSync(cwd);
+  const changes = exists ? await readWorktreeChanges(cwd) : { changed: [], untracked: [], ignored: [] };
+  const entries = await listManagedWorktrees(project.cwd, { root: worktreesRoot });
+  const entry = entries.find((candidate) => resolve(candidate.path) === resolve(cwd));
+  return {
+    isWorktree: true,
+    path: cwd,
+    displayName: worktreeDisplayName(cwd),
+    exists,
+    branch: entry?.branchName ?? "",
+    detached: entry ? entry.detached : true,
+    changes: {
+      changed: changes.changed.length,
+      untracked: changes.untracked.length,
+      ignored: changes.ignored.length,
+    },
+  };
+}
+
+/**
+ * 删除一条会话的托管 worktree：清掉检出、把会话退回主检出。
+ *
+ * 三道闸：回答生成中不能删（会话还指着这个目录）；git 侧还有一道（有未提交内容且没 `force`
+ * 就拒绝，见 `removeManagedWorktree`）；路由层只负责把用户二次确认后的 `force` 传下来。
+ *
+ * 目录已经被外部删掉时这里仍然放行：此时移除唯一的作用就是清掉 git 里的注册信息（在
+ * `removeManagedWorktree` 里走 prune），不然那个红徽标永远点不掉。
+ */
+async function removeSessionWorktree(project, sessionPath, force) {
+  const resolvedPath = assertProjectSessionPath(project, sessionPath);
+  const cwd = sessionWorkspaceCwdForPath(project, resolvedPath);
+  if (!isManagedWorktreePath(worktreesRoot, cwd)) {
+    throw new Error("这条会话不在托管 worktree 里。");
+  }
+  const wasActive = resolvedPath === runtime.session.sessionFile;
+  const openRuntime = openRuntimes.get(sessionRuntimeKey(resolvedPath));
+  if (openRuntime && isSessionBusy(openRuntime.session)) {
+    throw new Error("回答生成中，先等它结束再移除 worktree。");
+  }
+
+  await removeManagedWorktree(project.cwd, cwd, { root: worktreesRoot, force: Boolean(force) });
+  diagnosticLog("worktree.removed", { projectId: project.id, worktreePath: cwd, reason: "user" });
+
+  // 会话文件头里的 cwd 改不了（pi 不提供 setter），但目录已经没了 —— `sessionWorkspaceCwd`
+  // 下一次就会退回项目目录，索引里的 cwd 也会在 upsert 时跟着改回项目目录。
+  if (wasActive) {
+    disposeRuntime(resolvedPath);
+    return { result: await replaceRuntime(project, resolvedPath), worktree: await readSessionWorktreeInfo(project, resolvedPath) };
+  }
+
+  return { result: await refreshSnapshot(), worktree: await readSessionWorktreeInfo(project, resolvedPath) };
+}
+
+/**
+ * 删除会话时顺手回收它自己的托管 worktree。
+ *
+ * 只删“还干净的那个”：worktree 里还有未提交内容时保留原地（那是用户的活，不能因为删了
+ * 个聊天就没了），只写一条诊断。异步、不 await —— 清理失败不该让删会话失败。
+ */
+function scheduleWorktreeCleanup(project, resolvedPath) {
+  const stored = sessionStore.findCwd(project.id, resolvedPath);
+  if (!stored || !isManagedWorktreePath(worktreesRoot, stored)) {
+    return;
+  }
+
+  void removeManagedWorktree(project.cwd, stored, { root: worktreesRoot })
+    .then(() => diagnosticLog("worktree.removed", { projectId: project.id, worktreePath: stored, reason: "session_deleted" }))
+    .catch((error) => diagnosticLog("worktree.remove_skipped", {
+      projectId: project.id,
+      worktreePath: stored,
+      reason: error instanceof Error ? error.message : String(error),
+    }));
 }
 
 function persistSessionShell(sessionManager) {
@@ -7084,11 +7353,18 @@ function createProjectId(seed) {
   return `${prefix}-${randomUUID().slice(0, 8)}`;
 }
 
-function projectContextInstruction(project) {
+function projectContextInstruction(project, workspaceCwd = project.cwd) {
+  const inWorktree = workspaceCwd !== project.cwd;
   return [
     "## Active Project Context",
     `Project name: ${project.name}`,
-    `Working directory: ${project.cwd}`,
+    `Working directory: ${workspaceCwd}`,
+    ...(inWorktree
+      ? [
+          `This session runs in an app-managed Git worktree (detached checkout) at the working directory above; the project's main checkout is ${project.cwd}.`,
+          "Changes made here stay isolated from other sessions. Commit them in this worktree, or create a branch here, to keep the work.",
+        ]
+      : []),
     "When the user asks to read or write files without giving a concrete absolute path, interpret paths relative to the working directory above.",
     `Project skills directory: ${join(project.cwd, ".pi", "skills")}`,
     `User skills directory: ${agentSkillsDir}`,
