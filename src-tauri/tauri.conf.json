@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5176",
-    "beforeBuildCommand": "npm run build && npm run python:build && npm run node:build && npm run bridge:build",
+    "beforeBuildCommand": "npm run tauri:prepare",
     "frontendDist": "../dist"
   },
   "app": {
