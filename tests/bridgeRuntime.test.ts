@@ -23,6 +23,7 @@ const {
   staleInstalledPackages,
   versionFloor,
 } = await import(pathToFileURL(resolve(import.meta.dirname, "../scripts/lib/bridgeRuntime.mjs")).href);
+const { buildPackPlan, parsePackArgs } = await import(pathToFileURL(resolve(import.meta.dirname, "../scripts/lib/packPlan.mjs")).href);
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const readJson = (relative) => JSON.parse(readFileSync(resolve(repoRoot, relative), "utf8"));
@@ -112,21 +113,23 @@ test("only posix hosts get a launcher name", () => {
 });
 
 test("the packaged build assembles the bridge and self-tests it before the installer", () => {
-  const scripts = readJson("package.json").scripts;
-  const order = scripts["electron:build"].split("&&").map((step) => step.trim());
+  // 链的顺序由 scripts/lib/packPlan.mjs 的单一计划决定（package.json 里只剩同样形状的一行入口）。
+  const plan = buildPackPlan(parsePackArgs(["--host", "electron", "--target", "mac", "--arch", "arm64"]), {
+    platform: "darwin",
+    arch: "arm64",
+  });
+  const labels = plan.steps.map((step) => step.label);
+  const at = (needle) => labels.findIndex((label) => label.includes(needle));
 
+  assert.ok(at("bridge:build") >= 0, `打包链必须组装未编译的 bridge：${labels.join(" → ")}`);
   assert.ok(
-    order.some((step) => step.startsWith("npm run bridge:build")),
-    `electron:build must assemble the unpacked bridge: ${scripts["electron:build"]}`,
+    !labels.some((label) => label.includes("sidecar:build")),
+    "不能再回到 bun 编译的单文件桥",
   );
   assert.ok(
-    !order.some((step) => step.startsWith("npm run sidecar:build")),
-    "electron:build must stop shipping the bun-compiled bridge",
+    at("bridge:build") < at("sidecar:verify") && at("sidecar:verify") < at("electron-builder"),
+    `能力包门禁必须在组装之后、打包器之前：${labels.join(" → ")}`,
   );
-  const assembled = order.findIndex((step) => step.startsWith("npm run bridge:build"));
-  const gated = order.findIndex((step) => step.startsWith("npm run sidecar:verify"));
-  const packed = order.findIndex((step) => step.startsWith("electron-builder"));
-  assert.ok(assembled >= 0 && gated > assembled && packed > gated, "extension gate must run after assembly and before electron-builder");
 
   const electron = readJson("src-electron/electron-builder.json");
   const shipped = [...electron.extraResources, ...electron.mac.extraResources, ...electron.win.extraResources];
@@ -162,7 +165,14 @@ test("the packaged build assembles the bridge and self-tests it before the insta
 
   const tauri = readJson("src-tauri/tauri.conf.json");
   assert.equal(tauri.bundle.resources["binaries/bridge"], "bridge");
-  assert.match(tauri.build.beforeBuildCommand, /npm run bridge:build/);
+  const tauriPlan = buildPackPlan(parsePackArgs(["--host", "tauri", "--target", "mac", "--arch", "arm64"]), {
+    platform: "darwin",
+    arch: "arm64",
+  });
+  assert.ok(
+    tauriPlan.steps.some((step) => step.label.includes("bridge:build")),
+    `两条外壳都走同一个准备链：${tauriPlan.steps.map((step) => step.label).join(" → ")}`,
+  );
 });
 
 test("Windows 包不要求也不产出 pi-desktop-server.exe", () => {

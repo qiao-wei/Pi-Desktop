@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { classifyCapabilityLoad, formatGateReport, waitForCapabilities } from "../scripts/lib/sidecarGate.mjs";
+import { buildPackPlan, parsePackArgs } from "../scripts/lib/packPlan.mjs";
 
 const ROOT = resolve(import.meta.dirname, "..");
 
@@ -113,21 +114,29 @@ test("the gate gives up loudly instead of hanging forever", async () => {
   );
 });
 
-test("packaging runs the gate before electron-builder is allowed to produce an artifact", () => {
+test("packaging runs the gate before the packager is allowed to produce an artifact", () => {
   const scripts = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).scripts;
-
+  // 门禁脚本本身不再分模式：模式由出包计划经 env 下发（从前是内联 `VAR=x`，Windows 上根本跑不了）。
   assert.equal(scripts["sidecar:verify"], "node scripts/verify-sidecar-extensions.mjs");
-  const order = scripts["electron:build"].split("&&").map((step) => step.trim());
-  const at = (needle) => order.findIndex((step) => step.includes(needle));
-  // findIndex returns -1, so bare `<` comparisons pass when a step went missing. Require presence.
-  const steps = { "bridge:build": at("bridge:build"), "node:build": at("node:build"), "sidecar:verify": at("sidecar:verify"), "electron-builder": at("electron-builder") };
-  for (const [name, index] of Object.entries(steps)) {
-    assert.ok(index >= 0, `electron:build no longer contains ${name}: ${scripts["electron:build"]}`);
+  assert.ok(!Object.keys(scripts).some((name) => name.includes("sidecar:verify:slim")), "模式不再是脚本名的一个后缀");
+
+  for (const host of ["electron", "tauri"]) {
+    const plan = buildPackPlan(parsePackArgs(["--host", host, "--target", "mac", "--arch", "arm64"]), {
+      platform: "darwin",
+      arch: "arm64",
+    });
+    const labels = plan.steps.map((step) => step.label);
+    const at = (needle) => labels.findIndex((label) => label.includes(needle));
+
+    // findIndex 返回 -1，所以缺一步时裸的 `<` 比较会假绿。先要求都在。
+    for (const needed of ["node:build", "bridge:build", "sidecar:verify"]) {
+      assert.ok(at(needed) >= 0, `${host} 的打包链少了 ${needed}：${labels.join(" → ")}`);
+    }
+    assert.ok(at("node:build") < at("sidecar:verify"), "verify needs the bundled runtimes present");
+    assert.ok(at("bridge:build") < at("sidecar:verify"), "verify must run against the assembled bridge");
+    assert.equal(at("sidecar:verify"), labels.length - 2, `verify 必须紧接在打包器之前：${labels.join(" → ")}`);
+    assert.ok(!labels.some((label) => label.includes("sidecar:build")), "the bun-compiled bridge must not be packaged");
   }
-  assert.ok(steps["node:build"] < steps["sidecar:verify"], "verify needs the bundled runtimes present");
-  assert.ok(steps["bridge:build"] < steps["sidecar:verify"], "verify must run against the assembled bridge");
-  assert.ok(steps["sidecar:verify"] < steps["electron-builder"], "verify must gate electron-builder");
-  assert.equal(at("sidecar:build"), -1, "the bun-compiled bridge must not be packaged");
 });
 
 test("the runner keeps the packaged environment shape and honours the artifact under test", () => {

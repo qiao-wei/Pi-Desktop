@@ -287,10 +287,13 @@ export function verifyBridgeSelfResolve({ node = verificationNode, dir = bridgeD
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   const skipInstall = process.argv.includes("--skip-install");
   const targetIndex = process.argv.indexOf("--target");
-  const target = targetIndex >= 0 ? process.argv[targetIndex + 1] ?? "" : defaultTargetTriple();
-  // Tauri exports the real target triple while it runs `beforeBuildCommand`, which is how a
-  // cross-build prunes for the machine it is packaging for instead of the build machine.
-  const targetPlatform = resolveTargetPlatform({ triple: process.env.TAURI_ENV_TARGET_TRIPLE?.trim() || target });
+  const cliTarget = targetIndex >= 0 ? process.argv[targetIndex + 1] ?? "" : "";
+  // 目标三元组的来源：命令行 --target > 出包脚本导出的 PI_DESKTOP_TARGET_TRIPLE > Tauri 自己导出的
+  // TAURI_ENV_TARGET_TRIPLE > 构建机自己。两种外壳都从这里拿同一个值，于是“按哪个平台剪包”和
+  // “最终打包给哪个平台”不可能不一致（从前 Electron 在 mac 上打 --win 就会剪成 mac，那个坑就是这么来的）。
+  const envTriple = process.env.PI_DESKTOP_TARGET_TRIPLE?.trim() || process.env.TAURI_ENV_TARGET_TRIPLE?.trim() || "";
+  const target = cliTarget || envTriple || defaultTargetTriple();
+  const targetPlatform = resolveTargetPlatform({ triple: cliTarget || envTriple });
   const { manifest } = buildBridgeRuntime({ skipInstall, target, targetPlatform });
   const checked = skipInstall ? 0 : verifyBridgeSelfResolve();
   console.log(`bridge: ${Object.keys(manifest.dependencies).length} deps -> ${bridgeDir}`);
