@@ -154,6 +154,7 @@ type Action =
     }
   | { type: "finish-session-streaming-messages"; sessionPath: string }
   | { type: "replace-bootstrap"; bootstrap: BootstrapResponse; sessionPath?: string }
+  | { type: "replace-capabilities"; capabilities: CapabilitiesState }
   | { type: "apply-ambient"; ambient: AmbientBootstrap; sessionPath: string };
 
 function createDefaultConversation(): ChatSession {
@@ -275,18 +276,7 @@ function normalizeBootstrapValue(bootstrap: BootstrapResponse): BootstrapRespons
     projectTrusted: bootstrap.projectTrusted ?? false,
     availableModels: bootstrap.availableModels ?? [],
     skills: bootstrap.skills ?? [],
-    capabilities: {
-      ...createDefaultCapabilities(),
-      ...(bootstrap.capabilities ?? {}),
-      skills: bootstrap.capabilities?.skills ?? [],
-      packages: bootstrap.capabilities?.packages ?? [],
-      extensions: bootstrap.capabilities?.extensions ?? [],
-      mcpServers: bootstrap.capabilities?.mcpServers ?? [],
-      session: {
-        ...createDefaultCapabilities().session,
-        ...(bootstrap.capabilities?.session ?? {}),
-      },
-    },
+    capabilities: normalizeCapabilities(bootstrap.capabilities),
     streamingSessionPaths: bootstrap.streamingSessionPaths ?? [],
     compactingSessionPaths: bootstrap.compactingSessionPaths ?? [],
     personalization: {
@@ -294,6 +284,27 @@ function normalizeBootstrapValue(bootstrap: BootstrapResponse): BootstrapRespons
       style: bootstrap.personalization?.style ?? "default",
       customInstructions: bootstrap.personalization?.customInstructions ?? "",
       persona: bootstrap.personalization?.persona ?? "",
+    },
+  };
+}
+
+/**
+ * The capability slice on its own. A capability switch never moves the transcript, so
+ * `updateCapability` folds a fresh slice back through this without re-normalising - or even
+ * re-fetching - the whole conversation.
+ */
+function normalizeCapabilities(capabilities?: CapabilitiesState | null): CapabilitiesState {
+  const defaults = createDefaultCapabilities();
+  return {
+    ...defaults,
+    ...(capabilities ?? {}),
+    skills: capabilities?.skills ?? [],
+    packages: capabilities?.packages ?? [],
+    extensions: capabilities?.extensions ?? [],
+    mcpServers: capabilities?.mcpServers ?? [],
+    session: {
+      ...defaults.session,
+      ...(capabilities?.session ?? {}),
     },
   };
 }
@@ -465,6 +476,16 @@ export function reducer(state: AppState, action: Action): AppState {
         bootstrap,
         isStreaming: isActiveSessionStreaming(bootstrap),
         isCompacting: isActiveSessionCompacting(bootstrap),
+      };
+    }
+    case "replace-capabilities": {
+      if (!state.bootstrap) {
+        return state;
+      }
+      // Only the capability slice moves; conversation, projects and model config stay structurally shared.
+      return {
+        ...state,
+        bootstrap: { ...state.bootstrap, capabilities: normalizeCapabilities(action.capabilities) },
       };
     }
     default:
@@ -2446,8 +2467,25 @@ export function usePiDesktopApp() {
   const updateCapability = useCallback(
     async (path: string, body: unknown) => {
       const sessionPath = bootstrap.activeSessionPath ?? conversation.sessionFile;
-      await postJson(path, { ...((body && typeof body === "object") ? body : {}), sessionPath });
-      // Forced: the caller of `updateCapability` gets this payload back.
+      const result = await postJson<Partial<BootstrapResponse> & { capabilities?: CapabilitiesState }>(
+        path,
+        { ...((body && typeof body === "object") ? body : {}), sessionPath },
+      );
+      // The server answers a capability switch with the capability slice (a package/extension
+      // change may still answer with a whole bootstrap). Folding that slice back avoids
+      // shipping, parsing and normalising the entire conversation for a switch that never
+      // touched it - which used to be a second full `/api/bootstrap` on every toggle.
+      if (result && typeof result === "object" && "snapshot" in result && result.snapshot) {
+        if (activeSessionPathRef.current === sessionPath) {
+          replaceBootstrap(result as BootstrapResponse, sessionPath);
+        }
+        return result;
+      }
+      if (result?.capabilities) {
+        dispatch({ type: "replace-capabilities", capabilities: result.capabilities });
+        return result;
+      }
+      // Unknown response shape (e.g. an older server): keep the full reconcile as a fallback.
       const next = await fetchBootstrap({ force: true });
       if (activeSessionPathRef.current === sessionPath) {
         replaceBootstrap(next, sessionPath);
