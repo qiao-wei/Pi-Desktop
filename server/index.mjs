@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { agentRuntimePathDirs, mergePath } from "./agentEnv.mjs";
 import { removeBundledShims, runtimeShimSpecs } from "./agentShimFiles.mjs";
 import { createAgentShims } from "./agentShims.mjs";
+import { capabilityReloadPlan, reloadRuntimeSkills, sameCapabilityIds } from "./capabilityReload.mjs";
 import { describeLoadStatus, isUnhealthyLoadStatus, summarizePackageHealth } from "./capabilityHealth.mjs";
 import { absolutizeInstalledUserPackage, installTargetPath, packageSourceForPi } from "./capabilityPackageSource.mjs";
 import { emptyPackageResources, findPackageResourceEntry, MAX_RESOURCE_PREVIEW_BYTES, packageProgressEvent, packageResourceDetails, resourcePreview, summarizePackageResources } from "./capabilityPackageResources.mjs";
@@ -3230,8 +3231,14 @@ async function setDefaultCapability(body) {
   }
 
   writeCapabilitiesConfig(config);
-  await reloadOpenRuntimeCapabilities("all");
-  return buildCapabilitiesSnapshot(targetRuntime);
+  // A default skill change only moves which skills pass the loader's filter; the heavier
+  // package/extension/MCP changes still need the full runtime reload.
+  if (kind === "skill") {
+    await reloadOpenRuntimeSkills("all");
+  } else {
+    await reloadOpenRuntimeCapabilities("all");
+  }
+  return { capabilities: await buildCapabilitiesSnapshot(targetRuntime) };
 }
 
 async function setCapabilityPinned(body) {
@@ -3274,8 +3281,9 @@ async function setCapabilityPinned(body) {
   }
 
   writeCapabilitiesConfig(config);
-  await reloadOpenRuntimeCapabilities("all");
-  return buildCapabilitiesSnapshot(targetRuntime);
+  // Pinning only changes capability ordering/labels; it never enters a runtime path, so
+  // there is nothing to reload - the fresh snapshot below is enough.
+  return { capabilities: await buildCapabilitiesSnapshot(targetRuntime) };
 }
 
 async function setSessionSkillCapability(body) {
@@ -3306,7 +3314,7 @@ async function setSessionSkillCapability(body) {
       disabledSkills: [...disabledSkills],
     };
   });
-  return refreshSnapshot();
+  return { capabilities: await buildCapabilitiesSnapshot(targetRuntime) };
 }
 
 async function updateRuntimeSessionCapabilities(targetRuntime, updateSelection) {
@@ -3324,23 +3332,18 @@ async function updateRuntimeSessionCapabilities(targetRuntime, updateSelection) 
     targetRuntime,
   );
 
-  if (
-    sameCapabilityIds(current.skills, next.skills) &&
-    sameCapabilityIds(current.enabledSkills, next.enabledSkills) &&
-    sameCapabilityIds(current.disabledSkills, next.disabledSkills) &&
-    sameCapabilityIds(current.packages, next.packages) &&
-    sameCapabilityIds(current.enabledPackages, next.enabledPackages) &&
-    sameCapabilityIds(current.disabledPackages, next.disabledPackages) &&
-    sameCapabilityIds(current.extensions, next.extensions) &&
-    sameCapabilityIds(current.enabledExtensions, next.enabledExtensions) &&
-    sameCapabilityIds(current.disabledExtensions, next.disabledExtensions)
-  ) {
+  const plan = capabilityReloadPlan(current, next);
+  if (plan === "none") {
     return current;
   }
 
   appendSessionCapabilitySelection(targetRuntime.session.sessionManager, next);
   await refreshRuntimeCapabilityPaths(targetRuntime);
-  await targetRuntime.session.reload();
+  // A skill toggle already mutated `capabilityPaths.activeSkillIds` above, and pi's loader
+  // re-reads it through `skillsOverride`; only a package/extension move needs the full reload.
+  if (plan !== "skills" || !reloadRuntimeSkills(targetRuntime)) {
+    await targetRuntime.session.reload();
+  }
   return next;
 }
 
@@ -3364,7 +3367,7 @@ async function setSessionPackageCapability(body) {
     }
     return { ...selection, enabledPackages: [...enabledPackages], disabledPackages: [...disabledPackages] };
   });
-  return refreshSnapshot();
+  return { capabilities: await buildCapabilitiesSnapshot(targetRuntime) };
 }
 
 async function setSessionExtensionCapability(body) {
@@ -3387,7 +3390,7 @@ async function setSessionExtensionCapability(body) {
     }
     return { ...selection, enabledExtensions: [...enabledExtensions], disabledExtensions: [...disabledExtensions] };
   });
-  return refreshSnapshot();
+  return { capabilities: await buildCapabilitiesSnapshot(targetRuntime) };
 }
 
 function capabilityPackageManager(targetRuntime, onProgress) {
@@ -3613,14 +3616,6 @@ async function readRuntimeCapabilityContext(targetRuntime) {
     config,
     allSkills,
   };
-}
-
-function sameCapabilityIds(left, right) {
-  if (left.length !== right.length) {
-    return false;
-  }
-  const values = new Set(left);
-  return right.every((value) => values.has(value));
 }
 
 async function importSkillFromCapabilityPage(body) {
@@ -4114,13 +4109,35 @@ async function reloadOpenRuntimeCapabilities(scope = "all") {
   await reloadRuntimeTargets(targets);
 }
 
-async function reloadRuntimeTargets(targets) {
+/**
+ * Apply a skill-only default change to the open runtimes. `reloadRuntimeTargets` skips
+ * busy sessions, exactly like the full reload path does, so a change lands on the next
+ * reload/restart for a session that is mid-turn rather than mutating its prompt.
+ */
+async function reloadOpenRuntimeSkills(scope = "all") {
+  const targets = [...openRuntimes.values()].filter((candidate) =>
+    scope === "all" || candidate.projectId === scope,
+  );
+  await reloadRuntimeTargets(targets, { skillsOnly: true });
+}
+
+async function reloadRuntimeTargets(targets, { skillsOnly = false } = {}) {
   await Promise.all(targets.map(async (candidate) => {
-    if (!isSessionBusy(candidate.session)) {
-      await candidate.settingsManager.reload();
-      await refreshRuntimeCapabilityPaths(candidate);
-      await candidate.session.reload();
+    if (isSessionBusy(candidate.session)) {
+      return;
     }
+    if (skillsOnly) {
+      // The loader's filter reads `capabilityPaths` by reference, so refresh it first and
+      // then let pi re-run its own skill pass. Fall through to the full reload only when
+      // pi does not expose that entry point.
+      await refreshRuntimeCapabilityPaths(candidate);
+      if (reloadRuntimeSkills(candidate)) {
+        return;
+      }
+    }
+    await candidate.settingsManager.reload();
+    await refreshRuntimeCapabilityPaths(candidate);
+    await candidate.session.reload();
   }));
 }
 
