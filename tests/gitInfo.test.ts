@@ -8,6 +8,9 @@
  *   也保证只读路径永远不碰写命令。
  */
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -28,6 +31,7 @@ import {
   parseNumstat,
   parsePorcelainV2,
   parseUpstreamTrack,
+  readChangedEntries,
   readGitInfo,
   renameGitBranch,
   runReadOnlyGit,
@@ -340,6 +344,41 @@ test("正常仓库：分支、上游、领先/落后、改动明细与总数", a
     if (call.args[0] !== "--version") {
       assert.equal(isReadOnlyGitArgs(call.args), true, `读路径里出现了非只读命令: ${call.args.join(" ")}`);
     }
+  }
+});
+
+test("托管 worktree 的共享 .pi 链不进徽标 / 提交列表：软链剔掉，真实 .pi 目录保留", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-gitinfo-worktree-"));
+  const project = join(root, "project");
+  const worktree = join(root, "worktree");
+  try {
+    mkdirSync(project, { recursive: true });
+    mkdirSync(worktree, { recursive: true });
+    symlinkSync(project, join(worktree, ".pi"), "dir");
+
+    const status = ["# branch.head main", "? .pi", "? notes.md"].join("\u0000");
+    const { exec } = fakeExecFile((args) => {
+      const key = args.join(" ");
+      if (key === "--version") return { ok: true, stdout: VERSION_LINE };
+      if (key === "rev-parse --is-inside-work-tree") return { ok: true, stdout: "true\n" };
+      if (key === "status --porcelain=v2 --branch -z --untracked-files=normal") return { ok: true, stdout: `${status}\u0000` };
+      if (key === "diff HEAD --numstat -z") return { ok: true, stdout: "\u0000" };
+      if (key.startsWith("for-each-ref")) return { ok: true, stdout: "" };
+      return { ok: false, code: 1, stdout: "", stderr: "unexpected" };
+    });
+
+    const info = await readGitInfo(worktree, { execImpl: exec });
+    assert.deepEqual(info.files.map((file) => file.path), ["notes.md"], "共享链不进徽标");
+    const changed = await readChangedEntries(worktree, { execImpl: exec });
+    assert.deepEqual(changed.entries.map((entry) => entry.path), ["notes.md"], "共享链不进提交列表");
+
+    // 分支自带的真实 .pi（不是软链）里真有改动时必须保留。
+    rmSync(join(worktree, ".pi"), { force: true });
+    mkdirSync(join(worktree, ".pi"));
+    const plain = await readGitInfo(worktree, { execImpl: exec });
+    assert.deepEqual(plain.files.map((file) => file.path), [".pi", "notes.md"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -735,6 +774,39 @@ test("commitGitChanges：路径不在 status 里 / 是冲突文件 / 信息为�
   const emptyPaths = fakeExecFile(commitPlan());
   await assert.rejects(() => commitGitChanges("/tmp/repo", { message: "x", paths: [] }, { execImpl: emptyPaths.exec }), /at least one file/);
   assert.equal(emptyPaths.calls.length, 0);
+});
+
+test("commitGitChanges：托管 worktree 的共享 .pi 链永远不可提交", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-gitinfo-commit-"));
+  const project = join(root, "project");
+  const worktree = join(root, "worktree");
+  try {
+    mkdirSync(project, { recursive: true });
+    mkdirSync(worktree, { recursive: true });
+    symlinkSync(project, join(worktree, ".pi"), "dir");
+    const linked = ["# branch.head main", "? .pi", "? notes.md"].join("\u0000");
+    const { exec, calls } = fakeExecFile(
+      commitPlan({ "status --porcelain=v2 --branch -z --untracked-files=normal": { ok: true, stdout: `${linked}\u0000` } }),
+    );
+
+    await assert.rejects(
+      () => commitGitChanges(worktree, { message: "x", paths: [".pi"] }, { execImpl: exec }),
+      /Not a changed file: \.pi/,
+    );
+    assert.equal(writeArgs(calls, COMMIT_UPDATE).length, 0, "一条写命令都不该发");
+
+    // 分支自带的真实 .pi 目录照常可提交。
+    rmSync(join(worktree, ".pi"), { force: true });
+    mkdirSync(join(worktree, ".pi"));
+    const plain = fakeExecFile(commitPlan());
+    await assert.rejects(
+      () => commitGitChanges(worktree, { message: "x", paths: [".pi"] }, { execImpl: plain.exec }),
+      /Not a changed file: \.pi/,
+      "真实 .pi 不在 status 里（fake 计划里没有）同样不可提交",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("commitGitChanges：git 拒绝时抛原文，add 失败就不会走到 commit", async () => {

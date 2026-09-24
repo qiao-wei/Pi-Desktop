@@ -25,6 +25,8 @@ import { openSync, closeSync, readSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { dropProjectPiLinkEntries } from "./worktreePiLink.mjs";
+
 /** 单条 git 命令的超时（毫秒）。大仓库 `git status` 可能到秒级，给足余量但不无限等。 */
 export const GIT_TIMEOUT_MS = 5000;
 
@@ -485,7 +487,8 @@ export async function readGitInfo(cwd, { execImpl = execFile, timeoutMs = GIT_TI
   const chunks = status.stdout.split("\0");
   const header = parseBranchHeader(chunks);
   const counts = await readLineCounts(project, options);
-  const { files, added, removed } = summarizeChanges(parsePorcelainV2(chunks), counts);
+  // 托管 worktree 里的共享 `.pi` 链是应用放的未跟踪条目：不进徽标、不进提交列表。
+  const { files, added, removed } = summarizeChanges(dropProjectPiLinkEntries(project, parsePorcelainV2(chunks)), counts);
 
   const branches = await runReadOnlyGit(project, ["for-each-ref", `--format=${BRANCH_FORMAT}`, "refs/heads"], options);
 
@@ -739,7 +742,7 @@ export async function commitGitChanges(cwd, { message, paths } = {}, { execImpl 
     throw new Error(gitFailureReason(status));
   }
 
-  const entries = parsePorcelainV2(status.stdout.split("\u0000"));
+  const entries = dropProjectPiLinkEntries(project, parsePorcelainV2(status.stdout.split("\u0000")));
   const { paths: allowed, conflicted } = commitablePaths(entries);
   const requestedPaths = [...new Set(requested)];
   for (const path of requestedPaths) {
@@ -793,7 +796,7 @@ export async function readChangedEntries(cwd, { execImpl = execFile, timeoutMs =
   }
 
   const chunks = status.stdout.split("\u0000");
-  return { header: parseBranchHeader(chunks), entries: parsePorcelainV2(chunks) };
+  return { header: parseBranchHeader(chunks), entries: dropProjectPiLinkEntries(project, parsePorcelainV2(chunks)) };
 }
 
 /**
@@ -849,7 +852,7 @@ export async function readCommitDiff(cwd, paths, { execImpl = execFile, timeoutM
 
   const chunks = status.stdout.split("\u0000");
   const header = parseBranchHeader(chunks);
-  const entries = parsePorcelainV2(chunks);
+  const entries = dropProjectPiLinkEntries(project, parsePorcelainV2(chunks));
   const counts = await readLineCounts(project, options);
   const { files } = summarizeChanges(entries, counts);
   const byPath = new Map(entries.map((entry) => [entry.path, entry]));
