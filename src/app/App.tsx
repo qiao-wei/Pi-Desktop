@@ -5399,6 +5399,10 @@ function ProjectSidebar({
       return;
     }
 
+    // 点已经打开的那一行不是「切换」（selectSession 会提前返回）：这种点击不该把焦点
+    // 从用户当前所在的位置抢到 composer。
+    const switchesSession = sessionPath !== activeSessionPath;
+
     // Stamp before the switch renders: every message of the other session is
     // history and must not replay its entrance animation.
     markThreadSwitch();
@@ -5418,6 +5422,12 @@ function ProjectSidebar({
         pendingSwitchSessionPathRef.current = null;
         setPendingSwitchSessionPath(null);
       }
+    }
+    // 和侧栏「＋」新建会话一样，切换完成后把焦点交回 composer：点开一段对话十有八九就是
+    // 要接着打字，焦点留在侧栏行上还得再点一次输入框。放在 finally 之后，pending 状态先
+    // 清掉，composer 才是可输入的那个。
+    if (switchesSession) {
+      onFocusComposer();
     }
   }
 
