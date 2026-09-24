@@ -45,6 +45,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
+  SyntheticEvent as ReactSyntheticEvent,
   ReactNode,
   CSSProperties,
 } from "react";
@@ -658,6 +659,27 @@ export function App() {
     document.addEventListener("selectionchange", handleSelectionChange);
     return () => document.removeEventListener("selectionchange", handleSelectionChange);
   }, []);
+
+  /** 用户真的碰了 composer（点击 / 输入）→ 绿色聚焦框该回来了。 */
+  function restoreComposerFocusRing(event: ReactSyntheticEvent<HTMLElement>) {
+    event.currentTarget.removeAttribute("data-focus-quiet");
+  }
+
+  /**
+   * 程序化聚焦 composer（新建 / 切换会话之后）不该亮起那个绿色聚焦框：用户还没碰过
+   * 键鼠，绿框看起来像「选中了但没输入」。
+   * 用 DOM 属性而不是 state 传这个「暂时压住」信号，是为了能在 focus() 之前同步生效，
+   * 否则先 focus 后 re-render 会闪一帧绿框；用户一按下/一输入，restoreComposerFocusRing
+   * 就把属性摘掉，绿框恢复。
+   */
+  function focusComposerQuietly() {
+    const editor = composerEditorRef.current;
+    if (!editor) {
+      return;
+    }
+    editor.closest<HTMLElement>(".composer-surface")?.setAttribute("data-focus-quiet", "true");
+    editor.focus({ preventScroll: true });
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1951,7 +1973,7 @@ export function App() {
           onArchiveSession={archiveSession}
           onDeleteSession={deleteSession}
           onSelectSession={selectSession}
-          onFocusComposer={() => composerEditorRef.current?.focus({ preventScroll: true })}
+          onFocusComposer={focusComposerQuietly}
           activeMainView={activeMainView}
           onOpenCapabilities={() => {
             setActiveMainView("capabilities");
@@ -2127,6 +2149,9 @@ export function App() {
           />
           <div
             className={`composer-surface ${isDraggingFiles ? "is-dragging" : ""}`}
+            onPointerDown={restoreComposerFocusRing}
+            onKeyDown={restoreComposerFocusRing}
+            onInput={restoreComposerFocusRing}
             onDragEnter={handleDragEnter}
             onDragOver={(event) => {
               if (hasDraggedFiles(event)) {
