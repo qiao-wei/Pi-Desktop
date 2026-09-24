@@ -1,6 +1,14 @@
 # Pi Desktop
 
-A desktop host for `@earendil-works/pi-coding-agent`.
+A desktop app for `@earendil-works/pi-coding-agent`.
+
+It is not a work assistant built on top of pi - it is the same agent in a desktop window, with the
+terminal's rough edges smoothed out: pasting a screenshot, copying text out of a long answer,
+scrolling back through a session. How you use pi does not change; the conversations, skills and
+extensions you already have work as they do in the terminal.
+
+Expect rough edges: this is an early release, still evolving, so bugs, missing pieces and changing
+behaviour come with the territory. It gets better with each pass.
 
 Two native shells share one React renderer and one local Node "bridge":
 
