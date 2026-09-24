@@ -502,6 +502,101 @@ const headlessUiTheme = {
   getBashModeBorderColor: () => (str) => str,
 };
 
+/**
+ * The accent colour a panel draws its selected row with. `readRowTargets` in
+ * `src/shared/terminalText.ts` reads it back to tell a cursor row from an idle expanded row
+ * (both draw `▾`); `tests/extensionUiMode.test.ts` keeps the two sides in sync.
+ */
+const extensionUiAnsiAccent = "96";
+
+/**
+ * How extension panels (`ctx.ui.custom()`) are presented in the window; the reading side of this
+ * contract lives in `src/shared/terminalText.ts`, the setting in 设置 → 个性化.
+ */
+const extensionUiModes = ["tui", "webui"];
+const defaultExtensionUiMode = "tui";
+
+/** ANSI codes for the colour roles extensions ask for. Unknown roles fall back to the default colour. */
+const extensionUiAnsiFgCodes = {
+  accent: extensionUiAnsiAccent,
+  success: "92",
+  error: "91",
+  warning: "93",
+  border: "90",
+  borderAccent: extensionUiAnsiAccent,
+  borderMuted: "90",
+  muted: "90",
+  dim: "90",
+  text: "39",
+  toolOutput: "37",
+  toolDiffAdded: "92",
+  toolDiffRemoved: "91",
+  toolDiffContext: "90",
+};
+const extensionUiAnsiBgCodes = {
+  selectedBg: "106",
+  searchMatchBg: "103",
+  userMessageBg: "100",
+  customMessageBg: "100",
+  toolPendingBg: "100",
+  toolSuccessBg: "102",
+  toolErrorBg: "101",
+};
+
+/**
+ * The colour-preserving sibling of `headlessUiTheme`.
+ *
+ * `tui` presentation wants plain text (the host strips escapes anyway), but `webui`
+ * presentation renders the panel in the window, where colour is what turns a wall of
+ * monospace into a readable list. This theme emits real SGR sequences instead of inventing a
+ * bespoke marker format: the renderer parses them with the same rules a terminal would
+ * (`parseTerminalLines`), and any extension that draws with a real theme keeps working.
+ */
+const ansiUiTheme = {
+  fg: (name, text) => `\u001b[${extensionUiAnsiFgCodes[name] ?? "39"}m${text}\u001b[39m`,
+  bg: (name, text) => `\u001b[${extensionUiAnsiBgCodes[name] ?? "49"}m${text}\u001b[49m`,
+  bold: (text) => `\u001b[1m${text}\u001b[22m`,
+  italic: (text) => `\u001b[3m${text}\u001b[23m`,
+  underline: (text) => `\u001b[4m${text}\u001b[24m`,
+  inverse: (text) => `\u001b[7m${text}\u001b[27m`,
+  strikethrough: (text) => `\u001b[9m${text}\u001b[29m`,
+  getFgAnsi: (name) => `\u001b[${extensionUiAnsiFgCodes[name] ?? "39"}m`,
+  getBgAnsi: (name) => `\u001b[${extensionUiAnsiBgCodes[name] ?? "49"}m`,
+  getColorMode: () => "ansi16",
+  getThinkingBorderColor: () => (str) => ansiUiTheme.fg("muted", str),
+  getBashModeBorderColor: () => (str) => ansiUiTheme.fg("accent", str),
+};
+
+/** The personalization choice, resolved per call so switching it applies to the next panel. */
+function extensionUiRenderMode() {
+  return normalizeExtensionUiMode(personalization?.extensionUi);
+}
+
+function normalizeExtensionUiMode(value) {
+  const mode = String(value ?? "").trim();
+  return extensionUiModes.includes(mode) ? mode : defaultExtensionUiMode;
+}
+
+/** `webui` needs colours; `tui` keeps the historical plain-text output. */
+function activeUiTheme() {
+  return extensionUiRenderMode() === "webui" ? ansiUiTheme : headlessUiTheme;
+}
+
+/**
+ * Turns an extension-UI response into the key sequences to replay.
+ *
+ * A single keystroke arrives as `input` (the original protocol). A click on a rendered panel -
+ * which the panel contract cannot express as anything but keystrokes - arrives as `inputs`, a
+ * batch like `[down, down, enter]`.
+ */
+function readKeyResponse(response) {
+  if (Array.isArray(response?.inputs)) {
+    const keys = response.inputs.filter((key) => typeof key === "string" && key.length > 0);
+    return keys.length > 0 ? keys : undefined;
+  }
+  return typeof response?.input === "string" ? [response.input] : undefined;
+}
+
 function createExtensionUiBridge() {
   const listeners = new Set();
   const pendingRequests = new Map();
@@ -564,11 +659,18 @@ function createExtensionUiBridge() {
         pending.custom.finish({ cancelled: true });
         return true;
       }
-      if (typeof response?.input !== "string") {
+      const keys = readKeyResponse(response);
+      if (!keys) {
         return false;
       }
       try {
-        pending.custom.component?.handleInput?.(response.input);
+        // Replayed in order because a click is a synthetic "move the cursor there, then activate"
+        // - a component may also close itself mid-sequence (enter on a terminal action), so stop
+        // writing to it the moment it finishes.
+        for (const data of keys) {
+          pending.custom.component?.handleInput?.(data);
+          if (pendingRequests.get(String(response.id)) !== pending) break;
+        }
         if (pendingRequests.get(String(response.id)) === pending) {
           renderCustomRequest(pending.request, pending.custom.component);
         }
@@ -699,7 +801,7 @@ function createExtensionUiBridge() {
       setEditorComponent: () => {},
       getEditorComponent: () => undefined,
       get theme() {
-        return headlessUiTheme;
+        return activeUiTheme();
       },
       getAllThemes: () => [],
       getTheme: () => undefined,
@@ -758,12 +860,16 @@ function createExtensionUiBridge() {
       },
       custom: async (factory, options) => {
         const id = randomUUID();
+        // The mode is read here, not at bind time, so toggling it in 设置 → 个性化 applies to the
+        // next panel without reloading the session.
+        const renderMode = extensionUiRenderMode();
         const requestPayload = {
           type: "extension_ui_request",
           id,
           method: "custom",
           title: options?.title ?? "Pi extension",
           lines: [],
+          renderMode,
           overlay: options?.overlay !== false,
         };
 
@@ -806,7 +912,7 @@ function createExtensionUiBridge() {
           };
 
           Promise.resolve()
-            .then(() => factory(fakeTui, headlessUiTheme, fakeKeybindings, (value) => pending.custom.finish(value)))
+            .then(() => factory(fakeTui, activeUiTheme(), fakeKeybindings, (value) => pending.custom.finish(value)))
             .then((component) => {
               if (finished) {
                 component?.dispose?.();
@@ -4996,7 +5102,8 @@ async function setPersonalization(body) {
   const style = normalizePersonalizationStyle(body?.style);
   const customInstructions = normalizePersonalizationText(body?.customInstructions, 1500, "customInstructions");
   const persona = normalizePersonalizationText(body?.persona, 1000, "persona");
-  personalization = { style, customInstructions, persona };
+  const extensionUi = normalizeExtensionUiMode(body?.extensionUi);
+  personalization = { style, customInstructions, persona, extensionUi };
   writeJsonFile(personalizationFile, personalization);
   return buildSnapshot(getRuntimeForRequest(body));
 }
@@ -6805,6 +6912,7 @@ function loadPersonalization() {
     style: normalizePersonalizationStyle(stored?.style),
     customInstructions: normalizePersonalizationText(stored?.customInstructions, 1500, "customInstructions"),
     persona: normalizePersonalizationText(stored?.persona, 1000, "persona"),
+    extensionUi: normalizeExtensionUiMode(stored?.extensionUi),
   };
 }
 

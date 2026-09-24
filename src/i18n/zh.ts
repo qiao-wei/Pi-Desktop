@@ -337,6 +337,12 @@ export const zh = {
   "settings.instructions.label": "自定义指令",
   "settings.instructions.desc": "告诉它每轮对话都要遵守的规则与偏好。",
   "settings.instructions.placeholder": "例如：先给结论，再解释关键假设。",
+  "settings.extensionUi.label": "扩展面板的呈现方式",
+  "settings.extensionUi.desc": "扩展打开的交互面板（比如 /mcp 的服务器列表）在窗口里怎么显示。",
+  "settings.extensionUi.tui.label": "终端风格",
+  "settings.extensionUi.tui.desc": "原样显示终端文本，只用键盘操作",
+  "settings.extensionUi.webui.label": "网页风格",
+  "settings.extensionUi.webui.desc": "保留颜色与样式，列表行可以直接点选",
   "settings.savePersonalization": "保存个性化设置",
 
   /* ---- 侧栏与项目对话框 ---- */
@@ -647,5 +653,7 @@ export const zh = {
   "terminal.key.enter": "回车",
   "terminal.key.save": "保存",
   "terminal.key.close": "关闭",
+  "terminal.rowHint": "点击这一行：把光标移过去并确认（等同键盘操作）",
+  "terminal.scrollHint": "滚轮移动选中行 · Shift + 滚轮 滚动视图",
   "common.busy": "处理中...",
 } as const;

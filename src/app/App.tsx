@@ -145,6 +145,8 @@ import {
   sidebarSessionPreview,
 } from "../shared/sidebarHoverPreview";
 import { AutoHideScroll } from "../components/AutoHideScroll";
+import { ExtensionCustomUiPanel } from "../components/ExtensionCustomUiPanel";
+import { stripTerminalSequences } from "../shared/terminalText.ts";
 import { GitStatusBadge } from "../components/GitStatusBadge";
 import {
   CAPABILITY_TABS,
@@ -239,6 +241,11 @@ const personalizationStyleOptions = [
   { value: "efficient", labelKey: "settings.style.efficient.label", descKey: "settings.style.efficient.desc" },
   { value: "sharp", labelKey: "settings.style.sharp.label", descKey: "settings.style.sharp.desc" },
   { value: "socratic", labelKey: "settings.style.socratic.label", descKey: "settings.style.socratic.desc" },
+] as const;
+/** Extension-panel presentation; the values mirror `ExtensionUiMode` in `src/types` and the server list. */
+const personalizationExtensionUiOptions = [
+  { value: "tui", labelKey: "settings.extensionUi.tui.label", descKey: "settings.extensionUi.tui.desc" },
+  { value: "webui", labelKey: "settings.extensionUi.webui.label", descKey: "settings.extensionUi.webui.desc" },
 ] as const;
 
 interface ComposerAttachment extends ChatAttachment {
@@ -565,8 +572,9 @@ export function App() {
     }
   }, []);
 
+  // 扩展可能用 `theme.fg(...)` 涂过标题；window title / tooltip 只展示纯文本。
   useEffect(() => {
-    document.title = state.extensionTitle?.trim() || `Pi Desktop - ${conversation.title}`;
+    document.title = stripTerminalSequences(state.extensionTitle ?? "").trim() || `Pi Desktop - ${conversation.title}`;
   }, [conversation.title, state.extensionTitle]);
 
   useEffect(() => {
@@ -1936,7 +1944,7 @@ export function App() {
   return (
     <div className="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden rounded-[var(--window-radius)] border border-border bg-muted shadow-[0_18px_56px_rgba(20,24,22,0.18)]">
       <TitleBar
-        title={state.extensionTitle?.trim() || conversation.title}
+        title={stripTerminalSequences(state.extensionTitle ?? "").trim() || conversation.title}
         leftSidebarCollapsed={leftSidebarCollapsed}
         rightPanelCollapsed={rightPanelCollapsed}
         showContextPanel={showContextPanel}
@@ -2364,7 +2372,7 @@ export function App() {
           />
         ) : null}
         {activeCustomExtensionUiRequest && !activeExtensionUiRequest && !activeWebExtensionUiRequest ? (
-          <ExtensionCustomUi
+          <ExtensionCustomUiPanel
             request={activeCustomExtensionUiRequest}
             onRespond={(response) => void respondExtensionUi(response)}
             onCancelled={() => setCustomUiCancelVersion((version) => version + 1)}
@@ -3010,6 +3018,37 @@ function SettingsModal({
                   <p className="text-xs text-muted-foreground tabular-nums">
                     {personalizationDraft.customInstructions.length} / 1500
                   </p>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>{t("settings.extensionUi.label")}</Label>
+                  <p className="text-sm text-muted-foreground">
+                    {t("settings.extensionUi.desc")}
+                  </p>
+                  <div
+                    className="grid grid-cols-2 gap-2.5"
+                    role="radiogroup"
+                    aria-label={t("settings.extensionUi.label")}
+                  >
+                    {personalizationExtensionUiOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={personalizationDraft.extensionUi === option.value}
+                        className={cn(
+                          "grid min-w-0 gap-1.5 rounded-md border p-3.5 text-left hover:bg-accent",
+                          personalizationDraft.extensionUi === option.value && "border-primary bg-accent",
+                        )}
+                        onClick={() =>
+                          setPersonalizationDraft((current) => ({ ...current, extensionUi: option.value }))
+                        }
+                      >
+                        <strong className="text-sm">{t(option.labelKey)}</strong>
+                        <span className="text-xs leading-relaxed text-muted-foreground">{t(option.descKey)}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <Button
@@ -6283,7 +6322,8 @@ function ExtensionWidgetStack({
           className="border-l-[3px] border-l-primary bg-muted px-2.5 py-2 text-xs leading-snug whitespace-pre-wrap text-muted-foreground"
           key={key}
         >
-          {widget.lines.map((line, index) => <div key={`${key}-${index}`}>{line}</div>)}
+          {/* 扩展可能把 `ctx.ui.theme` 的颜色写进 widget 行；这里是纯文本展示，把转义序列去掉。 */}
+          {widget.lines.map((line, index) => <div key={`${key}-${index}`}>{stripTerminalSequences(line)}</div>)}
         </section>
       ))}
     </div>
@@ -6501,7 +6541,9 @@ function ExtensionStatusBar({ status }: { status: Record<string, string> }) {
       aria-label="Extension status"
     >
       {Object.entries(status).map(([key, value]) => (
-        <Badge key={key} variant="outline" className="bg-background/95 text-[0.72rem]" title={key}>{value}</Badge>
+        <Badge key={key} variant="outline" className="bg-background/95 text-[0.72rem]" title={key}>
+          {stripTerminalSequences(value)}
+        </Badge>
       ))}
     </div>
   );
@@ -6556,13 +6598,6 @@ function ExtensionNotifications({
       ))}
     </div>
   );
-}
-
-function stripTerminalSequences(value: string) {
-  return value
-    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "")
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\u001b[@-_]/g, "");
 }
 
 function ExtensionWebUi({
@@ -6762,114 +6797,6 @@ function ExtensionWebUi({
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function ExtensionCustomUi({
-  request,
-  onRespond,
-  onCancelled,
-}: {
-  request: Extract<ExtensionUiRequest, { method: "custom" }>;
-  onRespond: (response: ExtensionUiResponse) => void;
-  onCancelled?: () => void;
-}) {
-  const t = useT();
-  const panelRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    panelRef.current?.focus();
-    function handleKeyDown(event: KeyboardEvent) {
-      const input = event.ctrlKey && event.key.length === 1
-        ? String.fromCharCode(event.key.toLowerCase().charCodeAt(0) - 96)
-        : event.key === "ArrowUp"
-          ? "\u001b[A"
-          : event.key === "ArrowDown"
-            ? "\u001b[B"
-            : event.key === "Enter"
-              ? "\r"
-              : event.key === " "
-                ? " "
-                : event.key === "Escape"
-                  ? "\u001b"
-                  : event.key === "Backspace"
-                    ? "\u007f"
-                    : event.key === "Tab"
-                      ? "\t"
-                      : event.key.length === 1 && !event.metaKey && !event.altKey
-                        ? event.key
-                        : "";
-      if (!input) return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (input === "\u001b") {
-        onCancelled?.();
-        onRespond({ id: request.id, cancelled: true });
-      } else {
-        onRespond({ id: request.id, input });
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [onRespond, request.id]);
-
-  function send(input: string) {
-    onRespond({ id: request.id, input });
-  }
-
-  function cancel() {
-    onCancelled?.();
-    onRespond({ id: request.id, cancelled: true });
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/25 p-5 backdrop-blur-sm"
-      role="presentation"
-    >
-      <section
-        ref={panelRef}
-        className="grid max-h-[min(760px,calc(100vh-48px))] w-[min(920px,calc(100vw-48px))] gap-4 overflow-hidden rounded-lg border bg-background p-[22px] shadow-2xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="extension-custom-ui-title"
-        tabIndex={-1}
-      >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Pi extension</p>
-            <h2 id="extension-custom-ui-title" className="text-[1.08rem] font-semibold">{request.title}</h2>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={cancel}
-            aria-label="Close extension panel"
-            title="Close"
-          >
-            <X />
-          </Button>
-        </div>
-        <pre className="max-h-[min(560px,calc(100vh-210px))] min-h-[240px] overflow-auto rounded-md border bg-muted p-4 font-mono text-xs leading-normal whitespace-pre">
-          {(request.lines ?? []).map((line) => stripTerminalSequences(line)).join("\n")}
-        </pre>
-        <div className="flex flex-wrap justify-end gap-2">
-          {([
-            ["↑", () => send("\u001b[A")],
-            ["↓", () => send("\u001b[B")],
-            [t("terminal.key.space"), () => send(" ")],
-            [t("terminal.key.enter"), () => send("\r")],
-            [t("terminal.key.save"), () => send("\u0013")],
-            [t("terminal.key.close"), cancel],
-          ] as const).map(([label, onClick]) => (
-            <Button key={label} type="button" variant="outline" size="sm" className="min-w-[52px]" onClick={onClick}>
-              {label}
-            </Button>
-          ))}
-        </div>
-      </section>
-    </div>
   );
 }
 

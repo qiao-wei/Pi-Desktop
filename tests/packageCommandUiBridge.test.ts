@@ -16,47 +16,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { constObjectBody, functionBody } from "./lib/sourceText.ts";
+
 const server = readFileSync(join(import.meta.dirname, "../server/index.mjs"), "utf8");
-
-/** 按 "function name(" 定位,先跳过参数表再数花括号,返回完整函数体。 */
-function functionBody(source: string, name: string): string {
-  const marker = `function ${name}(`;
-  const start = source.indexOf(marker);
-  assert.ok(start >= 0, `source 里找不到 function ${name}(`);
-  let i = start + marker.length;
-  let parenDepth = 1;
-  while (i < source.length && parenDepth > 0) {
-    if (source[i] === "(") parenDepth += 1;
-    else if (source[i] === ")") parenDepth -= 1;
-    i += 1;
-  }
-  assert.ok(parenDepth === 0, `function ${name} 的参数表没闭合`);
-  while (i < source.length && source[i] !== "{") i += 1;
-  assert.ok(i < source.length, `function ${name} 没有函数体`);
-  return balancedBraces(source, i, `function ${name}`);
-}
-
-/** 按 "const name = {" 定位,返回完整对象字面量(含花括号)。 */
-function constObjectBody(source: string, name: string): string {
-  const start = source.indexOf(`const ${name} = {`);
-  assert.ok(start >= 0, `source 里找不到 const ${name}`);
-  return balancedBraces(source, start + `const ${name} = `.length, `const ${name}`);
-}
-
-function balancedBraces(source: string, openBraceIndex: number, label: string): string {
-  let depth = 0;
-  let i = openBraceIndex;
-  while (i < source.length) {
-    if (source[i] === "{") depth += 1;
-    else if (source[i] === "}") {
-      depth -= 1;
-      if (depth === 0) return source.slice(openBraceIndex, i + 1);
-    }
-    i += 1;
-  }
-  throw new Error(`${label} 的花括号没配平`);
-}
-
 test("headlessUiTheme 覆盖 Theme 的颜色/字重 API(/review 的 factory 直接踩 bold)", () => {
   const theme = constObjectBody(server, "headlessUiTheme");
   // pi 的 Theme API:fg/bg(color, text) + bold/italic/underline/inverse/strikethrough(text)。
@@ -65,12 +27,14 @@ test("headlessUiTheme 覆盖 Theme 的颜色/字重 API(/review 的 factory 直�
   }
 });
 
-test("custom() 把 headlessUiTheme(而不是 {})递给扩展 factory", () => {
+test("custom() 递给扩展 factory 的 theme 是完整透传对象(不是 {})", () => {
   const bridge = functionBody(server, "createExtensionUiBridge");
+  // 2026-09-24:主题从写死的 headlessUiTheme 改为按呈现方式取的 activeUiTheme(),
+  // 但「必须是有全套方法的透传 theme」这条不变 —— factory 会直接调 theme.bold(...)。
   assert.match(
     bridge,
-    /factory\(fakeTui,\s*headlessUiTheme,\s*fakeKeybindings,/,
-    "custom() 的 factory 调用必须注入 headlessUiTheme",
+    /factory\(fakeTui,\s*activeUiTheme\(\),\s*fakeKeybindings,/,
+    "custom() 的 factory 调用必须注入 activeUiTheme()",
   );
   assert.doesNotMatch(
     bridge,
@@ -81,7 +45,7 @@ test("custom() 把 headlessUiTheme(而不是 {})递给扩展 factory", () => {
 
 test("ctx.ui.theme 返回同一个透传对象(补齐旧版只有 fg 的残缺主题)", () => {
   const context = functionBody(server, "createUiContext");
-  assert.match(context, /get theme\(\)\s*\{\s*return headlessUiTheme;/);
+  assert.match(context, /get theme\(\)\s*\{\s*return activeUiTheme\(\);/);
 });
 
 test("桥启动即 initTheme（/end-review 的 BorderedLoader→keyHint 依赖模块级 theme）", () => {
