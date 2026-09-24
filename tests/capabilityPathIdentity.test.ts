@@ -1,9 +1,13 @@
 /**
  * 能力资源的路径身份（`server/capabilityPathIdentity.mjs`）。
  *
- * 背景：worktree 会话里 `<worktree>/.pi` 是指向 `<project>/.pi` 的软链，pi 报的是软链那侧
- * 的路径，而能力清单算的是项目那侧。这一组用例就是要证明：两边按 realpath 对齐之后，
- * 「算不算同一个 extension」「skill 在不在受管根里」在两种写法下答案一致。
+ * 背景：pi 报技能路径时**不做 realpath**，所以两边都有「软链那一侧」的情况：
+ * - worktree 会话里 `<worktree>/.pi` 是指向 `<project>/.pi` 的软链，项目技能报的是 worktree 那侧，
+ *   而能力清单算的是项目那侧；
+ * - 用户的技能本身就是软链（`~/.pi/agent/skills/x -> ~/.agents/skills/x`），报的就是软链那侧。
+ *
+ * 这一组用例要证明：这两个方向都得认（只认 realpath 会丢掉一整类用户技能，只认字面路径会丢掉
+ * worktree 里的项目技能），且「算不算同一个 extension」在两种写法下答案一致。
  */
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -78,6 +82,29 @@ test("extensionCapabilityId：同一条软链路径与真实路径得到同一�
     const viaLink = join(worktree, ".pi", "extensions", "demo.ts");
     assert.equal(extensionCapabilityId(viaLink), extensionCapabilityId(real));
     assert.equal(extensionCapabilityId("/definitely/not/here.ts"), resolve("/definitely/not/here.ts"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("isSkillPathUnderRoots：技能目录自己就是软链（用户技能常见写法）也算受管", () => {
+  const root = tempDir("pi-pathid-");
+  try {
+    // root 扮演 ~/.pi/agent/skills，real 扮演 ~/.agents/skills：root/x 是指向 real/x 的软链。
+    // 只比对 realpath 会把整类用户技能判成「非托管」—— 面板里消失、开关失效。
+    const agentSkills = join(root, "agent", "skills");
+    const realSkills = join(root, "agents", "skills");
+    mkdirSync(join(realSkills, "lark-im"), { recursive: true });
+    mkdirSync(agentSkills, { recursive: true });
+    writeFileSync(join(realSkills, "lark-im", "SKILL.md"), "---\nname: lark-im\n---\n");
+    symlinkSync(join(realSkills, "lark-im"), join(agentSkills, "lark-im"), "dir");
+
+    assert.equal(isSkillPathUnderRoots(join(agentSkills, "lark-im", "SKILL.md"), [agentSkills]), true, "软链那侧算受管");
+    assert.equal(
+      isSkillPathUnderRoots(join(realSkills, "lark-im", "SKILL.md"), [agentSkills]),
+      false,
+      "realpath 落在受管根之外的东西仍然不算（不能把所有软链都当受管）",
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

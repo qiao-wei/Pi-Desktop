@@ -37,11 +37,15 @@ test("index.mjs 从 capabilityPathIdentity 取路径身份，不再自己 resolv
   );
 });
 
-test("两个 override 用 canonicalPath 判身份：软链侧的 extension / skill 才对得上能力清单", () => {
+test("override 用 canonicalPath 判身份：软链侧的 extension / skill 才对得上能力清单", () => {
   const overrides = region(serverSource, "extensionsOverride: (base) => ({", "appendSystemPromptOverride:");
   assert.match(overrides, /const normalized = canonicalPath\(extension\.path\);/);
-  assert.match(overrides, /const normalized = canonicalPath\(skill\.filePath\);/);
   assert.doesNotMatch(overrides, /const normalized = resolve\(/, "不能再退回 resolve");
+  // 技能走 capabilitySkillSelection 的活策略（主分支的修复），但禁用包的守卫要按 realpath 比，
+  // 否则 worktree 会话里从软链侧报上来的包体资源过滤不掉。
+  assert.match(overrides, /applySkillSelection\(base\.skills, capabilityPaths\.skillSelection/);
+  assert.match(overrides, /isManaged: \(path\) => isManagedSkillPath\(path, project\)/);
+  assert.match(overrides, /isDisabledPath: \(path\) => capabilityPaths\.disabledPackageRoots\.some\(\(root\) => isPathInside\(root, canonicalPath\(path\)\)\)/);
 });
 
 test("能力清单里的路径按 realpath 算（含 disabledPackageRoots 的前缀匹配）", () => {

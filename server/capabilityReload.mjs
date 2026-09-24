@@ -2,7 +2,7 @@
  * Capability-selection reload helpers.
  *
  * A skill toggle only changes which skills pi's loader should keep. Pi Desktop already
- * feeds pi a live `skillsOverride` that reads `capabilityPaths.activeSkillIds`, so pi's
+ * feeds pi a live `skillsOverride` that reads `capabilityPaths.skillSelection`, so pi's
  * own (cheap) skill pass is enough to land the change. Package/extension changes go
  * through the loader's extension set and do need the full `session.reload()`.
  *
@@ -48,8 +48,8 @@ export function capabilityReloadPlan(current, next) {
 /**
  * Re-filter skills and rebuild the cached system prompt without reloading the session.
  *
- * Pi Desktop already feeds pi a live `skillsOverride` that filters by
- * `capabilityPaths.activeSkillIds`, and pi re-runs that override whenever it reloads a
+ * Pi Desktop already feeds pi a live `skillsOverride` that decides from
+ * `capabilityPaths.skillSelection`, and pi re-runs that override whenever it reloads a
  * skill path set. `resourceLoader.extendResources()` is pi's public entry point that
  * re-runs exactly that pass, and `session.setActiveToolsByName()` is pi's public hook
  * that rebuilds the cached system prompt for the next turn. Both are pi's own code - we
