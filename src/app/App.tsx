@@ -163,7 +163,11 @@ import {
 } from "../shared/capabilityScope";
 import { usePiDesktopApp } from "../features/chat/usePiDesktopApp";
 import { useProjectGit } from "../features/chat/useProjectGit";
-import { combineQueuedComposerText, mergeQueuedWithCurrentText } from "../features/chat/queuedComposerText";
+import {
+  selectRestorableQueuedEntries,
+  type ClearedComposerQueue,
+  type QueuedComposerEntry,
+} from "../features/chat/queuedComposerText";
 import { ChatThread, type ViewportState } from "../features/chat/ChatThread";
 import { sidebarStreamingSessionPaths } from "../features/chat/sidebarStreaming";
 import type { MessageEditPayload } from "../features/chat/MessageEditBox";
@@ -1311,27 +1315,30 @@ export function App() {
 
   // pi TUI 对齐（interactive-mode.js 的 restoreQueuedMessagesToEditor）：中断时把服务端
   // clearQueue() 取出的未消费 steering / follow-up 退回编辑器；排队文本在前，已有文本在后。
-  function restoreQueuedComposerMessages(cleared: { steering?: string[]; followUp?: string[] }) {
-    const queuedText = combineQueuedComposerText(cleared.steering ?? [], cleared.followUp ?? []);
-    if (!queuedText) {
+  // 退回内容按本地排队气泡里的 parts 重建（徽标仍是徽标）；只有本地没有对应气泡时才
+  // 退化成服务端原文。
+  function restoreQueuedComposerMessages(cleared: ClearedComposerQueue) {
+    const entries = selectRestorableQueuedEntries(cleared.entries ?? [], cleared);
+    if (!entries.length) {
       return;
     }
     const editor = composerEditorRef.current;
     if (!editor) {
       return;
     }
-    const parts = readComposerParts(editor);
     composerSelectionRef.current = null;
-    if (parts.some((part) => part.kind === "attachment")) {
-      // 编辑器里有附件时不能整体重写（会丢附件），把排队文本作为文本节点插到最前面。
-      editor.insertBefore(document.createTextNode(`${queuedText}\n\n`), editor.firstChild);
-    } else {
-      const currentText = parts
-        .filter((part): part is { kind: "text"; text: string } => part.kind === "text")
-        .map((part) => part.text)
-        .join("");
-      editor.textContent = mergeQueuedWithCurrentText(queuedText, currentText);
+    const fragment = document.createDocumentFragment();
+    entries.forEach((entry, index) => {
+      if (index > 0) {
+        fragment.appendChild(document.createTextNode("\n\n"));
+      }
+      appendQueuedComposerEntry(fragment, entry);
+    });
+    if (!isComposerEmpty(editor)) {
+      // 排队内容整体在前，编辑器已有内容在后（对齐 TUI）。
+      fragment.appendChild(document.createTextNode("\n\n"));
     }
+    editor.insertBefore(fragment, editor.firstChild);
     syncComposerState();
     const selection = window.getSelection();
     if (selection) {
@@ -1342,6 +1349,48 @@ export function App() {
       selection.addRange(range);
     }
     editor.focus({ preventScroll: true });
+  }
+
+  /** 把一条本地排队消息写回编辑器：文本进文本节点，附件/技能还原成真的徽标。 */
+  function appendQueuedComposerEntry(container: Node, entry: QueuedComposerEntry) {
+    const parts = entry.parts?.length
+      ? entry.parts
+      : [{ kind: "text" as const, text: entry.text }];
+    for (const part of parts) {
+      if (part.kind === "text") {
+        if (part.text) {
+          container.appendChild(document.createTextNode(part.text));
+        }
+        continue;
+      }
+      if (part.kind === "attachment") {
+        const attachment = entry.attachments?.find((candidate) => candidate.id === part.attachmentId);
+        if (!attachment || composerAttachmentMapRef.current.size >= maxAttachmentCount) {
+          continue;
+        }
+        const composerAttachment: ComposerAttachment = { ...attachment };
+        composerAttachmentMapRef.current.set(composerAttachment.id, composerAttachment);
+        if (composerAttachment.previewUrl) {
+          attachmentPreviewUrlsRef.current.set(composerAttachment.id, composerAttachment.previewUrl);
+        }
+        container.appendChild(createAttachmentBadgeNode(composerAttachment));
+        continue;
+      }
+      if (part.capability.kind !== "skill") {
+        // 编辑器目前只还原技能徽标（与 readComposerParts 的口径一致）。
+        continue;
+      }
+      const capability: ComposerCapability = {
+        id: part.capability.id,
+        kind: "skill",
+        name: part.capability.name,
+        description: part.capability.description,
+        active: true,
+        instanceId: createCapabilityInstanceId(),
+      };
+      composerCapabilityMapRef.current.set(capabilityBadgeKey(capability), capability);
+      container.appendChild(createCapabilityBadgeNode(capability));
+    }
   }
 
   async function handleStopTurn() {
