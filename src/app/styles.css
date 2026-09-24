@@ -41,17 +41,17 @@ button {
   flex: 0 0 var(--titlebar-height);
   height: var(--titlebar-height);
   padding: 0 10px;
-  border-bottom: 1px solid #dedfe0;
-  color: #3f4543;
-  background: #f0f1f2;
+  border-bottom: 1px solid var(--border);
+  color: var(--foreground);
+  background: var(--muted);
   user-select: none;
   -webkit-app-region: drag;
 }
 
 .titlebar-icon-button:hover,
 .titlebar-icon-button.is-active {
-  color: #1c6850;
-  background: #e0f1e9;
+  color: var(--app-accent-ink);
+  background: var(--app-accent-tint);
 }
 
 .sidebar-section-heading svg.is-collapsed {
@@ -60,22 +60,22 @@ button {
 
 .sidebar-nav-button:hover,
 .sidebar-nav-button.is-active {
-  border-color: #dedede;
-  background: #e8e8e8;
+  border-color: var(--border);
+  background: var(--app-surface-tile-hover);
 }
 
 .project-row.is-active {
-  border-color: #d8d0c3;
-  background: #efede6;
+  border-color: var(--app-border);
+  background: var(--app-surface-tile);
 }
 
 .session-row.is-active {
-  color: #18231f;
-  background: #e3e5e4;
+  color: var(--app-ink);
+  background: var(--app-surface-tile-hover);
 }
 
 .session-row.is-streaming {
-  color: #1f5a4b;
+  color: var(--app-accent-hover);
 }
 
 @keyframes session-pulse {
@@ -92,29 +92,29 @@ button {
 }
 
 .extension-web-notice.is-error {
-  border-color: #f0c8c4;
-  color: #8a3832;
-  background: #fff3f1;
+  border-color: var(--app-danger-border);
+  color: var(--app-danger-ink);
+  background: var(--app-danger-wash);
 }
 
 .extension-web-status.is-error {
-  color: #8c3d36;
-  background: #ffe8e5;
+  color: var(--app-danger-ink);
+  background: var(--app-danger-wash);
 }
 
 .extension-notification.is-error {
-  border-color: #e2b8b1;
-  border-left-color: #b94a3f;
-  color: #963b31;
+  border-color: var(--app-danger-border);
+  border-left-color: var(--app-danger-strong);
+  color: var(--app-danger-ink);
 }
 
 .settings-tab.is-active {
-  color: #15221d;
-  background: #e8e4dd;
+  color: var(--app-ink);
+  background: var(--app-surface-tile-hover);
 }
 
 .settings-tab.is-active svg {
-  color: #1f7a5b;
+  color: var(--app-accent);
 }
 
 .settings-close {
@@ -125,38 +125,38 @@ button {
   min-width: 40px;
   height: 40px;
   border: 0;
-  border-radius: 8px;
-  color: #656d68;
+  border-radius: var(--app-radius-control);
+  color: var(--app-ink-muted);
   background: transparent;
   cursor: pointer;
 }
 
 .settings-close:hover {
-  color: #1c2723;
-  background: #f0efeb;
+  color: var(--app-ink);
+  background: var(--app-surface-tile);
 }
 
 .capability-page-tab.is-active {
-  color: #ffffff;
-  background: #3d3d3d;
+  color: var(--app-chip-ink);
+  background: var(--app-chip-bg);
 }
 
 .mcp-adapter-state.is-unavailable,
 .mcp-adapter-state.is-error {
-  color: #8b3d35;
+  color: var(--app-danger-ink);
 }
 
 .capability-category-strip button:hover,
 .capability-category-strip button.is-active {
-  color: #111;
-  background: #e8e8e8;
+  color: var(--app-ink-strong);
+  background: var(--app-surface-tile-hover);
 }
 
 .capability-card strong,
 .capability-picker-row strong {
   display: block;
   min-width: 0;
-  color: #111111;
+  color: var(--app-ink-strong);
   font-size: 1.02rem;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -170,17 +170,17 @@ button {
   width: 40px;
   min-width: 40px;
   height: 40px;
-  border-radius: 50%;
-  color: #ffffff;
-  background: #cef9de;
-  color: #079445;
+  border-radius: var(--app-radius-round);
+  color: var(--app-chip-ink);
+  background: var(--app-success-wash);
+  color: var(--app-success);
   font-size: 0.95rem;
   font-weight: 900;
 }
 
 .capability-dot.mcp {
-  color: #6f3ef7;
-  background: #e6d7ff;
+  color: var(--app-info);
+  background: var(--app-info-wash);
 }
 
 /* The slash menu renders narrower rows than the old dialog: keep its dot small. */
@@ -192,8 +192,8 @@ button {
 
 .skill-import-scope button:hover,
 .skill-import-scope button.is-active {
-  border-color: #248261;
-  background: #edf7f2;
+  border-color: var(--app-accent);
+  background: var(--app-accent-tint);
 }
 
 .capability-form input,
@@ -202,10 +202,10 @@ button {
 .capability-picker input {
   width: 100%;
   min-width: 0;
-  border: 1px solid #d8d8d8;
-  border-radius: 8px;
-  color: #17231e;
-  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--app-radius-control);
+  color: var(--app-ink);
+  background: var(--card);
 }
 
 .capability-form input,
@@ -235,19 +235,19 @@ button {
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border: 1px solid #e5d8b8;
-  border-radius: 8px;
-  background: #fdf8ec;
-  box-shadow: 0 8px 22px rgba(18, 22, 20, 0.08);
-  color: #6b5320;
+  border: 1px solid var(--app-warning-border);
+  border-radius: var(--app-radius-control);
+  background: var(--app-warning-wash);
+  box-shadow: var(--app-shadow-sm);
+  color: var(--app-warning-ink);
   font-size: 0.82rem;
   line-height: 1.4;
 }
 
 .composer > .compaction-notice[data-tone="failed"] {
-  border-color: #e6c3bd;
-  background: #fdf1ef;
-  color: #8c2f22;
+  border-color: var(--app-danger-border);
+  background: var(--app-danger-wash);
+  color: var(--app-danger-ink);
 }
 
 .composer > .compaction-notice .compaction-notice-text {
@@ -286,10 +286,10 @@ button {
   z-index: 35;
   max-height: min(420px, 55svh);
   overflow: hidden;
-  border: 1px solid #d8d0c3;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 18px 48px rgba(18, 22, 20, 0.2);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-control);
+  background: var(--card);
+  box-shadow: var(--app-shadow-dialog);
 }
 
 /* Slash autocomplete popup: sections scroll together, rows keep to one line. */
@@ -315,7 +315,7 @@ button {
 
 .slash-menu-section-label {
   padding: 8px 9px 2px;
-  color: #8a938e;
+  color: var(--app-ink-faint);
   font-size: 0.78rem;
   font-weight: 600;
 }
@@ -332,7 +332,7 @@ button {
 .capability-picker.slash-menu .slash-menu-row-text strong {
   display: inline;
   flex: none;
-  color: #111111;
+  color: var(--app-ink-strong);
   font-size: 0.95rem;
   line-height: 1.35;
 }
@@ -341,7 +341,7 @@ button {
   display: inline;
   flex: 1 1 auto;
   min-width: 0;
-  color: #68756f;
+  color: var(--app-ink-muted);
   font-size: 0.85rem;
   overflow: hidden;
   white-space: nowrap;
@@ -352,7 +352,7 @@ button {
   display: inline;
   flex: none;
   max-width: 30%;
-  color: #9aa39d;
+  color: var(--app-ink-faint);
   font-size: 0.75rem;
   overflow: hidden;
   white-space: nowrap;
@@ -360,15 +360,15 @@ button {
 }
 
 .capability-dot.skill {
-  color: #079445;
-  background: #cef9de;
+  color: var(--app-success);
+  background: var(--app-success-wash);
   font-size: 0.95rem;
   font-weight: 900;
 }
 
 .capability-dot.command {
-  color: #6f3ef7;
-  background: #e6d7ff;
+  color: var(--app-info);
+  background: var(--app-info-wash);
   font-size: 1.05rem;
   font-weight: 800;
 }
@@ -378,7 +378,7 @@ button {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   padding: 10px;
-  border-bottom: 1px solid #eee8dd;
+  border-bottom: 1px solid var(--app-border-subtle);
 }
 
 .capability-picker-list {
@@ -397,7 +397,7 @@ button {
   min-width: 0;
   padding: 9px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--app-radius-control);
   background: transparent;
   text-align: left;
   cursor: pointer;
@@ -405,17 +405,17 @@ button {
 
 .capability-picker-row:hover,
 .capability-picker-row:focus-visible {
-  background: #f2f6f3;
+  background: var(--app-accent-wash);
   outline: none;
 }
 
 .capability-picker-row.is-active {
-  background: #e8e8e8;
+  background: var(--app-surface-tile-hover);
 }
 
 .capability-picker-row small {
   display: block;
-  color: #68756f;
+  color: var(--app-ink-muted);
 }
 
 p {
@@ -430,43 +430,43 @@ p {
   width: 40px;
   min-width: 40px;
   height: 40px;
-  border: 1px solid #d8d0c3;
-  border-radius: 8px;
-  color: #26312d;
-  background: #ffffff;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-control);
+  color: var(--app-ink-medium);
+  background: var(--card);
   cursor: pointer;
 }
 
 .icon-button.is-active {
-  border-color: #1f7a5b;
-  color: #1f7a5b;
-  background: #e7f4ee;
+  border-color: var(--app-accent);
+  color: var(--app-accent);
+  background: var(--app-accent-tint);
 }
 
 .icon-button:disabled,
 .send-button:disabled,
 .primary-action:disabled {
-  color: #929a96;
-  background: #efede7;
+  color: var(--app-ink-disabled);
+  background: var(--app-surface-tile);
   cursor: not-allowed;
 }
 
 .send-button,
 .primary-action {
-  border-color: #1f7a5b;
-  color: #ffffff;
-  background: #1f7a5b;
+  border-color: var(--app-accent);
+  color: var(--app-chip-ink);
+  background: var(--app-accent);
 }
 
 .stop-button {
-  border-color: #bf3f3f;
-  color: #ffffff;
-  background: #bf3f3f;
+  border-color: var(--app-danger);
+  color: var(--app-chip-ink);
+  background: var(--app-danger);
 }
 
 .stop-button:hover {
-  border-color: #9e3030;
-  background: #9e3030;
+  border-color: var(--app-danger-hover);
+  background: var(--app-danger-hover);
 }
 
 /* assistant-ui thread surface */
@@ -478,7 +478,7 @@ p {
   flex: 1 1 auto;
   flex-direction: column;
   overflow: hidden;
-  background: #fbfaf7;
+  background: var(--app-content-surface);
 }
 
 .aui-thread-viewport {
@@ -518,12 +518,12 @@ p {
   left: 50%;
   bottom: 18px;
   z-index: 2;
-  border: 1px solid #d8d0c3;
-  border-radius: 999px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-pill);
   padding: 8px;
-  color: #405149;
-  background: #ffffff;
-  box-shadow: 0 5px 18px rgba(18, 22, 20, 0.12);
+  color: var(--app-ink-soft);
+  background: var(--card);
+  box-shadow: var(--app-shadow-md);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -537,12 +537,12 @@ p {
   transform: translate(-50%, 10px);
   pointer-events: none;
 }
-.aui-scroll-to-bottom:hover { background: #edf3ef; }
+.aui-scroll-to-bottom:hover { background: var(--app-accent-wash); }
 
 .markdown {
   display: grid;
   gap: 10px;
-  color: #17231e;
+  color: var(--app-ink);
 }
 
 .markdown > :first-child {
@@ -633,19 +633,19 @@ p {
 .markdown th,
 .markdown td {
   padding: 7px 10px;
-  border: 1px solid #d8d0c3;
+  border: 1px solid var(--app-border);
   vertical-align: top;
   white-space: normal;
 }
 
 .markdown th {
-  color: #17231e;
-  background: #f1ece2;
+  color: var(--app-ink);
+  background: var(--app-surface-tile);
   font-weight: 700;
 }
 
 .markdown tr:nth-child(even) td {
-  background: #faf8f3;
+  background: var(--app-surface-inset);
 }
 
 .markdown input[type="checkbox"] {
@@ -656,27 +656,27 @@ p {
   width: 100%;
   height: 1px;
   border: 0;
-  background: #ded7ca;
+  background: var(--app-rule);
 }
 
 .markdown blockquote {
   padding-left: 12px;
-  border-left: 3px solid #d8d0c3;
-  color: #51605a;
+  border-left: 3px solid var(--app-border);
+  color: var(--app-ink-soft);
 }
 
 .markdown pre {
   overflow-x: auto;
   padding: 10px 12px;
-  border: 1px solid #dfd7ca;
-  border-radius: 8px;
-  background: #f8f6f1;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-code);
+  background: var(--app-surface-inset);
 }
 
 .markdown code {
   padding: 0.1em 0.35em;
-  border-radius: 6px;
-  background: #efe9de;
+  border-radius: var(--app-radius-chip);
+  background: var(--app-surface-tile);
   font-size: 0.92em;
 }
 
@@ -689,7 +689,7 @@ p {
 }
 
 .markdown a {
-  color: #176a50;
+  color: var(--app-accent-strong);
   text-decoration: underline;
 }
 
@@ -703,10 +703,10 @@ p {
   max-width: min(220px, 100%);
   height: 22px;
   padding: 1px 4px 1px 3px;
-  border: 1px solid #d8d3ca;
-  border-radius: 6px;
-  color: #26312d;
-  background: #f5f3ee;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-chip);
+  color: var(--app-ink-medium);
+  background: var(--app-surface-tile);
   vertical-align: middle;
 }
 
@@ -717,8 +717,8 @@ p {
 
 .attachment-badge.is-openable:hover,
 .attachment-badge.is-openable:focus-visible {
-  border-color: #8da79b;
-  background: #edf3ef;
+  border-color: var(--app-accent);
+  background: var(--app-accent-wash);
   outline: none;
 }
 
@@ -727,20 +727,20 @@ p {
   width: 16px;
   min-width: 16px;
   height: 16px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-tiny);
 }
 
 .attachment-badge img {
   object-fit: cover;
-  background: #e8e5de;
+  background: var(--app-surface-inset);
 }
 
 .attachment-badge-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #4f665d;
-  background: #e4ebe7;
+  color: var(--app-ink-soft);
+  background: var(--app-accent-wash);
 }
 
 .attachment-badge-copy {
@@ -754,7 +754,7 @@ p {
 .attachment-badge-copy strong {
   min-width: 0;
   overflow: hidden;
-  color: #25302c;
+  color: var(--app-ink-medium);
   font-size: 0.72rem;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -764,7 +764,7 @@ p {
 .attachment-badge-copy small {
   flex: none;
   margin-top: 0;
-  color: #7a827e;
+  color: var(--app-ink-muted);
   font-size: 0.6rem;
 }
 
@@ -777,17 +777,17 @@ p {
   height: 16px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--app-radius-tiny);
   font-size: 12px;
   line-height: 1;
-  color: #707975;
+  color: var(--app-ink-muted);
   background: transparent;
   cursor: pointer;
 }
 
 .attachment-badge button:hover {
-  color: #27312d;
-  background: #e1ded7;
+  color: var(--app-ink-medium);
+  background: var(--app-surface-tile-hover);
 }
 
 .aui-user-message-content .inline-message-text {
@@ -825,10 +825,10 @@ p {
   gap: 10px;
   min-height: 74px;
   padding: 10px;
-  border: 1px solid #d5cec2;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 14px 34px rgba(40, 50, 45, 0.18);
+  border: 1px solid var(--border);
+  border-radius: var(--app-radius-control);
+  background: var(--card);
+  box-shadow: var(--app-shadow-menu);
   pointer-events: none;
 }
 
@@ -846,8 +846,8 @@ p {
   width: 100%;
   max-height: 220px;
   object-fit: contain;
-  border-radius: 5px;
-  background: #f0eee9;
+  border-radius: var(--app-radius-nested);
+  background: var(--app-surface-inset);
 }
 
 .attachment-hover-file-icon {
@@ -856,9 +856,9 @@ p {
   justify-content: center;
   width: 34px;
   height: 34px;
-  border-radius: 6px;
-  color: #4f665d;
-  background: #e4ebe7;
+  border-radius: var(--app-radius-chip);
+  color: var(--app-ink-soft);
+  background: var(--app-accent-wash);
 }
 
 .attachment-hover-copy {
@@ -876,19 +876,19 @@ p {
 }
 
 .attachment-hover-copy strong {
-  color: #25302c;
+  color: var(--app-ink-medium);
   font-size: 0.8rem;
 }
 
 .attachment-hover-copy span {
-  color: #4e5e56;
+  color: var(--app-ink-soft);
   font-size: 0.72rem;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 
 .attachment-hover-copy small {
-  color: #7a827e;
+  color: var(--app-ink-muted);
   font-size: 0.66rem;
 }
 
@@ -901,7 +901,7 @@ p {
 .composer {
   flex: 0 0 auto;
   padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
-  background: #fbfaf7;
+  background: var(--app-content-surface);
 }
 
 .composer-file-input {
@@ -920,23 +920,23 @@ p {
   width: 100%;
   min-width: 0;
   padding: 8px;
-  border: 1px solid #d8d0c3;
-  border-radius: 8px;
-  background: #ffffff;
+  border: 1px solid var(--app-composer-border, var(--app-border));
+  border-radius: var(--app-radius-composer);
+  background: var(--card);
   transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
 
 /* 程序化 focus（新建/切换会话）时 surface 上会带 data-focus-quiet，压住绿框；
    用户点/敲一下（见 clearComposerFocusQuiet）属性就被摘掉，绿框恢复。 */
 .composer-surface:focus-within:not([data-focus-quiet="true"]) {
-  border-color: #1f7a5b;
-  box-shadow: 0 0 0 3px rgba(31, 122, 91, 0.14);
+  border-color: var(--app-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--app-accent) 14%, transparent);
 }
 
 .composer-surface.is-dragging {
-  border-color: #1f7a5b;
-  background: #edf8f2;
-  box-shadow: inset 0 0 0 1px #1f7a5b, 0 0 0 3px rgba(31, 122, 91, 0.12);
+  border-color: var(--app-accent);
+  background: var(--app-accent-tint);
+  box-shadow: inset 0 0 0 1px var(--app-accent), 0 0 0 3px color-mix(in oklab, var(--app-accent) 12%, transparent);
 }
 
 .composer-editor {
@@ -945,7 +945,7 @@ p {
   max-height: 160px;
   overflow-y: auto;
   padding: 3px 4px;
-  color: #17231e;
+  color: var(--app-ink);
   line-height: 1.5;
   outline: none;
   white-space: pre-wrap;
@@ -955,7 +955,7 @@ p {
 
 .composer-editor:empty::before {
   content: attr(data-placeholder);
-  color: #87908b;
+  color: var(--app-ink-faint);
   pointer-events: none;
 }
 
@@ -970,27 +970,27 @@ p {
   height: 22px;
   max-width: min(200px, 100%);
   padding: 1px 5px 1px 3px;
-  border-color: #dedede;
-  border-radius: 999px;
-  background: #efefef;
+  border-color: var(--border);
+  border-radius: var(--app-radius-pill);
+  background: var(--muted);
 }
 
 .capability-badge .attachment-badge-icon {
   width: 16px;
   min-width: 16px;
   height: 16px;
-  border-radius: 5px;
-  color: #ffffff;
+  border-radius: var(--app-radius-nested);
+  color: var(--app-chip-ink);
   font-size: 0.56rem;
   font-weight: 700;
 }
 
 .capability-badge.skill .attachment-badge-icon {
-  background: #1f7a5b;
+  background: var(--app-accent);
 }
 
 .capability-badge.mcp .attachment-badge-icon {
-  background: #5f5aa2;
+  background: var(--app-info-deep);
 }
 
 .capability-badge .attachment-badge-copy {
@@ -1011,7 +1011,7 @@ p {
   width: 15px;
   min-width: 15px;
   height: 15px;
-  border-radius: 50%;
+  border-radius: var(--app-radius-round);
 }
 
 /* 聊天用户消息里的技能徽标比编辑器里再小一档，和 14px 正文处在同一视觉层。 */
@@ -1019,7 +1019,7 @@ p {
   width: 14px;
   min-width: 14px;
   height: 14px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-tiny);
 }
 
 .aui-user-message-content .capability-badge .attachment-badge-copy strong {
@@ -1052,19 +1052,19 @@ p {
   height: 32px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
-  color: #5a6560;
+  border-radius: var(--app-radius-tool);
+  color: var(--app-ink-soft);
   background: transparent;
   cursor: pointer;
 }
 
 .composer-tool-button:hover {
-  color: #1f5f49;
-  background: #edf2ef;
+  color: var(--app-accent-hover);
+  background: var(--app-accent-wash);
 }
 
 .composer-tool-button:disabled {
-  color: #a2a8a5;
+  color: var(--app-ink-disabled);
   cursor: not-allowed;
 }
 
@@ -1100,8 +1100,8 @@ p {
 }
 
 .composer-tool-overflow[data-state="open"] {
-  color: #1f5f49;
-  background: #edf2ef;
+  color: var(--app-accent-hover);
+  background: var(--app-accent-wash);
 }
 
 .usage-popover-anchor {
@@ -1119,19 +1119,19 @@ p {
   height: 34px;
   padding: 0;
   border: 0;
-  border-radius: 50%;
-  color: #1f7a5b;
+  border-radius: var(--app-radius-round);
+  color: var(--app-accent);
   background: transparent;
   cursor: pointer;
 }
 
 .usage-trigger:hover,
 .usage-trigger.is-open {
-  background: #edf7f1;
+  background: var(--app-accent-tint);
 }
 
 .usage-trigger:focus-visible {
-  outline: 2px solid #1f7a5b;
+  outline: 2px solid var(--app-accent);
   outline-offset: 2px;
 }
 
@@ -1142,21 +1142,21 @@ p {
   justify-content: center;
   width: 27px;
   height: 27px;
-  border-radius: 50%;
-  background: conic-gradient(#1f7a5b var(--usage-percent), #dfe5e1 0);
+  border-radius: var(--app-radius-round);
+  background: conic-gradient(var(--app-accent) var(--usage-percent), var(--app-accent-track) 0);
 }
 
 .usage-ring::before {
   position: absolute;
   inset: 3px;
-  border-radius: 50%;
-  background: #ffffff;
+  border-radius: var(--app-radius-round);
+  background: var(--card);
   content: "";
 }
 
 .usage-ring span {
   position: relative;
-  color: #1c5f48;
+  color: var(--app-accent-ink);
   font-size: 0.52rem;
   font-weight: 800;
   line-height: 1;
@@ -1164,14 +1164,14 @@ p {
 
 .thinking-level-trigger:focus-visible,
 .thinking-level-control.is-open .thinking-level-trigger {
-  border-color: #1f7a5b;
-  box-shadow: 0 0 0 3px rgba(31, 122, 91, 0.12);
+  border-color: var(--app-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--app-accent) 12%, transparent);
 }
 
 .composer-error {
   min-width: 0;
   overflow: hidden;
-  color: #9a3c33;
+  color: var(--app-danger-ink);
   font-size: 0.74rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1180,17 +1180,17 @@ p {
 .panel {
   padding: 0 0 18px;
   margin-bottom: 18px;
-  border-bottom: 1px solid #e5dfd3;
+  border-bottom: 1px solid var(--border);
 }
 
 .context-meter span,
 .empty-text {
-  color: #69756f;
+  color: var(--app-ink-muted);
   font-size: 0.86rem;
 }
 
 .skill-modal-body .markdown {
-  color: #202724;
+  color: var(--app-ink);
 }
 
 /* Keep chrome boundaries quiet and make the content plane lighter than the
@@ -1198,17 +1198,50 @@ p {
 .app-titlebar {
   box-sizing: border-box;
   border-bottom: 1px solid var(--app-header-border);
-  background: var(--app-sidebar-surface);
+  background: var(--app-titlebar-surface, var(--app-sidebar-surface));
 }
 
-.app-main,
+/* `.app-main` is only a fallback plate for the columns that do not paint their
+   own surface. A glass theme sets `--app-main-surface: transparent` so the
+   sidebar column can let the window material through; the chat and context
+   columns still paint `--app-content-surface` themselves. */
+.app-main {
+  background: var(--app-main-surface, var(--app-content-surface));
+}
+
 .conversation-surface,
 .context-panel-surface {
   background: var(--app-content-surface);
 }
 
+/*
+ * 侧栏材质（参考 PI-Desktop chrome.css:427-445）。
+ *
+ * macOS 上真正的模糊来自 Electron 的原生 material（`vibrancy: "sidebar"`,
+ * 见 src-electron/main.js），渲染层只叠一层薄 tint + 上下两道 sheen；透明度
+ * 太重会变成一块"油漆板"、把材质盖掉。非 macOS 没有原生材质，用
+ * `--app-sidebar-blur` 的 backdrop-filter 兜底。
+ *
+ * `--app-sidebar-image`（参考 --ds-bg-sidebar-image）是留给渐变/图片的独立一层，
+ * 不参与 tint 混色。
+ */
 .project-sidebar-surface {
-  background: var(--app-sidebar-surface);
+  background-color: var(--app-sidebar-glass-tint, var(--app-sidebar-surface));
+  background-image: var(--app-sidebar-image, none), var(--app-sidebar-sheen-top, none),
+    var(--app-sidebar-sheen-bottom, none);
+  background-repeat: no-repeat;
+  backdrop-filter: var(--app-sidebar-blur, none);
+}
+
+/*
+ * 窗口外壳（App 根圆）。默认主题是不透明的 `--muted` + 一层外阴影；玻璃主题把它
+ * 整个让开（`--app-shell-surface: transparent`），好让侧栏那列透出窗口 material，
+ * 同时把圆角/描边/阴影交给原生窗口。
+ */
+.app-shell-surface {
+  background: var(--app-shell-surface);
+  border-color: var(--app-shell-border);
+  box-shadow: var(--app-shadow-window);
 }
 
 /* 侧栏滚动区：隐藏原生滚动条，自绘一个只在滚动/拖动时出现的 overlay 滑块
@@ -1245,7 +1278,7 @@ p {
   top: 0;
   right: 3px;
   width: 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-tiny);
   background: color-mix(in oklab, var(--foreground) 30%, transparent);
   opacity: 0;
   pointer-events: none;
@@ -1286,7 +1319,7 @@ p {
 /* 设置 → 模型：自定义模型卡片。颜色只用主题变量，深浅两套都要能读。 */
 .settings-card {
   border: 1px solid var(--app-header-border);
-  border-radius: 12px;
+  border-radius: var(--app-radius-panel);
   background: var(--app-content-surface);
 }
 
@@ -1336,7 +1369,7 @@ p {
   align-items: center;
   gap: 10px;
   padding: 10px 8px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-control);
   color: var(--foreground);
 }
 
@@ -1372,7 +1405,7 @@ p {
   gap: 10px;
   min-width: 0;
   padding: 10px 8px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-control);
 }
 
 /* 整条 provider 栏都是折叠开关，悬停高亮与模型行同款（不然点上去看不出能点）。 */
@@ -1411,7 +1444,7 @@ p {
 .settings-group-toggle:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-tiny);
 }
 
 .settings-group-name {
@@ -1481,7 +1514,7 @@ p {
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--app-radius-panel-sm);
   list-style: none;
   margin: 0;
 }
@@ -1496,7 +1529,7 @@ p {
   gap: 10px;
   min-width: 0;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-control);
   cursor: pointer;
 }
 
@@ -1526,7 +1559,7 @@ p {
   justify-content: center;
   width: 20px;
   height: 20px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-chip);
   color: var(--muted-foreground);
   cursor: pointer;
 }
@@ -1548,7 +1581,7 @@ p {
   min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--app-radius-panel-sm);
   background: color-mix(in srgb, var(--muted) 35%, transparent);
 }
 
@@ -1585,7 +1618,7 @@ p {
   width: 100%;
   padding: 7px 10px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--app-radius-panel-sm);
   background: transparent;
   color: var(--foreground);
   text-align: left;
@@ -1631,10 +1664,10 @@ p {
   max-height: min(320px, 60vh);
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--app-radius-panel-sm);
   background: var(--popover);
   color: var(--popover-foreground);
-  box-shadow: 0 14px 34px rgba(18, 22, 20, 0.18);
+  box-shadow: var(--app-shadow-lg);
 }
 
 .provider-picker-body {
@@ -1671,7 +1704,7 @@ p {
   gap: 2px;
   padding: 7px 9px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--app-radius-control);
   background: transparent;
   color: var(--foreground);
   text-align: left;
@@ -1744,7 +1777,7 @@ p {
   flex: none;
   padding: 2px 8px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   color: var(--muted-foreground);
   font-size: 0.7rem;
   white-space: nowrap;
@@ -1755,7 +1788,7 @@ p {
   align-items: flex-start;
   gap: 8px;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-control);
   color: var(--destructive);
   background: var(--accent);
   font-size: 0.78rem;
@@ -1798,7 +1831,7 @@ p {
   left: 50%;
   width: 1px;
   height: 34px;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   background: color-mix(in oklab, var(--border) 72%, transparent);
   content: "";
   opacity: 0;
@@ -1881,6 +1914,16 @@ p {
   background: var(--card);
 }
 
+/*
+ * 上下文占用圆盘里那行百分比：浅色下是深绿落在白盘上，没问题；深色下盘底变成
+ * `--card`（#171717），同一个深绿只剩 ≈2.3:1，数字基本读不出来。
+ * 这是改造前就有的存量问题（`--app-accent-ink` 在深色下没有对应的覆盖），
+ * 顺手用前景色修正：白字黑盘，两套主题都成立。
+ */
+.dark .usage-ring span {
+  color: var(--foreground);
+}
+
 /* Normalize the legacy surface rules to the neutral palette in both themes. */
 .titlebar {
   border-bottom-color: var(--border);
@@ -1898,7 +1941,11 @@ p {
   border-color: var(--border);
 }
 
-.composer-surface,
+.composer-surface {
+  border-color: var(--app-composer-border, var(--border));
+  background: var(--card);
+}
+
 .capability-picker,
 .attachment-hover-card {
   border-color: var(--border);

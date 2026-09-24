@@ -111,7 +111,7 @@ import { cn } from "@/lib/utils";
 import { canOpenTarget, openTarget } from "../lib/open-target";
 import { createId } from "../lib/id";
 import { perfCount } from "../lib/perf";
-import { loadUiPreferences, saveUiPreferences } from "../lib/ui-preferences";
+import { loadUiPreferences, saveUiPreferences, type UiAppearance } from "../lib/ui-preferences";
 import { findProjectByCwd } from "../shared/projectPaths";
 import { collectDroppedItems, pickDroppedProjectFolder, supportsDroppedFolderPaths } from "../shared/droppedProjectFolder";
 import { compactActionState, compactionNotice } from "../shared/compactionNotice";
@@ -247,6 +247,14 @@ const personalizationExtensionUiOptions = [
   { value: "tui", labelKey: "settings.extensionUi.tui.label", descKey: "settings.extensionUi.tui.desc" },
   { value: "webui", labelKey: "settings.extensionUi.webui.label", descKey: "settings.extensionUi.webui.desc" },
 ] as const;
+/**
+ * 界面配色主题。与浅色/深色正交：每个主题都有两套完整 token（见 tailwind.css），
+ * 标题栏的太阳/月亮按钮仍然管明暗。
+ */
+const appearanceOptions = [
+  { value: "default", labelKey: "settings.appearance.default.label", descKey: "settings.appearance.default.desc" },
+  { value: "codex", labelKey: "settings.appearance.codex.label", descKey: "settings.appearance.codex.desc" },
+] as const satisfies readonly { value: UiAppearance; labelKey: string; descKey: string }[];
 
 interface ComposerAttachment extends ChatAttachment {
   /** Absent for badges pasted from a sent message; the server reuses `sourcePath`. */
@@ -375,6 +383,8 @@ export function App() {
   const [showLeftPanel, setShowLeftPanel] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">(() => loadUiPreferences().theme);
+  // 配色主题（默认 / Codex）：与浅色/深色正交，决定的是同一明暗下用哪套 token。
+  const [appearance, setAppearance] = useState<UiAppearance>(() => loadUiPreferences().appearance);
   const [activeMainView, setActiveMainView] = useState<"chat" | "capabilities">("chat");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   // 一次发送失败后，重新打开的编辑框要用它把用户打的字填回去。
@@ -557,14 +567,17 @@ export function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
     document.documentElement.style.colorScheme = theme;
+    // 首帧之前 index.html 的引导脚本已经贴过一次（防闪）；这里是运行期的唯一权威。
+    document.documentElement.dataset.appearance = appearance;
     saveUiPreferences({
       theme,
+      appearance,
       leftSidebarWidth,
       rightPanelWidth,
       leftSidebarCollapsed,
       rightPanelCollapsed,
     });
-  }, [leftSidebarCollapsed, leftSidebarWidth, rightPanelCollapsed, rightPanelWidth, theme]);
+  }, [appearance, leftSidebarCollapsed, leftSidebarWidth, rightPanelCollapsed, rightPanelWidth, theme]);
 
   useEffect(() => () => {
     for (const url of attachmentPreviewUrlsRef.current.values()) {
@@ -1942,7 +1955,7 @@ export function App() {
   const showContextPanel = activeMainView === "chat";
 
   return (
-    <div className="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden rounded-[var(--window-radius)] border border-border bg-muted shadow-[0_18px_56px_rgba(20,24,22,0.18)]">
+    <div className="app-shell-surface flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden rounded-[var(--window-radius)] border">
       <TitleBar
         title={stripTerminalSequences(state.extensionTitle ?? "").trim() || conversation.title}
         leftSidebarCollapsed={leftSidebarCollapsed}
@@ -2381,7 +2394,7 @@ export function App() {
 
       {showContextPanel && showPanel ? (
         <button
-          className="fixed top-[var(--titlebar-height)] right-0 bottom-0 left-0 z-10 hidden h-full w-full border-0 bg-[rgba(22,35,30,0.18)] max-[920px]:block"
+          className="fixed top-[var(--titlebar-height)] right-0 bottom-0 left-0 z-10 hidden h-full w-full border-0 bg-[var(--app-scrim)] max-[920px]:block"
           type="button"
           onClick={() => setShowPanel(false)}
           aria-label="Close settings"
@@ -2390,7 +2403,7 @@ export function App() {
 
       {showLeftPanel ? (
         <button
-          className="fixed top-[var(--titlebar-height)] right-0 bottom-0 left-0 z-10 hidden h-full w-full border-0 bg-[rgba(22,35,30,0.18)] max-[920px]:block"
+          className="fixed top-[var(--titlebar-height)] right-0 bottom-0 left-0 z-10 hidden h-full w-full border-0 bg-[var(--app-scrim)] max-[920px]:block"
           type="button"
           onClick={() => setShowLeftPanel(false)}
           aria-label={t("common.closeProjects")}
@@ -2418,7 +2431,7 @@ export function App() {
             // 是 z-[100] 的不透明条，浮层 z-20 从 y=0 起就会被整条盖住 —— 面板第一行
             // 是搜索框，用户看到的就是「搜索显示不全」。左侧项目栏同样用
             // top-[var(--titlebar-height)] + bottom-0，两边保持一致。
-            "max-[920px]:fixed max-[920px]:top-[var(--titlebar-height)] max-[920px]:bottom-0 max-[920px]:right-0 max-[920px]:left-auto max-[920px]:z-20 max-[920px]:w-[min(88vw,360px)] max-[920px]:translate-x-[105%] max-[920px]:shadow-[-24px_0_54px_rgba(20,24,22,0.16)] max-[920px]:transition-transform",
+            "max-[920px]:fixed max-[920px]:top-[var(--titlebar-height)] max-[920px]:bottom-0 max-[920px]:right-0 max-[920px]:left-auto max-[920px]:z-20 max-[920px]:w-[min(88vw,360px)] max-[920px]:translate-x-[105%] max-[920px]:shadow-[var(--app-shadow-drawer-left)] max-[920px]:transition-transform",
             showPanel && "max-[920px]:visible max-[920px]:translate-x-0 max-[920px]:pointer-events-auto",
           )}
           aria-label={t("capability.context.panelAria")}
@@ -2447,6 +2460,8 @@ export function App() {
           onModelsChanged={() => void refreshAvailableModels()}
           personalization={bootstrap.personalization}
           onSavePersonalization={savePersonalization}
+          appearance={appearance}
+          onAppearanceChange={setAppearance}
           archivedSessions={bootstrap.archivedSessions ?? []}
           onUnarchiveSession={unarchiveSession}
           onDeleteArchivedSession={deleteArchivedSession}
@@ -2833,6 +2848,8 @@ function SettingsModal({
   onModelsChanged,
   personalization,
   onSavePersonalization,
+  appearance,
+  onAppearanceChange,
   archivedSessions,
   onUnarchiveSession,
   onDeleteArchivedSession,
@@ -2845,6 +2862,9 @@ function SettingsModal({
   onModelsChanged: () => void;
   personalization: PersonalizationSettings;
   onSavePersonalization: (settings: PersonalizationSettings) => Promise<void>;
+  /** 配色主题；和明暗一样属于 UI 偏好，改完立即生效，不走下面的保存按钮。 */
+  appearance: UiAppearance;
+  onAppearanceChange: (appearance: UiAppearance) => void;
   /** 归档会话（跨项目），归「归档聊天」页唯一使用。 */
   archivedSessions: ArchivedSessionSummary[];
   onUnarchiveSession: (projectId: string, sessionPath: string) => Promise<void>;
@@ -2953,6 +2973,43 @@ function SettingsModal({
               </TabsContent>
 
               <TabsContent value="personalization" className="grid max-w-2xl gap-6">
+                {/*
+                  主题选择放在最前面，且**立即生效**（不走下面的保存按钮）：
+                  主题是 UI 偏好（localStorage），不是 pi 的个性化设置（服务端），
+                  而且切换必须能当场看到效果，否则「选一下再保存」体验很怪。
+                */}
+                <div className="grid gap-2">
+                  <Label>{t("settings.appearance.label")}</Label>
+                  <p className="text-sm text-muted-foreground">
+                    {t("settings.appearance.desc")}
+                  </p>
+                  <div
+                    className="grid grid-cols-2 gap-2.5"
+                    role="radiogroup"
+                    aria-label={t("settings.appearance.label")}
+                  >
+                    {appearanceOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={appearance === option.value}
+                        data-appearance-option={option.value}
+                        className={cn(
+                          "grid min-w-0 gap-1.5 rounded-md border p-3.5 text-left hover:bg-accent",
+                          appearance === option.value && "border-primary bg-accent",
+                        )}
+                        onClick={() => onAppearanceChange(option.value)}
+                      >
+                        <strong className="text-sm">{t(option.labelKey)}</strong>
+                        <span className="text-xs leading-relaxed text-muted-foreground">
+                          {t(option.descKey)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="grid gap-2">
                   <Label htmlFor="settings-style">{t("settings.style.label")}</Label>
                   <p className="text-sm text-muted-foreground">
@@ -5562,7 +5619,7 @@ function ProjectSidebar({
         // Collapsed visibility is owned by this component rather than by a
         // descendant rule on the shell, so it no longer depends on the shell.
         collapsed && "invisible pointer-events-none",
-        "max-[920px]:fixed max-[920px]:top-[var(--titlebar-height)] max-[920px]:bottom-0 max-[920px]:left-0 max-[920px]:z-20 max-[920px]:w-[min(88vw,340px)] max-[920px]:-translate-x-[105%] max-[920px]:shadow-[24px_0_54px_rgba(20,24,22,0.16)] max-[920px]:transition-transform",
+        "max-[920px]:fixed max-[920px]:top-[var(--titlebar-height)] max-[920px]:bottom-0 max-[920px]:left-0 max-[920px]:z-20 max-[920px]:w-[min(88vw,340px)] max-[920px]:-translate-x-[105%] max-[920px]:shadow-[var(--app-shadow-drawer-right)] max-[920px]:transition-transform",
         isOpen && "max-[920px]:visible max-[920px]:translate-x-0 max-[920px]:pointer-events-auto",
       )}
       aria-label={t("sidebar.projectsAria")}
@@ -5574,7 +5631,7 @@ function ProjectSidebar({
     >
       {isProjectFolderDragOver ? (
         <div
-          className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-[#539af8] bg-background/85 px-4 text-center text-[13px] font-medium text-foreground backdrop-blur-sm"
+          className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-[color:var(--app-drop-accent)] bg-background/85 px-4 text-center text-[13px] font-medium text-foreground backdrop-blur-sm"
           aria-hidden="true"
         >
           {t("sidebar.dropFolderToCreateProject")}
@@ -5666,8 +5723,8 @@ function ProjectSidebar({
             <section key={project.id} className="relative mb-0.5" data-project-drop-section={project.id}>
               {projectDropTarget?.projectId === project.id && projectDropTarget.position === "before" ? (
                 <div className="pointer-events-none absolute -top-1 left-2 right-2 z-10 h-2" aria-hidden="true">
-                  <div className="absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-[#539af8]" />
-                  <div className="absolute left-0 top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-[#539af8] bg-background" />
+                  <div className="absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-[var(--app-drop-accent)]" />
+                  <div className="absolute left-0 top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-[color:var(--app-drop-accent)] bg-background" />
                 </div>
               ) : null}
               <div
@@ -5791,8 +5848,8 @@ function ProjectSidebar({
               ) : null}
               {projectDropTarget?.projectId === project.id && projectDropTarget.position === "after" ? (
                 <div className="pointer-events-none absolute -bottom-1 left-2 right-2 z-10 h-2" aria-hidden="true">
-                  <div className="absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-[#539af8]" />
-                  <div className="absolute left-0 top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-[#539af8] bg-background" />
+                  <div className="absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-[var(--app-drop-accent)]" />
+                  <div className="absolute left-0 top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-[color:var(--app-drop-accent)] bg-background" />
                 </div>
               ) : null}
             </section>
@@ -5805,7 +5862,7 @@ function ProjectSidebar({
         <div
           ref={hoverCardRef}
           className={cn(
-            "fixed z-[60] rounded-xl border border-border bg-popover text-popover-foreground shadow-[0_8px_26px_rgba(0,0,0,0.13),0_1px_2px_rgba(0,0,0,0.06)]",
+            "fixed z-[60] rounded-xl border border-border bg-popover text-popover-foreground shadow-[var(--app-shadow-popover)]",
             hoverCard.kind === "session" ? "pointer-events-none w-[258px] p-2.5 text-[13px]" : "w-[300px] py-1 text-[13.5px]",
           )}
           style={{ left: hoverCard.x, top: hoverCard.y }}
@@ -5895,7 +5952,7 @@ function ProjectSidebar({
 
       {projectDragPreview ? createPortal(
         <div
-          className="pointer-events-none fixed z-[100] flex max-w-[min(280px,calc(100vw-24px))] items-center gap-2 rounded-xl border border-border/70 bg-popover/80 px-3.5 py-2 text-sm font-medium text-popover-foreground opacity-90 shadow-[0_10px_28px_rgba(20,24,22,0.18)] backdrop-blur-sm"
+          className="pointer-events-none fixed z-[100] flex max-w-[min(280px,calc(100vw-24px))] items-center gap-2 rounded-xl border border-border/70 bg-popover/80 px-3.5 py-2 text-sm font-medium text-popover-foreground opacity-90 shadow-[var(--app-shadow-toast)] backdrop-blur-sm"
           style={{ left: projectDragPreview.x, top: projectDragPreview.y, transform: "translate(-50%, -50%)" }}
           aria-hidden="true"
         >

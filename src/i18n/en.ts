@@ -311,6 +311,12 @@ export const en = {
 
   "models.settings.switchHint": "Switch models from the picker next to the composer send button. Your choice is remembered and used for the next new task.",
   "settings.style.label": "Basic style and tone",
+  "settings.appearance.label": "Theme",
+  "settings.appearance.desc": "Pick the interface palette. Applied immediately; combines with the light/dark button in the title bar.",
+  "settings.appearance.default.label": "Default",
+  "settings.appearance.default.desc": "The original palette: warm off-white surfaces, warm borders, green accent.",
+  "settings.appearance.codex.label": "Codex",
+  "settings.appearance.codex.desc": "Neutral grayscale, deeper sidebar in dark mode; the accent is ink in light mode and white in dark.",
   "settings.style.desc": "Choose how it responds. This does not change its capabilities.",
   "settings.style.default.label": "Default",
   "settings.style.default.desc": "No preset style",
