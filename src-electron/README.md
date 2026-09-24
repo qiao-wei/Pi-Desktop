@@ -1,7 +1,7 @@
 # src-electron — Pi Desktop 的 Electron 外壳
 
 与 `src-tauri` 平级的第二个桌面外壳。同样是**薄壳**：只负责建窗口、拉起 sidecar、把 7 个原生能力
-桥接给渲染进程；业务逻辑仍然全在 `server/index.mjs`（bun sidecar）+ `src/`（React）。
+桥接给渲染进程；业务逻辑仍然全在 `server/index.mjs`（Node sidecar）+ `src/`（React）。
 
 ## 文件
 

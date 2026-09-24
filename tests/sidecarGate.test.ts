@@ -1,8 +1,8 @@
 /**
- * The sidecar build gate: a compiled bridge must prove that every selected capability package
- * actually reached the session before it is allowed into a package. Without it, bun's
- * build-dependent symbol renaming ships an app where `pi-memory` silently fails to load, and the
- * only symptom is a user saying "I installed it and it still doesn't work".
+ * The sidecar build gate: an assembled bridge must prove that every selected capability package
+ * actually reached the session before it is allowed into a package. Without it, a compiled build's
+ * symbol renaming ships an app where `pi-memory` silently fails to load, and the only symptom is a
+ * user saying "I installed it and it still doesn't work".
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -135,7 +135,7 @@ test("packaging runs the gate before the packager is allowed to produce an artif
     assert.ok(at("node:build") < at("sidecar:verify"), "verify needs the bundled runtimes present");
     assert.ok(at("bridge:build") < at("sidecar:verify"), "verify must run against the assembled bridge");
     assert.equal(at("sidecar:verify"), labels.length - 2, `verify 必须紧接在打包器之前：${labels.join(" → ")}`);
-    assert.ok(!labels.some((label) => label.includes("sidecar:build")), "the bun-compiled bridge must not be packaged");
+    assert.ok(!labels.some((label) => label.includes("sidecar:build")), "the compiled single-file bridge must not be packaged");
   }
 });
 

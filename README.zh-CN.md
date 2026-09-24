@@ -41,7 +41,6 @@ tests/           node:test 用例
 | 依赖 | 用途 |
 | --- | --- |
 | Node.js 22 或更高 | 开发、测试，以及所有 `slim` 打包（桥声明了 `engines.node >= 22`） |
-| `bun` | 只影响开发期启动桥的默认运行时；设 `PI_DESKTOP_SERVER_RUNTIME=node` 就改用 Node |
 | Rust stable + [Tauri v2 的系统依赖](https://tauri.app/start/prerequisites/) | 只做 Tauri 外壳才需要 |
 | Python 3.13 源 + `uv` | 只做 `bundled` 打包才需要，见[打包机需要什么](#打包机需要什么) |
 
@@ -167,7 +166,7 @@ overlay 现在只剩两个资源 null，不再抄一份步骤链）。
 
 桥是**组装**出来的、从不编译成单文件：未打包的 `server/` 与 `src/` 源码 + 一份真实的生产
 `node_modules`，由内置 Node 通过 `pi-desktop-server` launcher 执行。pi 的运行时扩展是按它
-在磁盘上解析到的包来加载的；`bun build --compile` 的产物会把这些包内联一份、并按构建改名
+在磁盘上解析到的包来加载的；编译成单个可执行文件的桥会把这些包内联一份、并按构建改名
 导出，让扩展能不能加载取决于构建运气。`sidecar:verify` 会把组装好的桥起起来，只要有一个被
 选中的能力包没加载成功就报错，因此坏掉的组装根本到不了打包器。
 
@@ -275,7 +274,6 @@ macOS 和 Linux 上会回读登录 shell 的 PATH，因为 GUI 启动的应用�
 | --- | --- |
 | `PI_DESKTOP_HOST`、`PI_DESKTOP_PORT` | 桥的监听地址 / 端口。显式指定端口就是契约，否则桥回退到空闲端口并把真实地址打出来 |
 | `PI_DESKTOP_REUSE_API=1` | 开发期：复用已经在监听的桥 |
-| `PI_DESKTOP_SERVER_RUNTIME` | 开发期：用哪个运行时启动桥（默认 `bun`） |
 | `PI_DESKTOP_DEV_URL`、`PI_DESKTOP_ELECTRON_ARGS` | `electron:dev`：要接的开发服务器地址 / 额外的 Electron 参数 |
 | `PI_CODING_AGENT_DIR` | pi 的状态目录（默认 `~/.pi/agent`） |
 | `PI_DESKTOP_LOCALE=zh\|en` | 钉住界面语言，不做系统探测 |

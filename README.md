@@ -42,7 +42,6 @@ tests/           node:test suites
 | Requirement | Needed for |
 | --- | --- |
 | Node.js 22 or newer | dev, tests, and any `slim` build (the bridge declares `engines.node >= 22`) |
-| `bun` | only the default dev bridge runtime; `PI_DESKTOP_SERVER_RUNTIME=node` uses Node instead |
 | Rust stable + the [Tauri v2 prerequisites](https://tauri.app/start/prerequisites/) | the Tauri shell only |
 | Python 3.13 source + `uv` | `bundled` packaging only - see [Build machine requirements](#build-machine-requirements) |
 
@@ -183,8 +182,8 @@ entry (see "Judging packaged behaviour" above).
 
 The bridge is assembled, never compiled into a single file: unpacked `server/` and `src/` sources plus
 a real production `node_modules`, executed by the bundled Node through the `pi-desktop-server`
-launcher. pi loads runtime extensions through the packages it resolves on disk; a `bun build
---compile` artifact inlines its own copies and renames exports per build, which makes extension
+launcher. pi loads runtime extensions through the packages it resolves on disk; a bridge compiled
+into a single executable inlines its own copies and renames exports per build, which makes extension
 loading depend on build luck. `sidecar:verify` boots the assembled bridge and fails if a selected
 capability package did not load, so a broken assembly never reaches the packager.
 
@@ -301,7 +300,6 @@ modes.
 | --- | --- |
 | `PI_DESKTOP_HOST`, `PI_DESKTOP_PORT` | bridge bind address / port. An explicit port is a contract; otherwise the bridge falls back to a free one and announces it. |
 | `PI_DESKTOP_REUSE_API=1` | dev: attach to a bridge that is already listening |
-| `PI_DESKTOP_SERVER_RUNTIME` | dev: runtime used to start the bridge (default `bun`) |
 | `PI_DESKTOP_DEV_URL`, `PI_DESKTOP_ELECTRON_ARGS` | `electron:dev`: dev server to attach to / extra Electron flags |
 | `PI_CODING_AGENT_DIR` | pi's state directory (default `~/.pi/agent`) |
 | `PI_DESKTOP_LOCALE=zh\|en` | pin the UI language instead of detecting it |

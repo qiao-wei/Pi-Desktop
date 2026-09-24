@@ -111,12 +111,15 @@ async function ensureBridge() {
 }
 
 function spawnBridge() {
-  const bridgeRuntime = process.env.PI_DESKTOP_SERVER_RUNTIME?.trim() || "bun";
+  // One runtime, no knob: the bridge runs on the same Node the packaged app's `pi-desktop-server`
+  // launcher uses. A "which runtime" switch only ever produced a second policy that could
+  // disagree with what actually ships (and, when the other runtime was not installed, a dev stack
+  // that died on ENOENT instead of starting).
   const env = {
     ...process.env,
     PI_DESKTOP_HOST: host,
     ENGBUDDY_HOST: host,
-    PI_DESKTOP_PI_CLI_RUNTIME: bridgeRuntime,
+    PI_DESKTOP_PI_CLI_RUNTIME: process.execPath,
     PI_DESKTOP_PI_CLI_ENTRY: serverEntry,
     ...hostPiPackageRootEnv({ root: rootDir }),
   };
@@ -126,7 +129,7 @@ function spawnBridge() {
     env.ENGBUDDY_PORT = String(requestedPort);
   }
 
-  const child = spawn(bridgeRuntime, [serverEntry], { stdio: ["ignore", "pipe", "pipe"], env });
+  const child = spawn(process.execPath, [serverEntry], { stdio: ["ignore", "pipe", "pipe"], env });
   const watcher = rules.createBridgeUrlWatcher({ timeoutMs: 20000 });
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => {
