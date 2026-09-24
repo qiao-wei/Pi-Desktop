@@ -334,12 +334,12 @@ export const en = {
   "settings.instructions.label": "Custom instructions",
   "settings.instructions.desc": "Tell the assistant rules and preferences to follow in every conversation.",
   "settings.instructions.placeholder": "For example: Give the conclusion first, then explain key assumptions.",
-  "settings.extensionUi.label": "Extension panels",
-  "settings.extensionUi.desc": "How interactive panels opened by extensions (the /mcp server list, for example) appear in the window.",
+  "settings.extensionUi.label": "Extension panel style & input",
+  "settings.extensionUi.desc": "The layout comes from the extension, and both modes show the same text; they differ only in colours and mouse input.",
   "settings.extensionUi.tui.label": "Terminal style",
-  "settings.extensionUi.tui.desc": "Show the raw terminal text, keyboard only",
+  "settings.extensionUi.tui.desc": "Plain text without colours; move rows with the keyboard or the buttons below",
   "settings.extensionUi.webui.label": "Web style",
-  "settings.extensionUi.webui.desc": "Keep colours and styling, and let list rows be clicked",
+  "settings.extensionUi.webui.desc": "Colours and links restored; rows can be clicked, the wheel moves the selection",
   "settings.savePersonalization": "Save personalization",
 
   /* ---- sidebar & project dialogs ---- */
