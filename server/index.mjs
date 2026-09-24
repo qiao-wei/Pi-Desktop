@@ -10,6 +10,7 @@ import { agentRuntimePathDirs, mergePath } from "./agentEnv.mjs";
 import { removeBundledShims, runtimeShimSpecs } from "./agentShimFiles.mjs";
 import { createAgentShims } from "./agentShims.mjs";
 import { capabilityReloadPlan, reloadRuntimeSkills, sameCapabilityIds } from "./capabilityReload.mjs";
+import { applySkillSelection, createSkillSelectionPolicy, replaceSkillSelectionPolicy, skillEnabledBySelection } from "./capabilitySkillSelection.mjs";
 import { describeLoadStatus, isUnhealthyLoadStatus, summarizePackageHealth } from "./capabilityHealth.mjs";
 import { absolutizeInstalledUserPackage, installTargetPath, packageSourceForPi } from "./capabilityPackageSource.mjs";
 import { emptyPackageResources, findPackageResourceEntry, MAX_RESOURCE_PREVIEW_BYTES, packageProgressEvent, packageResourceDetails, resourcePreview, summarizePackageResources } from "./capabilityPackageResources.mjs";
@@ -1783,6 +1784,18 @@ async function createRuntime(project, sessionPath, trace = {}) {
   const uiBridge = createExtensionUiBridge();
   const runtimeRef = { current: null };
   const trustStore = new ProjectTrustStore(agentDir);
+  // Resolve project trust *before* the capability inventory. pi only discovers project
+  // `.pi/skills`/extensions under a trusted settings manager, and the session loader's own
+  // trust pass resolves later (inside the resource loader). Running the inventory first
+  // under an untrusted manager made the selection disagree with what the loader loaded.
+  // Same source as the loader uses (`ProjectTrustStore` + default), so both passes align.
+  const projectTrusted = await resolveProjectTrustForRuntime({
+    cwd: project.cwd,
+    settingsManager,
+    trustStore,
+    projectTrustContext: uiBridge.createProjectTrustContext(project.cwd),
+  });
+  settingsManager.setProjectTrusted(projectTrusted);
   const capabilityPaths = await resolveRuntimeCapabilityPaths({
     project,
     settingsManager,
@@ -1822,19 +1835,18 @@ async function createRuntime(project, sessionPath, trace = {}) {
             return true;
           }),
         }),
-        skillsOverride: (base) => ({
-          ...base,
-          skills: base.skills.filter((skill) => {
-            const normalized = resolve(skill.filePath);
-            if (capabilityPaths.disabledPackageRoots.some((root) => isPathInside(root, normalized))) {
-              return false;
-            }
-            if (!isManagedSkillPath(normalized, project)) {
-              return true;
-            }
-            return capabilityPaths.activeSkillIds.has(skillCapabilityId(skill));
-          }),
-        }),
+        skillsOverride: (base) => {
+          // pi hands us its discovered set *before* any filtering - same loader, same trust
+          // state, same instant. That set is the inventory, so the capability page and the
+          // session agree without a second, potentially disagreeing, discovery pass.
+          const { skills, inventory } = applySkillSelection(base.skills, capabilityPaths.skillSelection, {
+            isManaged: (path) => isManagedSkillPath(path, project),
+            isDisabledPath: (path) => capabilityPaths.disabledPackageRoots.some((root) => isPathInside(root, path)),
+            onMismatch: (skill) => reportSkillInventoryMismatch(skill, project),
+          });
+          capabilityPaths.skillInventory = inventory;
+          return { ...base, skills };
+        },
         appendSystemPromptOverride: (base) => [...base, hostSystemPrompt],
         extensionFactories: [
           createPiDesktopRuntimeExtension(project),
@@ -1931,6 +1943,13 @@ async function createRuntime(project, sessionPath, trace = {}) {
     },
     capabilityPaths,
   };
+  // Project extensions can vote on trust through pi's `project_trust` event, which only
+  // runs during the loader's own reload. If that pass disagreed with the trust we used to
+  // build the inventory, re-align once and let pi re-run its skill pass.
+  if (targetRuntime.settingsManager.isProjectTrusted() !== projectTrusted) {
+    await refreshRuntimeCapabilityPaths(targetRuntime);
+    reloadRuntimeSkills(targetRuntime);
+  }
   // createAgentSessionServices already loaded the resource loader with these
   // session-specific paths; reloading here would scan every capability twice.
   diagnosticLog("session.switch.runtime.ready", {
@@ -2026,7 +2045,19 @@ async function resolveRuntimeCapabilityPaths({ project, settingsManager, session
       .map((path) => resolve(path)),
     standaloneExtensionIds: new Set(standaloneExtensionPaths.map(extensionCapabilityId)),
     activeExtensionIds: new Set([...selectedExtensionIds]),
+    // Kept for the reload plan / message-part decoration; the loader no longer reads it.
     activeSkillIds: new Set(selection.skills ?? []),
+    // Live skill selection: the loader's `skillsOverride` decides per skill from this
+    // policy, so the decision can never be stale relative to what pi discovered.
+    skillSelection: createSkillSelectionPolicy({
+      selection,
+      config,
+      inventorySkills: allSkills,
+      isManaged: (path) => isManagedSkillPath(path, project),
+    }),
+    // The full set pi's loader discovers, captured from its own pass (seeded with the
+    // pre-resolve so the page has data even before the loader runs).
+    skillInventory: allSkills,
   };
 }
 
@@ -2044,6 +2075,8 @@ async function refreshRuntimeCapabilityPaths(targetRuntime) {
   current.standaloneExtensionIds = next.standaloneExtensionIds;
   current.activeExtensionIds = next.activeExtensionIds;
   current.activeSkillIds = next.activeSkillIds;
+  replaceSkillSelectionPolicy(current.skillSelection, next.skillSelection);
+  current.skillInventory = next.skillInventory;
   return current;
 }
 
@@ -3011,6 +3044,9 @@ async function discoverAllProjectSkills(project, settingsManager = undefined) {
   const effectiveSettingsManager = settingsManager ?? SettingsManager.create(project.cwd, agentDir, { projectTrusted: false });
   const loader = new DefaultResourceLoader({
     ...basePiDesktopResourceLoaderOptions(project, effectiveSettingsManager),
+    // Inventory only: importing the packages' extensions is the bulk of this pass' cost
+    // and none of it feeds skill discovery (package skills still resolve either way).
+    noExtensions: true,
     extensionFactories: [],
   });
   await loader.reload();
@@ -3051,13 +3087,43 @@ function reportUnhealthyLoads(health, packages) {
   }
 }
 
+// A managed skill can only be judged against the pre-resolved inventory. If pi's loader
+// discovers one that pass never saw, the two disagree; keep it (fail open) and say so
+// once, instead of letting the override silently delete a capability.
+const reportedSkillInventoryMismatches = new Set();
+
+function reportSkillInventoryMismatch(skill, project) {
+  const key = `${project?.id ?? ""}:${skill?.name ?? ""}`;
+  if (reportedSkillInventoryMismatches.has(key)) {
+    return;
+  }
+  reportedSkillInventoryMismatches.add(key);
+  console.error(`[pi-desktop:capability] skill ${skill?.name} was loaded by pi but missing from the pre-resolved inventory; keeping it`);
+  diagnosticLog("capability.skill_inventory_mismatch", {
+    projectId: project?.id,
+    skill: skill?.name,
+    path: skill?.filePath,
+  });
+}
+
 async function buildCapabilitiesSnapshot(targetRuntime = runtime, options = {}) {
   const project = findProject(targetRuntime.projectId);
-  const allSkills = await discoverAllProjectSkills(project, targetRuntime.settingsManager);
+  // Reuse the set pi's session loader actually discovered (post-trust, post-package).
+  // Re-running a discovery pass here would cost a full resource resolve per snapshot *and*
+  // could disagree with what the session really loaded - which is exactly how project
+  // skills went missing while the page still claimed they were active.
+  const allSkills = targetRuntime.capabilityPaths?.skillInventory
+    ?? await discoverAllProjectSkills(project, targetRuntime.settingsManager);
   const managed = managedSkills(allSkills, project);
   const config = ensureCapabilitiesConfigInitialized(managed);
   const sessionSelection = activeSessionCapabilitySelection(targetRuntime.session.sessionManager, allSkills, config, targetRuntime);
-  const activeSkills = new Set(sessionSelection.skills);
+  const skillPolicy = targetRuntime.capabilityPaths?.skillSelection
+    ?? createSkillSelectionPolicy({
+      selection: sessionSelection,
+      config,
+      inventorySkills: allSkills,
+      isManaged: (path) => isManagedSkillPath(path, project),
+    });
   const packages = configuredPackagesForRuntime(targetRuntime);
   const extensionPaths = discoverStandaloneExtensionPaths(project, targetRuntime.settingsManager);
   const activePackages = new Set(sessionSelection.packages ?? []);
@@ -3117,7 +3183,7 @@ async function buildCapabilitiesSnapshot(targetRuntime = runtime, options = {}) 
           disableModelInvocation: skill.disableModelInvocation,
           defaultEnabled: metadata.defaultEnabled === true,
           pinned: Boolean(metadata.pinned),
-          active: activeSkills.has(id),
+          active: skillEnabledBySelection(skillPolicy, id),
           readonly: isBuiltinSkillPath(skill.filePath),
         };
       })
@@ -3445,8 +3511,9 @@ async function updateRuntimeSessionCapabilities(targetRuntime, updateSelection) 
 
   appendSessionCapabilitySelection(targetRuntime.session.sessionManager, next);
   await refreshRuntimeCapabilityPaths(targetRuntime);
-  // A skill toggle already mutated `capabilityPaths.activeSkillIds` above, and pi's loader
-  // re-reads it through `skillsOverride`; only a package/extension move needs the full reload.
+  // A skill toggle already refreshed `capabilityPaths.skillSelection` above, and pi's
+  // loader re-reads it through `skillsOverride`; only a package/extension move needs the
+  // full reload.
   if (plan !== "skills" || !reloadRuntimeSkills(targetRuntime)) {
     await targetRuntime.session.reload();
   }
@@ -3715,7 +3782,8 @@ async function removeCapabilityExtension(body) {
 
 async function readRuntimeCapabilityContext(targetRuntime) {
   const project = findProject(targetRuntime.projectId);
-  const allSkills = await discoverAllProjectSkills(project, targetRuntime.settingsManager);
+  const allSkills = targetRuntime.capabilityPaths?.skillInventory
+    ?? await discoverAllProjectSkills(project, targetRuntime.settingsManager);
   const config = ensureCapabilitiesConfigInitialized(managedSkills(allSkills, project));
   return {
     project,
@@ -3746,7 +3814,8 @@ async function deleteSkillFromCapabilityPage(body) {
   const project = findProject(targetRuntime.projectId);
   const skillTarget = String(body?.path ?? body?.id ?? "").trim();
   const skillPath = skillTarget ? resolve(skillTarget) : "";
-  const allSkills = await discoverAllProjectSkills(project, targetRuntime.settingsManager);
+  const allSkills = targetRuntime.capabilityPaths?.skillInventory
+    ?? await discoverAllProjectSkills(project, targetRuntime.settingsManager);
   const skill = allSkills.find((candidate) =>
     candidate.name === skillTarget || resolve(candidate.filePath) === skillPath,
   );
