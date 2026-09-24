@@ -359,8 +359,10 @@ test("玻璃只在 macOS 成立：其它平台退回不透明侧栏，不叠一�
     assert.match(tokens["--app-sidebar-sheen-top"], /^linear-gradient\(/);
     assert.match(tokens["--app-sidebar-sheen-bottom"], /^linear-gradient\(/);
     assert.match(tokens["--app-sidebar-blur"], /^blur\(/);
-    // 外壳与主格必须让开，否则材质透不出来
-    assert.equal(tokens["--app-main-surface"], "transparent", `darwin ${mode} 主格没让开`);
+    // 外壳要让开，否则材质透不出来；但**主格不能**跟着让 —— 参考项目 chrome.css:426-445
+    // 写死了 "The main pane and titlebars remain opaque bg-primary"，主格透明会让三列
+    // 之间的 3px 抓取条漏出材质（实测过）。
+    assert.equal(tokens["--app-main-surface"], "var(--app-content-surface)", `darwin ${mode} 主格要保持不透明`);
     assert.equal(tokens["--app-shell-surface"], "transparent", `darwin ${mode} 外壳没让开`);
   }
   assert.equal(light.tokens["--app-sidebar-glass-tint"], "color-mix(in oklab, #f3f3f3 55%, transparent)");
@@ -516,4 +518,210 @@ test("131 处调色板类靠覆盖 --color-* 变量换色，不改组件", () =>
   for (const token of ["--color-sky-500", "--color-blue-500", "--color-cyan-500"]) {
     assert.equal(oklchOf(own[token]).c, 0, `${token} 应该是中性灰`);
   }
+});
+
+/* ------------------------------------------------- codex 的窗口 chrome（结构） */
+
+/**
+ * codex 下的窗口 chrome 是**结构**不是配色：参考项目靠 macOS 的
+ * `titleBarStyle: "hiddenInset"` + 通高侧栏做到 —— 侧栏从窗口最顶端开始、红绿灯浮在
+ * 它上面，主面板自带的那条 band 就是「标题栏」，上沿没有横向分界线（chrome.css:426-445）。
+ *
+ * 我们的骨架是「全宽标题栏 + 底下三列」，所以把**三列一起抬到窗口顶端**：侧栏、
+ * 右侧栏、两条抓取条用等量 padding 把内容压回带子下面，会话列不压 —— 它的
+ * `conversation-header` 本来就有 45px 高，抬上去就是窗口最上面那一排。
+ *
+ * 这些规则写在 tailwind.css 的**无 layer** 区（文件尾部），因为要盖过
+ * `h-[calc(100dvh-…)]` / `[-webkit-app-region:drag]` 这类工具类：styles.css 在
+ * `legacy` 层，`utilities` 排在它后面，同属性会输。
+ */
+
+/**
+ * 找一条规则：选择器列表里含 `selector`、声明体里含 `declaration`（返回整段文本）。
+ *
+ * 不能只按 selector 的第一次出现来切：同一条规则常常是分组选择器（`a,\n b { … }`），
+ * 而 `.context-panel-surface` 这种名字会同时出现在「抬起」和「补内边距」两条不同的规则里。
+ */
+function codexRule(selector: string, declaration: RegExp): string {
+  const rule = [...tailwindCss.matchAll(/(?:^|\n)([^{}]*?)\{([^{}]*)\}/g)].find(
+    ([, sel, body]) => sel.includes(selector) && declaration.test(body),
+  );
+  assert.ok(rule, `找不到同时含「${selector}」与「${declaration}」的 codex 规则`);
+  return rule[0];
+}
+
+test("codex：三列通高（侧栏/右侧栏/抓取条内容位置不变，只有会话列真的往上挪）", () => {
+  const lift = codexRule(".project-sidebar-surface", /margin-top:/);
+  assert.match(lift, /margin-top:\s*calc\(-1 \* var\(--titlebar-height\)\)/);
+  assert.match(lift, /height:\s*calc\(100% \+ var\(--titlebar-height\)\)/);
+  // 右侧栏与抓取条必须一起抬：右侧那条 ::before 是整列常显的 1px 分隔线，
+  // 不抬的话它在标题栏那一段是空的（用户报的「分隔线没接上去」）。
+  assert.match(lift, /context-panel-surface/);
+  assert.match(lift, /panel-resize-handle/);
+
+  // 内容仍从带子下面开始，否则第一行会被窗口按钮盖住
+  const pad = codexRule(".context-panel-surface", /padding-top:/);
+  assert.match(pad, /padding-top:\s*var\(--titlebar-height\)/);
+
+  // 这些是「只在 codex」的：默认主题的侧栏必须还在标题栏下面
+  assert.ok(
+    !stylesCss.includes("calc(-1 * var(--titlebar-height))"),
+    "通高规则要留在 tailwind.css 且限定 codex，别落回 styles.css（legacy 层会被工具类盖掉）",
+  );
+});
+
+test("codex：会话头就是窗口最上面那一排（下面那一排移上来、可拖、控件免拖）", () => {
+  const surface = codexRule(".conversation-surface", /margin-top:/);
+  assert.match(surface, /margin-top:\s*calc\(-1 \* var\(--titlebar-height\)\)/);
+  assert.match(surface, /height:\s*calc\(100% \+ var\(--titlebar-height\)\)/);
+
+  // 包着它的格子默认 overflow-hidden，不放行的话抬起来那 45px 既画不出来也接不到
+  // 指针（rect 还报 y=1，elementFromPoint 却只返回外壳）—— 会话头白抬。
+  assert.match(codexRule(".conversation-column", /overflow:/), /overflow:\s*visible/);
+
+  // 抬上去之后它落在 Electron 的拖拽带里：整条可拖，控件必须显式豁免
+  assert.match(
+    codexRule(".conversation-header ", /-webkit-app-region:\s*drag/),
+    /-webkit-app-region:\s*drag/,
+  );
+  const ctl = codexRule(".conversation-header button", /no-drag/);
+  assert.match(ctl, /-webkit-app-region:\s*no-drag/);
+  assert.match(ctl, /\[role="button"\]/);
+});
+
+test("codex：标题栏退成一条留白（不留可见的「栏」，中格那行重复标题隐藏）", () => {
+  const bar = codexRule(".app-titlebar", /grid-template-columns:/);
+
+  // 自己不再画底色（三列都通高，底色已由格子铺满）
+  assert.match(bar, /background:\s*transparent/);
+  assert.match(bar, /border-bottom-color:\s*transparent/);
+  // 左格贴着侧栏宽（红绿灯那段），中格让给会话头，右格留给窗口图标
+  assert.match(bar, /grid-template-columns:\s*var\(--left-sidebar-width\) minmax\(0, 1fr\) auto/);
+  // 自己不吃事件，否则会吞掉会话头里的按钮
+  assert.match(bar, /pointer-events:\s*none/);
+
+  // 中格用 visibility 而不是 display：display 会把右格挤到第二道轨道上
+  const middle = codexRule(".app-titlebar > :nth-child(2)", /visibility:/);
+  assert.match(middle, /visibility:\s*hidden/);
+  assert.ok(!/display:\s*none/.test(middle), "中格只能用 visibility:hidden，不能用 display:none");
+});
+
+test("codex 的结构规则全部限定在 codex 档（默认主题的 chrome 不许被碰）", () => {
+  // 只挑「布局类」属性，避免把别处的 padding 误判进来
+  const layoutRules = [
+    ...tailwindCss.matchAll(/(^|[^,{]*)\{([^}]*)\}/gm),
+  ].filter(([, selector, body]) =>
+    /--titlebar-height|--left-sidebar-width/.test(body) && /(margin-top|height|padding-top|linear-gradient)/.test(body),
+  );
+
+  assert.ok(layoutRules.length >= 2, "应该能找到那两条 codex chrome 规则");
+  for (const [, selector, body] of layoutRules) {
+    if (!/\.app-titlebar|\.project-sidebar-surface/.test(selector)) continue;
+    assert.ok(
+      selector.includes('[data-appearance="codex"]'),
+      `这条改动的布局没限定 codex，会动到默认主题：${selector.trim()} → ${body.trim().slice(0, 60)}`,
+    );
+  }
+});
+
+test("列宽变量挂在 shell 上（标题栏要按侧栏宽度决定哪一段透明）", () => {
+  const shell = appTsx.slice(appTsx.indexOf("app-shell-surface flex h-dvh"));
+  const block = shell.slice(0, shell.indexOf("<TitleBar"));
+
+  assert.match(block, /"--left-sidebar-width":/, "shell 上要暴露 --left-sidebar-width，否则标题栏的硬切渐变没有依据");
+  assert.match(block, /"--right-panel-width":/);
+
+  // 原来挂在 <main> 上；两边都留会让人以为标题栏也能读（它读不到，是兄弟节点）
+  const main = appTsx.slice(appTsx.indexOf("<main\n"), appTsx.indexOf("<main\n") + 600);
+  assert.ok(!/"--left-sidebar-width":/.test(main), "列宽变量已经从 <main> 移到 shell，别留两份");
+});
+
+/**
+ * 参考项目原文（chrome.css:426-445）："The main pane and titlebars remain opaque
+ * bg-primary" —— 玻璃只有侧栏那一条。主区若跟着透明，三列之间的 3px 抓取条就会把
+ * 原生材质漏成三道玻璃竖线（真实 app 里量到过），所以这条要钉死。
+ */
+test("codex+darwin：只有侧栏是玻璃，主区保持不透明", () => {
+  for (const selector of [
+    ':root[data-platform="darwin"][data-appearance="codex"]',
+    ':root[data-platform="darwin"][data-appearance="codex"].dark',
+  ]) {
+    const { tokens } = blockTokens(tailwindCss, selector);
+
+    assert.equal(
+      tokens["--app-main-surface"],
+      "var(--app-content-surface)",
+      `${selector} 的主区必须不透明（否则抓取条漏材质）`,
+    );
+    assert.equal(tokens["--app-shell-surface"], "transparent", `${selector} 的外壳要透明才看得到材质`);
+    assert.match(tokens["--app-sidebar-glass-tint"] ?? "", /color-mix\(in oklab, #[0-9a-f]{6} \d+%, transparent\)/);
+    assert.match(tokens["--app-sidebar-blur"] ?? "", /blur\(/);
+    assert.match(tokens["--app-sidebar-sheen-top"] ?? "", /linear-gradient\(/);
+  }
+});
+
+test("codex：不透明底色画在格子上，不画在 .app-main 上（否则垫到玻璃底下）", () => {
+  const at = tailwindCss.indexOf(':root[data-appearance="codex"] .app-main {');
+  assert.ok(at > 0, "找不到 codex 的 .app-main 规则");
+  const rule = tailwindCss.slice(at, tailwindCss.indexOf("}", at));
+
+  // 网格容器自己不能有底色：它的背景会铺到侧栏那一列底下，材质就透不上来
+  assert.match(rule, /background:\s*transparent/);
+  assert.ok(!/background:\s*var\(--app-content-surface\)/.test(rule), ".app-main 上别铺不透明底色");
+  // 抬起来的侧栏要允许溢出，否则顶部 46px 被父级裁掉、露出一道硬缝
+  assert.match(rule, /overflow:\s*visible/);
+
+  const cells = tailwindCss.slice(tailwindCss.indexOf(".app-main > :not(.project-sidebar-surface)"));
+  const cellRule = cells.slice(0, cells.indexOf("}"));
+  assert.match(cellRule, /background-color:\s*var\(--app-content-surface\)/, "会话列/右侧栏/3px 抓取条要不透明");
+});
+
+/**
+ * 会话头右边必须给标题栏那两个图标（语言 / 面板开关）留位。
+ *
+ * 实测过的 bug：**右侧面板收起时**主区顶到窗口右缘，图标正好压在分支信息上
+ * （dev 栈里量到重叠 59px，用户截图里同一处）。面板自己占的宽度要算进可用空间 ——
+ * 面板宽了图标就落在面板那一列里，不必再留。
+ *
+ * 留位必须用 `margin`（缩掉盒子）而不能用 `padding`（只挪内容）：会话头整条是 drag 区，
+ * 用 padding 时它的拖拽矩形照样伸到图标底下，而兄弟子树的 `no-drag` 挖不动别人的 drag
+ * 区 —— 真机上那两个图标会直接点不动（CDP 注入的鼠标事件绕过拖拽判定，测不出来，所以
+ * 这条断言必须盯住实现方式本身）。
+ */
+test("codex：会话头用 margin 留位（drag 矩形不能伸到标题栏图标底下）", () => {
+  const rule = codexRule(".conversation-header", /margin-right:/);
+
+  assert.ok(rule.includes('[data-appearance="codex"]'), "这条必须限定 codex");
+  assert.match(
+    rule,
+    /margin-right:\s*calc\(12px \+ max\(0px, 80px - var\(--right-panel-width/,
+    "要用 max() 把右侧面板宽度算进去，不能写死常量",
+  );
+  assert.doesNotMatch(
+    rule,
+    /padding-right:\s*calc\(/,
+    "不能退回 padding：那不会缩掉 drag 矩形，图标又会被拖拽区吞掉",
+  );
+});
+
+/**
+ * 图标那一格自己声明 no-drag，以及会话头左边界那条挖洞。
+ *
+ * 依赖“按钮去挖父级的洞”时，跨子树的 drag 区（面板收起时伸到右侧的会话头）会把图标吞掉；
+ * 把**整格**摘出拖拽区，就不看具体命中模型了。
+ */
+test("codex：图标那一格自己摘出拖拽区（不依赖按钮挖洞）", () => {
+  const cell = codexRule(".app-titlebar > :last-child", /-webkit-app-region:\s*no-drag/);
+
+  assert.ok(cell.includes('[data-appearance="codex"]'), "这条必须限定 codex");
+});
+
+test("codex：会话头左边界用同宗 no-drag 挖洞（侧栏收起时红绿灯不被吞）", () => {
+  const rule = codexRule(".conversation-header::before", /no-drag/);
+  // 只看规则体：匹配串里带着上面那条注释，注释里提到过属性名会把断言喂成假绿。
+  const body = rule.slice(rule.indexOf("{"));
+
+  assert.ok(rule.slice(0, rule.indexOf("{")).includes('[data-appearance="codex"]'), "这条必须限定 codex");
+  assert.match(body, /width:\s*max\(0px, 76px - var\(--left-sidebar-width/, "左侧留位同样要按侧栏宽度算");
+  assert.match(body, /pointer-events:\s*none/, "挖洞用的伪元素不能在渲染层挡住点击");
 });

@@ -390,7 +390,10 @@
     transparent 160px
   );
   --app-sidebar-blur: blur(30px) saturate(180%);
-  --app-main-surface: transparent;
+  /* 参考项目原文："The main pane and titlebars remain opaque bg-primary"
+   * （chrome.css:426-445）。只有侧栏那一条是玻璃；主区必须不透明，否则
+   * 三列之间的 3px 抓取条会把原生材质漏成三道玻璃竖线。 */
+  --app-main-surface: var(--app-content-surface);
   --app-shell-surface: transparent;
   --app-shadow-window: none;
 }
@@ -523,7 +526,7 @@
     transparent 160px
   );
   --app-sidebar-blur: blur(30px) saturate(180%);
-  --app-main-surface: transparent;
+  --app-main-surface: var(--app-content-surface);
   --app-shell-surface: transparent;
   --app-shadow-window: none;
 }
@@ -585,3 +588,135 @@
  */
 
 @custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
+
+/* ---------------------------------------------------------------------------
+ * codex 主题的窗口 chrome：三列通高、上沿只有一条留白（参考 PI-Desktop）
+ *
+ * 参考项目在 macOS 用 `titleBarStyle: "hiddenInset"`：侧栏从窗口最顶端开始，红绿灯
+ * 浮在侧栏玻璃上，主面板自带的那条 band 就是「标题栏」（放着会话标题与分支信息），
+ * 上沿没有横向分界线；而且主面板与标题栏始终不透明（chrome.css:426-445 原文注释：
+ * “The main pane and titlebars remain opaque bg-primary”）。
+ *
+ * 我们的骨架是「全宽标题栏 + 底下三列」。对齐办法：把**三列一起抬到窗口顶端**
+ * （`margin-top` 顶出去、高度补回来），侧栏与右侧栏再用等量的 `padding-top` 把内容
+ * 压回红绿灯底下；**会话列不补 padding** —— 它自己的 `conversation-header`（文件夹
+ * 按钮 / 会话名 / 分支徽标）本来就有 45px 高，抬上去正好落在 46px 的带子里，于是
+ * 「下面那一排」就变成了窗口最上面那一排。两条 3px 抓取条也一起抬（右侧那条的
+ * `::before` 是整列常显的 1px 分隔线，抬上去它才会在标题栏那一段接得上）。
+ *
+ * 标题栏本身因此退成纯留白：自己不吃事件（`pointer-events: none`），中格那行居中的
+ * 会话名隐藏（和会话头重复），左格（红绿灯/侧栏开关）与右格（图标）继续当拖拽区；
+ * 主区那一条由会话头自己当拖拽区（里面的控件显式豁免）。
+ *
+ * 默认主题完全不受影响：每条都限定 `[data-appearance="codex"]`，默认档的标题栏
+ * 占位、表面与下边框都保持原样。
+ *
+ * 放这里（而不是 styles.css）是因为要覆盖 Tailwind 的 `h-[calc(100dvh-…)]`、
+ * `[-webkit-app-region:drag]` 这类工具类：styles.css 在 `legacy` 层，`utilities`
+ * 排在它后面，同属性会输。
+ *
+ * 窄屏（<920px）下侧栏是抽屉（`max-[920px]:fixed top-[var(--titlebar-height)]`）、
+ * 抓取条 `hidden`，不参与网格，所以通高那几条只在桌面档生效，别把抽屉也顶出窗口。
+ */
+@media (min-width: 921px) {
+  /* 网格容器默认 `overflow: hidden`，会把抬上去的那 46px 剪掉 —— 侧栏顶部只剩裸材质、
+   * 没有 tint/光泽，于是在 y=46 处露出一道硬缝。放行溢出，让背景从窗口顶端起算。 */
+  :root[data-appearance="codex"] .app-main {
+    overflow: visible;
+    /* 不透明背景要画在**格子**那一层，不能画在 .app-main 上：它会垫到侧栏玻璃底下，
+     * 材质就永远透不上来（实测：侧栏身部比顶部亮 5 阶，因为下面正好是主区的白）。 */
+    background: transparent;
+  }
+
+  /* 参考项目 chrome.css:426-445："The main pane and titlebars remain opaque”.
+   * 除了侧栏（它自己要留玻璃），所有格子 —— 会话列、右侧栏、两条 3px 抓取条 —— 都补上
+   * 不透明底色，这样窗口上沿只有侧栏那一条是玻璃。 */
+  :root[data-appearance="codex"] .app-main > :not(.project-sidebar-surface) {
+    background-color: var(--app-content-surface);
+  }
+
+  /* 会话列的**格子**（包着 .conversation-surface 的那层，不是 surface 自己）默认
+   * `overflow-hidden`，会把往上顶的 45px 裁掉：`getBoundingClientRect` 还报 y=1，但那里
+   * 既画不出来也接不到指针（`elementFromPoint` 只返回外壳）—— 会话头白抬。放行溢出。 */
+  :root[data-appearance="codex"] .conversation-column {
+    overflow: visible;
+  }
+
+  /* 三列都通高。侧栏/右侧栏/抓取条的内容位置不变，只有会话列是真的往上挪。 */
+  :root[data-appearance="codex"] .project-sidebar-surface,
+  :root[data-appearance="codex"] .context-panel-surface,
+  :root[data-appearance="codex"] .panel-resize-handle,
+  :root[data-appearance="codex"] .conversation-surface {
+    margin-top: calc(-1 * var(--titlebar-height));
+    height: calc(100% + var(--titlebar-height));
+  }
+
+  :root[data-appearance="codex"] .project-sidebar-surface,
+  :root[data-appearance="codex"] .context-panel-surface {
+    padding-top: var(--titlebar-height);
+  }
+
+  /* 会话头现在是窗口最上面那一排：整条可拖，只有控件豁免 —— Electron 拖拽命中会把
+   * 没豁免的按钮吃掉（参考 chrome.tsx 里的 `no-drag` 写法）。 */
+  :root[data-appearance="codex"] .conversation-header {
+    -webkit-app-region: drag;
+    position: relative;
+    /* 右边要给标题栏那两个图标（语言 / 面板开关）让位：**右侧面板收起时**主区顶到窗口
+     * 右缘，图标就直接压在分支信息上（实测重叠 59px）。面板自己占的宽度算进可用空间，
+     * 面板宽到 80px 以上时图标已经落在面板那一列里，就不再预留。
+     *
+     * 必须是 `margin` 不能是 `padding`：留位要**缩掉这条 drag 区自己的盒子**。padding 只
+     * 把内容往左挪，盒子照样伸到图标那一格底下 —— 而兄弟子树里的 `no-drag` 挖不动别人的
+     * drag 区（真机症状：面板收起时语言 / 面板两个图标全点不动，`padding-right` 那版就是
+     * 这样；默认主题没事是因为它的 drag 区正好是按钮的祖先，洞挖得掉）。 */
+    margin-right: calc(12px + max(0px, 80px - var(--right-panel-width, 0px)));
+  }
+
+  /* 同一类问题在左边：侧栏收起时主区顶到窗口左缘，红绿灯 / 侧栏开关会落进这条 drag
+   * 区里。用同宗（会话头自己的伪元素）的 no-drag 把左边那条挖掉 —— 侧栏展开时宽度算下来
+   * 是 0，不生效。留 `pointer-events: none`：它只负责拖拽命中，不能在渲染层挡住点击。 */
+  :root[data-appearance="codex"] .conversation-header::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    width: max(0px, 76px - var(--left-sidebar-width, 0px));
+    pointer-events: none;
+    -webkit-app-region: no-drag;
+  }
+
+  :root[data-appearance="codex"] .conversation-header button,
+  :root[data-appearance="codex"] .conversation-header a,
+  :root[data-appearance="codex"] .conversation-header [role="button"] {
+    -webkit-app-region: no-drag;
+  }
+}
+
+/*
+ * 标题栏退成一条留白：它的背景不能再自己画（三列都通高，底色已经由格子铺满），
+ * 自己也不吃事件（否则主区那一列的点击会被它吞掉、会话头里的按钮点不动）。
+ * 左格与右格仍是拖拽区；中格那行居中的会话名隐藏（下面那一排已经显示同一个标题）。
+ * 这三条不需要限定桌面档：窄屏下侧栏是抽屉，标题栏本来就该只是留白。
+ */
+:root[data-appearance="codex"] .app-titlebar {
+  /* 左格贴着侧栏宽度（红绿灯那一段可拖），中格让给会话头，右格仍是窗口图标。 */
+  grid-template-columns: var(--left-sidebar-width) minmax(0, 1fr) auto;
+  background: transparent;
+  border-bottom-color: transparent;
+  pointer-events: none;
+}
+
+:root[data-appearance="codex"] .app-titlebar > * {
+  pointer-events: auto;
+}
+
+/* 图标那一格自己声明 no-drag，不去依赖「按钮往父级挖洞」那条路径：这一格的盒子正好
+ * 覆盖语言 / 面板两个图标，把它整格从拖拽区里摘掉，图标就不会在任何模型下被吞。 */
+:root[data-appearance="codex"] .app-titlebar > :last-child {
+  -webkit-app-region: no-drag;
+}
+
+/* visibility 而不是 display：中格必须留在网格里，否则右格会掉到第二道轨道上。 */
+:root[data-appearance="codex"] .app-titlebar > :nth-child(2) {
+  visibility: hidden;
+}

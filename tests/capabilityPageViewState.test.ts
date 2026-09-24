@@ -31,11 +31,18 @@ test("the conversation surface stays mounted while the Global page is open", () 
     /activeMainView === "capabilities" \? \(\s*<CapabilitiesPage/,
     "the capabilities page must not replace the conversation section",
   );
-  assert.match(
+  // 按 token 断言而不是整串 className：codex 主题会给这层加一个 `conversation-column`
+  // class（用来把会话列抬到窗口顶部），整串匹配会把它误判成回归。
+  const host = /<div\s+className="([^"]*)"\s*>\s*<section\s+className="conversation-surface/.exec(
     appSource,
-    /className="relative h-full min-h-0 min-w-0 overflow-hidden"/,
-    "the overlay needs a positioned, clipped host that also stays in the grid column",
-  );
+  )?.[1];
+  assert.ok(host, "找不到包住会话区的那个栅格格子");
+  for (const token of ["relative", "h-full", "min-h-0", "min-w-0", "overflow-hidden"]) {
+    assert.ok(
+      host.split(/\s+/).includes(token),
+      `覆盖层宿主必须保留 ${token}（定位 / 裁剪 / 栅格列都靠它）：${host}`,
+    );
+  }
   assert.match(
     appSource,
     /inert=\{activeMainView === "capabilities"\}/,
