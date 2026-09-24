@@ -72,11 +72,25 @@ export function extensionCapabilityId(filePath) {
   return canonicalPath(filePath);
 }
 
-/** 某个 skill 文件是否落在「受管的技能根」里（内置、用户、项目三处）。 */
+/**
+ * 某个 skill 文件是否落在「受管的技能根」里（内置、用户、项目三处）。
+ *
+ * 两个方向都要认，缺一个就会丢掉一整类技能（都有真实用例）：
+ * - **字面路径**：用户的技能通常是从 `~/.pi/agent/skills/x` 指向 `~/.agents/skills/x`（或
+ *   `~/.bailian/skills/x`）的软链，pi 报出来的是软链那一侧。只对比 realpath 会把整类用户
+ *   技能判成「非托管」—— 能力面板里直接消失、会话级开关也落不到它们身上。
+ * - **真实路径**：托管 worktree 会话里，项目技能是通过 `<worktree>/.pi` 软链看到的，pi 报的是
+ *   worktree 那一侧，而能力清单锚在项目根。只对比字面路径就认不出它，开关同样落不到。
+ */
 export function isSkillPathUnderRoots(filePath, roots) {
-  const normalized = canonicalPath(filePath);
-  if (!normalized) {
+  const list = roots ?? [];
+  const literal = resolve(String(filePath ?? "").trim() || ".");
+  if (list.some((root) => isPathInside(resolve(root), literal))) {
+    return true;
+  }
+  const canonical = canonicalPath(filePath);
+  if (!canonical) {
     return false;
   }
-  return (roots ?? []).some((root) => isPathInsideCanonical(root, normalized));
+  return list.some((root) => isPathInsideCanonical(root, canonical));
 }
