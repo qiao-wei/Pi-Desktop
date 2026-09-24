@@ -2008,7 +2008,17 @@ export function App() {
   const showContextPanel = activeMainView === "chat";
 
   return (
-    <div className="app-shell-surface flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden rounded-[var(--window-radius)] border">
+    <div
+      className="app-shell-surface flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden rounded-[var(--window-radius)] border"
+      style={
+        {
+          // 列宽挂在 shell（而不是 .app-main）上：标题栏要按侧栏宽度决定自己哪一段透明
+          // —— codex 主题下侧栏通高、上沿没有横向分界（见 styles.css 的 codex chrome）。
+          "--left-sidebar-width": leftSidebarCollapsed ? "0px" : `${leftSidebarWidth}px`,
+          "--right-panel-width": rightPanelCollapsed || !showContextPanel ? "0px" : `${rightPanelWidth}px`,
+        } as CSSProperties
+      }
+    >
       <TitleBar
         title={stripTerminalSequences(state.extensionTitle ?? "").trim() || conversation.title}
         leftSidebarCollapsed={leftSidebarCollapsed}
@@ -2019,12 +2029,6 @@ export function App() {
       />
       <main
         className="app-main grid h-[calc(100dvh-var(--titlebar-height))] max-h-[calc(100dvh-var(--titlebar-height))] min-h-0 grid-cols-[var(--left-sidebar-width)_3px_minmax(0,1fr)_3px_var(--right-panel-width)] overflow-hidden max-[920px]:grid-cols-[minmax(0,1fr)]"
-        style={
-          {
-            "--left-sidebar-width": leftSidebarCollapsed ? "0px" : `${leftSidebarWidth}px`,
-            "--right-panel-width": rightPanelCollapsed || !showContextPanel ? "0px" : `${rightPanelWidth}px`,
-          } as CSSProperties
-        }
       >
         <ProjectSidebar
           isOpen={showLeftPanel}
@@ -2070,7 +2074,7 @@ export function App() {
             DOM 里（composerText 只是派生值），卸载它会连草稿和会话滚动位置一起丢掉。改成把
             整页盖在会话上，并用 inert 把被遮住的聊天移出 Tab 顺序、挡住误点。 */}
         <div
-          className="relative h-full min-h-0 min-w-0 overflow-hidden"
+          className="conversation-column relative h-full min-h-0 min-w-0 overflow-hidden"
         >
         <section
           className="conversation-surface flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
