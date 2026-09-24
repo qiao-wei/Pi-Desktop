@@ -33,7 +33,6 @@ test("bare imports are collected without builtins or relative files", () => {
     [
       'import { a } from "./local.mjs";',
       'import { b } from "node:fs";',
-      'import { c } from "bun:sqlite";',
       'import { d } from "@earendil-works/pi-coding-agent";',
       'import { e } from "@modelcontextprotocol/client/stdio";',
       'const { f } = require("typebox");',
@@ -124,7 +123,7 @@ test("the packaged build assembles the bridge and self-tests it before the insta
   assert.ok(at("bridge:build") >= 0, `打包链必须组装未编译的 bridge：${labels.join(" → ")}`);
   assert.ok(
     !labels.some((label) => label.includes("sidecar:build")),
-    "不能再回到 bun 编译的单文件桥",
+    "不能再回到编译成单文件的桥",
   );
   assert.ok(
     at("bridge:build") < at("sidecar:verify") && at("sidecar:verify") < at("electron-builder"),

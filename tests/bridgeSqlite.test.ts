@@ -1,16 +1,16 @@
 /**
- * The bridge has to speak to SQLite from both runtimes: bun (dev) and the app's bundled Node
- * (production, once the bridge is no longer compiled into a single executable). `node:sqlite`
- * lacks bun's `db.query()` and `db.transaction()` conveniences, so the compat shim is the only
+ * The bridge speaks to SQLite from the one runtime it now runs on: Node (dev: the dev stack's own
+ * `node`; packaged: the bundled `node-runtime`). `node:sqlite` does not provide the `db.query()`
+ * and `db.transaction()` conveniences the callers are written against, so the shim is the only
  * thing standing between the session index and a crash on startup.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
-import { openSqliteDatabase, withBunSqliteCompat } from "../server/sqlite.mjs";
+import { openSqliteDatabase, withSqliteConveniences } from "../server/sqlite.mjs";
 
 const ROOT = resolve(import.meta.dirname, "..");
 
@@ -24,7 +24,7 @@ async function memoryDb() {
   return db;
 }
 
-test("node:sqlite gets bun's query() shape", async () => {
+test("node:sqlite gets the query() shape the bridge expects", async () => {
   const db = await memoryDb();
   db.prepare("INSERT INTO t (a, b) VALUES (?, ?)").run(1, "one");
 
@@ -102,24 +102,35 @@ test("open read-only refuses a database that is not there", async () => {
   await assert.rejects(openSqliteDatabase(missing, { create: false }), /database not found/);
 });
 
-test("the shim is idempotent and never clobbers a real bun implementation", () => {
+test("the shim is idempotent and never clobbers a binding that already provides both", () => {
   const seen = [];
-  const fakeBun = {
+  const complete = {
     prepare: () => ({}),
     query: (sql) => seen.push(sql),
     transaction: () => () => "original",
   };
-  const patched = withBunSqliteCompat(fakeBun);
+  const patched = withSqliteConveniences(complete);
 
   patched.query("SELECT 1");
   assert.deepEqual(seen, ["SELECT 1"]);
   assert.equal(patched.transaction(() => {})(), "original");
 });
 
-test("the bridge no longer imports bun-only modules", () => {
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+test("every module the bridge imports comes from the Node runtime", () => {
+  // The bridge used to carry a second-runtime branch behind a dynamic import. The removal is only
+  // real if no `server/` source reaches for another runtime scheme again.
+  const dir = join(ROOT, "server");
+  const schemes = new Set();
+  for (const name of readdirSync(dir).filter((entry) => entry.endsWith(".mjs"))) {
+    const source = readFileSync(join(dir, name), "utf8");
+    for (const match of source.matchAll(/(?:from|import\(|require\()\s*"([a-z][a-z0-9+.-]*):/g)) {
+      schemes.add(match[1]);
+    }
+  }
 
-  assert.ok(!/from "bun:/.test(source), "bun: imports would make the bridge bun-only");
+  assert.deepEqual([...schemes].sort(), ["node"], "server/ 只能导入 node: 内建模块");
+
+  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
   assert.match(source, /import \{ openSqliteDatabase \} from "\.\/sqlite\.mjs"/);
   assert.match(source, /await openSqliteDatabase\(sessionsDatabaseFile\)/);
 });

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Assemble the shippable bridge: unpacked sources + a real npm `node_modules`, executed by the
- * bundled Node through a small launcher instead of a bun-compiled single file.
+ * bundled Node through a small launcher instead of a compiled single file.
  *
  * The compiled form inlined pi's modules, and pi loads runtime extensions against those inlined
  * copies; the bundler's export renaming (Type -> Type3) shifted between builds, so some artefacts

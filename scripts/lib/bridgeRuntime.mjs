@@ -2,11 +2,12 @@
  * Pure helpers for shipping the bridge as plain sources plus a real `node_modules`, executed by
  * the bundled Node instead of a compiled-in binary.
  *
- * Why this exists: `bun build --compile` inlines pi's own modules and lets the bundler rename
- * their exports, while pi loads runtime extensions through jiti against those inlined copies.
- * The rename numbering shifts between builds, so a whole artefact can load every extension and
- * the next one cannot (`Type3 is not defined`). Running the bridge under Node against on-disk
- * packages makes extension loading deterministic, exactly like the terminal CLI.
+ * Why this exists: compiling the bridge into a single executable inlines pi's own modules and lets
+ * the bundler rename their exports, while pi loads runtime extensions through jiti against those
+ * inlined copies. The rename numbering shifts between builds, so a whole artefact can load every
+ * extension and the next one cannot (`Type3 is not defined`) - which is why the compiled sidecar
+ * was retired. Running the bridge under Node against on-disk packages makes extension loading
+ * deterministic, exactly like the terminal CLI.
  */
 
 const BARE_IMPORT = /(?:^|\n)\s*(?:import|export)[^"']*?from\s*"([a-z@][^"]*)"|require\("([a-z@][^"]*)"\)/g;
@@ -25,7 +26,7 @@ export function collectBareImports(sources) {
       if (!specifier) {
         continue;
       }
-      if (specifier.startsWith("node:") || specifier.startsWith("bun:")) {
+      if (specifier.startsWith("node:")) {
         continue;
       }
       found.add(specifier);
