@@ -369,6 +369,7 @@ export const en = {
   "dialog.removeAction": "Remove",
   "dialog.archiveSessionTitle": "Archive session",
   "dialog.archiveSessionDesc": "Archive {title}? Archiving only files it away — restore it in Settings → Archived chats. “Delete now” removes the session file for good.",
+  "dialog.archiveSessionDescWorktree": "Archive {title}? Archiving only files it away — restore it in Settings → Archived chats. “Delete now” removes the session file for good and also deletes this session’s worktree (kept if it still has uncommitted changes).",
   "dialog.archiveAction": "Archive",
   "dialog.deleteSessionForever": "Delete now",
   "dialog.newProjectTitle": "New project",

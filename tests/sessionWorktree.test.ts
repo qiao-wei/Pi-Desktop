@@ -194,6 +194,26 @@ test("服务端接线：worktree 路由 / 会话 cwd / git 写操作都落在会
   assert.match(remove, /isManagedWorktreePath\(worktreesRoot, cwd\)/, "移除仍然限定在应用自己的 worktree 里");
 });
 
+test("删除弹窗：worktree 会话说清 worktree 会一起删，普通会话保持原文案", () => {
+  // 侧栏两处入口（置顶区 / 项目区）都要把会话的 inWorktree 带进弹窗，漏一处就只有一边有提示。
+  const opens = appSource.match(/setDialog\(\{ kind: "archive-session"[^}]*\}\)/g) ?? [];
+  assert.equal(opens.length, 2, "置顶与项目两处入口");
+  for (const open of opens) {
+    assert.match(open, /inWorktree: Boolean\(session\.inWorktree\)/, `入口要带上 inWorktree：${open}`);
+  }
+  assert.match(
+    appSource,
+    /\{ kind: "archive-session"; projectId: string; sessionPath: string; title: string; inWorktree\?: boolean \}/,
+    "弹窗状态要带 inWorktree",
+  );
+  const desc = region(appSource, '? t("dialog.removeProjectDesc"', "</AlertDialogDescription>");
+  assert.match(
+    desc,
+    /t\(dialog\.inWorktree \? "dialog\.archiveSessionDescWorktree" : "dialog\.archiveSessionDesc", \{ title: dialog\.title \}\)/,
+    "按 inWorktree 选文案",
+  );
+});
+
 test("i18n：worktree 文案中英都有（English 包按中文键集类型校验，漏一个就编译不过）", () => {
   const keys = [
     "worktree.badge",
@@ -208,6 +228,7 @@ test("i18n：worktree 文案中英都有（English 包按中文键集类型校�
     "worktree.removeConfirm",
     "worktree.createFailed",
     "sidebar.newSessionInWorktree",
+    "dialog.archiveSessionDescWorktree",
   ];
   for (const key of keys) {
     assert.ok(zhSource.includes(`"${key}"`), `zh 缺 ${key}`);
