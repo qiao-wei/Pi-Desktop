@@ -5,7 +5,7 @@ use std::{
     sync::Mutex,
 };
 
-use tauri::{path::BaseDirectory, window::Color, AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, Window};
+use tauri::{path::BaseDirectory, window::Color, AppHandle, Manager, RunEvent, Theme, WebviewUrl, WebviewWindowBuilder, Window};
 
 struct BridgeSidecar(Mutex<Option<Child>>);
 
@@ -107,6 +107,24 @@ fn close_window(window: Window) -> Result<(), String> {
     window
         .close()
         .map_err(|error| format!("Unable to close window: {error}"))
+}
+
+/// 把界面主题同步给窗口外观。
+///
+/// macOS 侧栏材质（`Effect::Sidebar`）的明暗跟随 NSAppearance，而浅色/深色是渲染层
+/// 自己的（`<html class="dark">`）；不同步就会出现「系统浅色 + 界面深色」= 一层发白的
+/// 玻璃垫在深色侧栏下面。与 Electron 侧 `src-electron/host-commands.js` 同一口径。
+#[tauri::command]
+fn set_window_appearance(window: Window, appearance: String) -> Result<(), String> {
+    let theme = match appearance.as_str() {
+        "dark" => Theme::Dark,
+        "light" => Theme::Light,
+        other => return Err(format!("Unknown appearance: {other}")),
+    };
+
+    window
+        .set_theme(Some(theme))
+        .map_err(|error| format!("Unable to set window appearance: {error}"))
 }
 
 #[derive(serde::Serialize)]
@@ -215,6 +233,7 @@ pub fn run() {
             toggle_window_maximize,
             minimize_window,
             close_window,
+            set_window_appearance,
             notify_turn_complete
         ])
         .build(tauri::generate_context!())
@@ -244,12 +263,14 @@ fn create_main_window(app: &AppHandle, api_base: Option<&str>) -> tauri::Result<
     #[cfg(target_os = "macos")]
     {
         use tauri::window::{Effect, EffectState, EffectsBuilder};
+        // `FollowsWindowActiveState` = Electron 侧的 `visualEffectState: "followWindow"`。
+        // `effects()` 返回 builder 本身（不是 Result），所以不能加 `?`。
         builder = builder.effects(
             EffectsBuilder::new()
                 .effect(Effect::Sidebar)
-                .state(EffectState::FollowWindow)
+                .state(EffectState::FollowsWindowActiveState)
                 .build(),
-        )?;
+        );
     }
 
     if let Some(url) = api_base {
