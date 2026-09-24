@@ -41,6 +41,10 @@ import { composeTurnNotificationBody, resolveTurnNotificationLabel, shouldNotify
 import { deriveSessionTitle } from "../../shared/sessionTitle";
 import { isSessionBusy } from "../../shared/sessionBusy";
 import {
+  queuedComposerEntriesFromBubbles,
+  type ClearedComposerQueue,
+} from "./queuedComposerText";
+import {
   createChatStreamView,
   finalizeChatStreamView,
   projectStreamEvent,
@@ -1924,8 +1928,10 @@ export function usePiDesktopApp() {
 
   // onClearedQueue：/api/stop 响应一到就回调（不等 idle 轮询），把服务端 clearQueue()
   // 取出的未消费 steering / follow-up 原文交还给调用方，用于按 pi TUI 行为退回编辑器。
+  // 带内联徽标的消息，pi 队列里的原文夹着附件路径/元数据块，所以一并把本地排队气泡的
+  // parts 交出去 —— 编辑器才能按原样还原徽标，而不是把元数据块当文本贴回去。
   // （不用 useCallback：回调参数无法进 deps 数组作用域，且 stopTurn 无 effect/memo 依赖）
-  async function stopTurn(onClearedQueue?: (cleared: { steering: string[]; followUp: string[] }) => void) {
+  async function stopTurn(onClearedQueue?: (cleared: ClearedComposerQueue) => void) {
     if (state.isStopping || (!state.isStreaming && !state.isCompacting)) {
       return;
     }
@@ -1934,6 +1940,8 @@ export function usePiDesktopApp() {
       return;
     }
     const streamState = getSessionStreamState(sessionPath);
+    // 停止前先抓本地排队气泡：/api/stop 的响应会把它们从 UI 上清掉，之后再取就晚了。
+    const queuedEntries = queuedComposerEntriesFromBubbles(currentBubbles(sessionPath) ?? []);
     streamState.lifecycleGeneration += 1;
     const stopRequestId = ++stopRequestIdRef.current;
     reportDiagnostic("client.stop.start", {
@@ -1966,6 +1974,7 @@ export function usePiDesktopApp() {
       onClearedQueue?.({
         steering: next.clearedQueue?.steering ?? [],
         followUp: next.clearedQueue?.followUp ?? [],
+        entries: queuedEntries,
       });
       if (activeSessionPathRef.current === sessionPath) {
         replaceBootstrap(next.snapshot, sessionPath);
