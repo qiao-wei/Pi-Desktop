@@ -926,7 +926,9 @@ p {
   transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
 
-.composer-surface:focus-within {
+/* 程序化 focus（新建/切换会话）时 surface 上会带 data-focus-quiet，压住绿框；
+   用户点/敲一下（见 clearComposerFocusQuiet）属性就被摘掉，绿框恢复。 */
+.composer-surface:focus-within:not([data-focus-quiet="true"]) {
   border-color: #1f7a5b;
   box-shadow: 0 0 0 3px rgba(31, 122, 91, 0.14);
 }
