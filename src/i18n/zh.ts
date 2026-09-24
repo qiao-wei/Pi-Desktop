@@ -372,6 +372,7 @@ export const zh = {
   "dialog.removeAction": "移除",
   "dialog.archiveSessionTitle": "归档会话",
   "dialog.archiveSessionDesc": "归档 {title}？归档只是把它从侧栏收起，可在「设置 → 归档聊天」里取消归档；「直接删除」则会永久删除会话文件。",
+  "dialog.archiveSessionDescWorktree": "归档 {title}？归档只是把它从侧栏收起，可在「设置 → 归档聊天」里取消归档；「直接删除」会永久删除会话文件，并一起删掉这条会话的 worktree（里面还有未提交内容时会保留）。",
   "dialog.archiveAction": "归档",
   "dialog.deleteSessionForever": "直接删除",
   "dialog.newProjectTitle": "新建项目",

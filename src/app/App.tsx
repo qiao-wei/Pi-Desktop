@@ -5658,7 +5658,7 @@ function ProjectSidebar({
                     onPinSession={onPinSession}
                     onHoverSession={showSessionCard}
                     onHoverEnd={scheduleHideHoverCard}
-                    onArchive={(title) => setDialog({ kind: "archive-session", projectId, sessionPath: session.path, title })}
+                    onArchive={(title) => setDialog({ kind: "archive-session", projectId, sessionPath: session.path, title, inWorktree: Boolean(session.inWorktree) })}
                   />
                 ))}
               </div>
@@ -5810,7 +5810,7 @@ function ProjectSidebar({
                       onPinSession={onPinSession}
                       onHoverSession={showSessionCard}
                       onHoverEnd={scheduleHideHoverCard}
-                      onArchive={(title) => setDialog({ kind: "archive-session", projectId: project.id, sessionPath: session.path, title })}
+                      onArchive={(title) => setDialog({ kind: "archive-session", projectId: project.id, sessionPath: session.path, title, inWorktree: Boolean(session.inWorktree) })}
                     />
                   ))}
                   {hasMoreSessions ? (
@@ -6133,7 +6133,7 @@ type SidebarDialog =
   | { kind: "create-project"; name: string; cwd: string }
   | { kind: "edit-project"; project: ProjectSummary; name: string; cwd: string }
   | { kind: "remove-project"; project: ProjectSummary }
-  | { kind: "archive-session"; projectId: string; sessionPath: string; title: string };
+  | { kind: "archive-session"; projectId: string; sessionPath: string; title: string; inWorktree?: boolean };
 
 function SidebarDialogView({
   dialog,
@@ -6197,7 +6197,7 @@ function SidebarDialogView({
             <AlertDialogDescription>
               {dialog.kind === "remove-project"
                 ? t("dialog.removeProjectDesc", { name: dialog.project.name })
-                : t("dialog.archiveSessionDesc", { title: dialog.title })}
+                : t(dialog.inWorktree ? "dialog.archiveSessionDescWorktree" : "dialog.archiveSessionDesc", { title: dialog.title })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
