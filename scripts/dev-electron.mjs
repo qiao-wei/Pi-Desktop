@@ -1,5 +1,5 @@
 // `npm run electron:dev` = what tauri.conf.json's `beforeDevCommand` + `devUrl`
-// do for the Tauri shell: bring up the dev stack (bun bridge + vite) and attach
+// do for the Tauri shell: bring up the dev stack (bridge + vite) and attach
 // the Electron shell to it. If a dev stack is already answering on 5176 we just
 // attach, so re-running the command is cheap.
 import { spawn } from "node:child_process";
@@ -22,7 +22,7 @@ if (await isUp(devUrl)) {
 } else {
   console.log(`[electron:dev] starting bridge + vite (${devUrl})...`);
   const stack = spawnChild(process.execPath, [devStack], { stdio: "inherit" });
-  // A dead stack (port taken, bun missing) must not leave the shell staring at
+  // A dead stack (port taken, entry missing) must not leave the shell staring at
   // an origin that will never answer.
   stack.on("exit", (code, signal) => {
     if (!exiting) {

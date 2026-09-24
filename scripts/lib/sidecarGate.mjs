@@ -1,11 +1,12 @@
 /**
- * Build gate for the compiled bridge.
+ * Build gate for the assembled bridge.
  *
- * `bun build --compile` is not reproducible on this project: consecutive builds of the *same*
- * `server/index.mjs` produce different binaries, and a runtime-loaded pi extension that
- * imports from `@earendil-works/pi-ai` can come out as `Failed to load extension: Type3 is not
- * defined`. Before this gate that only showed up on the user's machine, as "I installed the
- * package and it still doesn't work".
+ * Compiling the bridge into one executable - what the retired compiled sidecar did - is not
+ * reproducible on this project: consecutive builds of the *same* `server/index.mjs` produce
+ * different binaries, and a runtime-loaded pi extension that imports from
+ * `@earendil-works/pi-ai` can come out as `Failed to load extension: Type3 is not defined`. Before
+ * this gate that only showed up on the user's machine, as "I installed the package and it still
+ * doesn't work".
  *
  * So: boot the artifact we just built, ask it what it really loaded, and refuse to ship it if a
  * selected package did not reach the session.
