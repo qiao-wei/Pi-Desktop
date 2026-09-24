@@ -19,11 +19,10 @@ import test from "node:test";
 
 import { contrast, flatten, resolveColor, type RGB, type Tokens } from "./lib/cssColor.ts";
 import { themeTokens } from "./lib/cssTokens.ts";
+import { defaultThemeCss } from "./lib/themeSources.ts";
 
 const stylesCss = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");
-const TOKENS: Tokens = themeTokens(
-  readFileSync(new URL("../src/app/tailwind.css", import.meta.url), "utf8"),
-);
+const TOKENS: Tokens = themeTokens(defaultThemeCss);
 
 /** WCAG 1.4.11 minimum for a graphical object that carries meaning. */
 const MIN_CONTRAST = 3;

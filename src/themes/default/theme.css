@@ -1,0 +1,171 @@
+/*
+ * 默认主题：暖白底 + 绿色强调色（原始配色）。
+ *
+ * **它同时是所有人的基础层** —— 这里刻意写裸 `:root` / `.dark`，不带
+ * `[data-appearance]` 门控，所以 `<html data-appearance="…">` 指向一个不存在的主题
+ * 时，界面就落到这套 token 上，不会变成白板（这是「不需要主题白名单」的前提）。
+ * 新增主题请从 `../codex/theme.css` 抄，并把每条规则门控到自己的 id 上。
+ * 约定见 `../README.md`。
+ */
+
+/*
+ * shadcn/ui default theme (base color: neutral).
+ *
+ * Sets the inherited text color but deliberately not a background: the Tauri
+ * window is frameless and relies on `body { background: transparent }` from
+ * styles.css, so painting the body here would break the rounded window shell
+ * and the custom titlebar drag region.
+ */
+:root {
+  --radius: 0.625rem;
+
+  color: var(--foreground);
+
+  --background: oklch(0.995 0.002 95);
+  --foreground: oklch(0.19 0.01 95);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.28 0.01 95);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.95 0.004 95);
+  --secondary-foreground: oklch(0.25 0.01 95);
+  --muted: oklch(0.955 0.004 95);
+  --muted-foreground: oklch(0.5 0.01 95);
+  --accent: oklch(0.925 0.006 95);
+  --accent-foreground: oklch(0.22 0.01 95);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.87 0.006 95);
+  --input: oklch(0.87 0.006 95);
+  --ring: oklch(0.56 0.01 95);
+  --app-sidebar-surface: #f2f2f2;
+  --app-content-surface: #ffffff;
+  --app-header-border: #d9d9d9;
+
+  /*
+   * 遗留兼容 token（"legacy compat"）。
+   *
+   * `styles.css` 是从旧设计里长出来的：它还有近百处写死的颜色，不属于上面这套
+   * shadcn 语义 token（那是控件层的），而属于「暖白 + 绿色」这套原始配色本身。
+   * 一个主题要真的换掉整套观感，就必须连这些颜色一起换，所以把它们按**角色**
+   * 收敛成下面这组 `--app-*`，写死的字面量全部搬到这里。
+   *
+   * 缺省值刻意保持原字面量不变（少数肉眼不可分的邻近色阶做了合并，注释里标了
+   * `collapsed:`），因此默认主题的观感与改造前一致。
+   */
+  --app-accent: #1f7a5b;
+  --app-accent-hover: #1f5f49; /* collapsed: #1f5a4b */
+  --app-accent-strong: #176a50;
+  --app-accent-ink: #1c5f48; /* collapsed: #1c6850 */
+  --app-accent-wash: #edf3ef; /* collapsed: #edf2ef, #f2f6f3, #e4ebe7 */
+  --app-accent-tint: #e7f4ee; /* collapsed: #e0f1e9, #edf7f1, #edf7f2, #edf8f2 */
+  --app-accent-track: #dfe5e1;
+  --app-ink: #17231e; /* collapsed: #15221d, #18231f, #202724 */
+  --app-ink-strong: #111111; /* collapsed: #111 */
+  --app-ink-medium: #26312d; /* collapsed: #25302c, #27312d */
+  --app-ink-soft: #4f665d; /* collapsed: #4e5e56, #51605a, #405149, #5a6560 */
+  --app-ink-muted: #68756f; /* collapsed: #656d68, #69756f, #707975, #7a827e */
+  --app-ink-faint: #87908b; /* collapsed: #8a938e, #9aa39d */
+  --app-ink-disabled: #a2a8a5;
+  --app-border: #d8d0c3; /* collapsed: #d8d3ca, #8da79b */
+  --app-border-subtle: #eee8dd;
+  --app-rule: #ded7ca;
+  --app-surface-tile: #efede6; /* collapsed: #f5f3ee, #f0efeb */
+  --app-surface-tile-hover: #e8e5de; /* collapsed: #e8e8e8, #e8e4dd, #e3e5e4, #e1ded7 */
+  --app-surface-inset: #f0eee9; /* collapsed: #e8e5de */
+  --app-chip-bg: #3d3d3d;
+  --app-chip-ink: #ffffff;
+  --app-danger: #bf3f3f;
+  --app-danger-hover: #9e3030;
+  --app-danger-strong: #b94a3f;
+  --app-danger-border: #e2b8b1; /* collapsed: #f0c8c4, #e6c3bd */
+  --app-danger-wash: #fff3f1; /* collapsed: #ffe8e5, #fdf1ef */
+  --app-danger-ink: #963b31; /* collapsed: #8a3832, #8c3d36, #8b3d35, #9a3c33, #8c2f22 */
+  --app-warning-border: #e5d8b8;
+  --app-warning-wash: #fdf8ec;
+  --app-warning-ink: #6b5320;
+  --app-info: #6f3ef7;
+  --app-info-deep: #5f5aa2;
+  --app-info-wash: #e6d7ff;
+  --app-success: #079445;
+  --app-success-wash: #cef9de;
+  /*
+   * 参考项目（PI-Desktop，Codex 视觉系统）的表层机制。
+   * 缺省值刻意等于改造前的渲染结果：侧栏不透明、无光泽、无模糊，阴影/圆角就是
+   * 原来那些字面量。主题 block 负责整档改写它们。
+   */
+  --app-sidebar-glass-tint: var(--app-sidebar-surface);
+  --app-sidebar-sheen-top: none;
+  --app-sidebar-sheen-bottom: none;
+  --app-sidebar-image: none;
+  --app-sidebar-blur: none;
+  --app-titlebar-surface: var(--app-sidebar-surface);
+  --app-main-surface: var(--app-content-surface);
+  --app-shell-surface: var(--muted);
+  --app-shell-border: var(--border);
+  --app-composer-border: var(--border);
+  --app-shadow-window: 0 18px 56px rgba(20, 24, 22, 0.18);
+  --app-shadow-popover: 0 8px 26px rgba(0, 0, 0, 0.13), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --app-shadow-toast: 0 10px 28px rgba(20, 24, 22, 0.18);
+  --app-shadow-drawer-left: -24px 0 54px rgba(20, 24, 22, 0.16);
+  --app-shadow-drawer-right: 24px 0 54px rgba(20, 24, 22, 0.16);
+  --app-drop-accent: #539af8;
+  --app-scrim: rgba(22, 35, 30, 0.18);
+
+  /* 圆角阶梯（参考项目 tokens.css §6.2）。styles.css 里的写死 px 收敛到这里，
+     主题可以整档调粗 —— codex 用的就是参考项目 14/18/20 那几档。 */
+  --app-radius-tiny: 4px;
+  --app-radius-nested: 5px;
+  --app-radius-chip: 6px;
+  --app-radius-tool: 7px;
+  --app-radius-control: 8px;
+  --app-radius-panel-sm: 10px;
+  --app-radius-panel: 12px;
+  --app-radius-code: 8px;
+  --app-radius-composer: 8px;
+  --app-radius-pill: 999px;
+  --app-radius-round: 50%;
+
+  /* 阴影阶梯（参考项目 §6.3）：浅色三级轻阴影，深色只留 0.5px 描边。 */
+  --app-shadow-sm: 0 8px 22px rgba(18, 22, 20, 0.08);
+  --app-shadow-md: 0 5px 18px rgba(18, 22, 20, 0.12);
+  --app-shadow-lg: 0 14px 34px rgba(18, 22, 20, 0.18);
+  --app-shadow-menu: 0 14px 34px rgba(40, 50, 45, 0.18);
+  --app-shadow-dialog: 0 18px 48px rgba(18, 22, 20, 0.2);
+  --app-elevation-stroke: 0 0 0 0;
+
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --app-sidebar-surface: #181818;
+  --app-content-surface: #202020;
+  --app-header-border: #3a3a3a;
+
+  /*
+   * 注意：这里**故意不**覆盖 `--app-*`。深色下大多数遗留规则仍然是"浅色控件落在
+   * 深色画布上"（只有 `.dark …` 列出的那一小批被重写过），所以这些字面量的深色
+   * 取值与浅色相同 —— 保持原样才是真正的"默认主题不变"。
+   */
+}
+

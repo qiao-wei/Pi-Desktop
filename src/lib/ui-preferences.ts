@@ -1,26 +1,35 @@
 const UI_PREFS_KEY = "pi-desktop.ui.v1";
 
 /**
- * 界面配色主题（与 `theme` 的浅色/深色正交）：
- * - `default`：Pi Desktop 原有配色（暖白底 + 绿色点缀），缺省值；
- * - `codex`：中性灰阶 + 深色侧栏，参考 PI-Desktop 的 Codex 风格视觉系统。
+ * 界面配色主题（与 `theme` 的浅色/深色正交）：`default`（缺省）、`codex` 等。
  *
  * 应用方式：`<html data-appearance="…">`，配合 `.dark` class 一起决定最终配色。
+ *
+ * 这里**刻意没有主题 id 的枚举**：主题清单来自目录（`src/themes/<id>/`），而本模块
+ * 要能在 `node --test` 里加载。已知性判断在 `src/themes/index.ts` 的
+ * `resolveAppearance()` 里做，见下面 `normalizeAppearance()` 的注释。
  */
-export type UiAppearance = "default" | "codex";
+
+/** 主题 id 的字面形态：小写字母/数字/连字符，≤32 字符。 */
+const APPEARANCE_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 /**
- * 读取持久化偏好时用它兜底：localStorage 里可能是旧版本或手改的任意字符串，
- * 未知值一律落回缺省主题，避免 `<html>` 上挂一个没有样式定义的值（界面全裸）。
+ * 读持久化偏好时用它兜底：localStorage 里可能是旧版本、手改或非字符串的任意值。
+ *
+ * 只做**卫生检查**，不判断 id 是否真的有对应主题：
+ * - 「未知但形态合法」的 id 会在 `src/themes/index.ts` 的 `resolveAppearance()` 里
+ *   落回默认主题；
+ * - 就算两边都漏掉，`data-appearance` 指不到任何主题块时界面也只会渲染成默认主题
+ *   （默认主题是裸 `:root`，见 `src/themes/default/theme.css`）。
  */
-export function normalizeAppearance(value: unknown): UiAppearance {
-  return value === "codex" ? "codex" : "default";
+export function normalizeAppearance(value: unknown): string {
+  return typeof value === "string" && APPEARANCE_ID.test(value) ? value : "default";
 }
 
 export interface UiPreferences {
   theme: "light" | "dark";
-  /** 配色主题；缺省 = `default`（原有配色）。`loadUiPreferences()` 会把它归一到已知值。 */
-  appearance: UiAppearance;
+  /** 配色主题 id（`src/themes/<id>/` 的目录名）；缺省 = `default`。见 `normalizeAppearance()`。 */
+  appearance: string;
   /** UI language; absent = follow the OS (resolved once by src/i18n at startup). */
   locale?: "zh" | "en";
   leftSidebarWidth: number;
@@ -68,8 +77,8 @@ export function loadUiPreferences(): UiPreferences {
     return {
       ...defaultUiPreferences,
       ...parsed,
-      // 只认已知主题：手改/旧版本里的未知字符串会让 `<html data-appearance>` 指向一个
-      // 没有任何样式块命中的值，整个界面就只剩浏览器默认样式。
+      // 只做形态卫生：未知但合法的 id 交给 `src/themes/index.ts` 的
+      // `resolveAppearance()` 落回默认主题。
       appearance: normalizeAppearance(parsed.appearance),
     };
   } catch {

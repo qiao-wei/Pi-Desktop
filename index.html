@@ -15,7 +15,10 @@
           var dark = prefs.theme === "dark";
           root.classList.toggle("dark", dark);
           root.style.colorScheme = dark ? "dark" : "light";
-          root.dataset.appearance = prefs.appearance === "codex" ? "codex" : "default";
+          /* 主题 id 直接透传（不在这里维护白名单）：不存在的 id 没有任何主题块命中，
+             渲染层会落到基础层，也就是默认主题。见 src/themes/README.md。 */
+          root.dataset.appearance =
+            typeof prefs.appearance === "string" ? prefs.appearance : "default";
           /* 侧栏玻璃只在真有原生 material 的平台上成立（参考 chrome.css:427 的
              `:root[data-platform="darwin"]`）。没有 material 时 tint 会叠在白画布上，
              变成一块洗白的板子，所以其它平台退回不透明侧栏。 */

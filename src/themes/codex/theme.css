@@ -1,0 +1,496 @@
+/*
+ * Codex 主题：参考 PI-Desktop（Codex 视觉系统）的完整复刻。
+ *
+ * 文件内顺序**必须**保持：浅色 token → darwin 浅色 → 深色 token → darwin 深色 →
+ * chrome/结构覆盖。前四块的权重相同（深色比浅色多一个 `.dark`）时靠先后定胜负，
+ * 所以别重排；主题之间的加载顺序则无所谓（每条规则都带 `[data-appearance]` 门控）。
+ * 约定与「怎么加新主题」见 `../README.md`。
+ */
+
+/*
+ * ============================================================================
+ * 配色主题："codex" —— 参考 PI-Desktop（Codex 视觉系统）的完整复刻
+ * ============================================================================
+ *
+ * 一个主题 = 对同一批 token 的**完整**覆盖，浅色/深色各一套：
+ *
+ *   :root[data-appearance="codex"]          → 浅色（Codex electron-light）
+ *   :root[data-appearance="codex"].dark     → 深色（Codex electron-dark，参考项目的主主题）
+ *
+ * 两条选择器必须放在 `.dark` 之后，且深色那条要比浅色那条多一个选择器权重：
+ * `:root[data-appearance="codex"]` 是 (0,2,0)，会盖过单独的 `.dark` (0,1,0)。
+ *
+ * 取值逐条来自参考项目 `apps/desktop/src/styles/tokens.css`：
+ *   §4.2 深色 / §4.3 浅色配色, §6.2 圆角阶梯, §6.3 阴影, §6.4 表层与玻璃。
+ * 侧栏玻璃是 `chrome.css:427-445` 的做法：原生 vibrancy 提供模糊（见
+ * `src-electron/main.js`），渲染层只叠一层薄 tint + 上下两道 sheen，
+ * `--app-sidebar-image` 是留给渐变/图片的另一层。
+ *
+ * 按参考项目 `scripts/style-surface-tokens.mjs` 的约定：token block 里允许字面量，
+ * 组件规则里不允许 —— codex 的所有颜色都在这里，`styles.css` 只读 token。
+ */
+:root[data-appearance="codex"] {
+  color-scheme: light;
+
+  /* --- shadcn 语义 token（参考 §4.3 light） --- */
+  --background: #ffffff;
+  --foreground: #1a1c1f;
+  --card: #ffffff;
+  --card-foreground: #1a1c1f;
+  --popover: #ffffff;
+  --popover-foreground: #1a1c1f;
+  --primary: #1a1c1f;
+  --primary-foreground: #ffffff;
+  --secondary: #f9f9f9;
+  --secondary-foreground: #1a1c1f;
+  --muted: #f3f3f3;
+  --muted-foreground: #5d5d5d;
+  --accent: #f3f3f3;
+  --accent-foreground: #1a1c1f;
+  --destructive: #e02e2a;
+  --destructive-foreground: #ffffff;
+  /* 参考 --ds-border-default / --ds-border-subtle：不是实色，是 8% / 5% 墨 */
+  --border: color-mix(in oklab, #1a1c1f 8%, transparent);
+  --input: color-mix(in oklab, #1a1c1f 8%, transparent);
+  --ring: #1a1c1f;
+
+  /* 圆角阶梯：参考项目整体比我们粗两档（§6.2），明暗同档 */
+  --radius: 1rem;
+  --app-radius-tiny: 4px;
+  --app-radius-nested: 10px;
+  --app-radius-chip: 8px;
+  --app-radius-tool: 10px;
+  --app-radius-control: 10px;
+  --app-radius-panel-sm: 14px;
+  --app-radius-panel: 18px;
+  --app-radius-code: 14px;
+  --app-radius-composer: 20px;
+  --app-radius-pill: 999px;
+  --app-radius-round: 50%;
+
+  /* --- 阴影阶梯（§6.3 light）+ 浮层 0.5px 描边（§6.4） --- */
+  --app-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --app-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --app-shadow-lg: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --app-shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --app-shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.12);
+  --app-shadow-window: none;
+  --app-elevation-stroke: 0 0 0 0.5px color-mix(in oklab, #1a1c1f 12%, transparent);
+
+  /* --- 侧栏（§6.4）。非 macOS 没有原生 material，侧栏就是不透明的一块；
+         玻璃那层（tint + sheen + 模糊）只在 darwin 上加，见下方平台块 --- */
+  --app-sidebar-surface: #f3f3f3;
+  --app-sidebar-glass-tint: #f3f3f3;
+  --app-sidebar-sheen-top: none;
+  --app-sidebar-sheen-bottom: none;
+  --app-sidebar-image: none;
+  --app-sidebar-blur: none;
+  /* 参考 chrome.css：主面板与标题栏是不透明 bg-primary，只有侧栏吃玻璃 */
+  --app-titlebar-surface: var(--background);
+  --app-content-surface: #ffffff;
+  --app-main-surface: var(--app-content-surface);
+  --app-header-border: transparent;
+  --app-shell-surface: var(--background);
+  --app-shell-border: transparent;
+  --app-composer-border: transparent;
+  /* 参考 §6.3/§10：工具条 46px（我们原本是 40px） */
+  --titlebar-height: 46px;
+  --app-shadow-popover: var(--app-shadow-menu);
+  --app-shadow-toast: var(--app-shadow-menu);
+  --app-shadow-drawer-left: var(--app-shadow-menu);
+  --app-shadow-drawer-right: var(--app-shadow-menu);
+  --app-drop-accent: #1a1c1f;
+  --app-scrim: color-mix(in oklab, #1a1c1f 28%, transparent);
+
+  /* --- 强调色：单色。浅色下是墨，深色下是白（§4.2/§4.3） --- */
+  --app-accent: #1a1c1f;
+  --app-accent-hover: #303030;
+  --app-accent-strong: #1a1c1f;
+  --app-accent-ink: #1a1c1f;
+  --app-accent-wash: #f3f3f3;
+  --app-accent-tint: #ededed;
+  --app-accent-track: #ededed;
+
+  /* --- 墨阶（§4.3 light：secondary 74% / muted 500 / faint 300） --- */
+  --app-ink: #1a1c1f;
+  --app-ink-strong: #1a1c1f;
+  --app-ink-medium: #1a1c1f;
+  --app-ink-soft: #5d5d5d;
+  --app-ink-muted: #5d5d5d;
+  --app-ink-faint: #8e8e8e; /* 参考 faint 是 #afafaf；我们拿它画小号辅助文字，压深一档保住 ≥3:1 */
+  --app-ink-disabled: #afafaf;
+
+  /* --- 分区不用描边（D297），结构靠 tonal layer：tile 3.5% → hover 6% → deep 8% --- */
+  --app-border: color-mix(in oklab, #1a1c1f 8%, transparent);
+  --app-border-subtle: color-mix(in oklab, #1a1c1f 5%, transparent);
+  --app-rule: color-mix(in oklab, #1a1c1f 5%, transparent);
+  --app-surface-tile: color-mix(in oklab, #1a1c1f 3.5%, transparent);
+  --app-surface-tile-hover: color-mix(in oklab, #1a1c1f 6%, transparent);
+  --app-surface-inset: #ededed;
+  --app-chip-bg: #1a1c1f;
+  --app-chip-ink: #ffffff;
+
+  /* --- 状态色（参考 §4.2 的 --ds-error/warning/success/info/purple 浅色档） --- */
+  --app-danger: #e02e2a;
+  --app-danger-hover: #b8231f;
+  --app-danger-strong: #e02e2a;
+  --app-danger-border: color-mix(in oklab, #e02e2a 25%, transparent);
+  --app-danger-wash: color-mix(in oklab, #e02e2a 8%, #ffffff);
+  --app-danger-ink: color-mix(in oklab, #e02e2a 82%, #1a1c1f);
+  --app-warning-border: color-mix(in oklab, #e25507 25%, transparent);
+  --app-warning-wash: color-mix(in oklab, #e25507 8%, #ffffff);
+  --app-warning-ink: color-mix(in oklab, #e25507 82%, #1a1c1f);
+  --app-info: #5d5d5d;
+  --app-info-deep: #303030;
+  --app-info-wash: #ededed;
+  --app-success: #00a240;
+  --app-success-wash: color-mix(in oklab, #00a240 10%, #ffffff);
+
+  /*
+   * Tailwind 调色板家族重定向。
+   *
+   * `.tsx` 里还有 131 处写死的 `text-emerald-600` / `bg-amber-950/40` 这类调色板类，
+   * 组件规则改不到它们 —— 但 Tailwind v4 把它们编译成 `var(--color-emerald-600)`，
+   * 所以覆盖这些变量就等于覆盖了那 131 处，不用动一个组件。
+   *
+   * 换的是**色相**：每个色阶的 oklch 亮度/彩度原样保留，只把 hue 换成参考项目的
+   * 语义状态色（success/warning/error/info/purple）。因此每个类在任何底色上的对比度
+   * 与改造前完全一致，不会引入可读性回归；观感上则从"我们的绿/蓝/紫"变成参考项目的
+   * 橙/绿/红/中性灰。
+   *
+   * `*-900` 以上与 `sky/blue/cyan` 一起收成中性灰，对应参考项目 `--ds-info: gray-300/500`
+   * 的单色 informational 语义。
+   */
+  --color-emerald-50: oklch(97.9% 0.021 152.9);
+  --color-emerald-100: oklch(95% 0.052 152.9);
+  --color-emerald-200: oklch(90.5% 0.093 152.9);
+  --color-emerald-400: oklch(76.5% 0.1664 152.9);
+  --color-emerald-500: oklch(69.6% 0.1664 152.9);
+  --color-emerald-600: oklch(59.6% 0.145 152.9);
+  --color-emerald-700: oklch(50.8% 0.118 152.9);
+  --color-emerald-800: oklch(43.2% 0.095 152.9);
+  --color-emerald-900: oklch(37.8% 0.077 152.9);
+  --color-emerald-950: oklch(26.2% 0.051 152.9);
+  --color-amber-50: oklch(98.7% 0.022 45.1);
+  --color-amber-100: oklch(96.2% 0.059 45.1);
+  --color-amber-200: oklch(92.4% 0.12 45.1);
+  --color-amber-300: oklch(87.9% 0.1658 45.1);
+  --color-amber-400: oklch(82.8% 0.1658 45.1);
+  --color-amber-500: oklch(76.9% 0.1658 45.1);
+  --color-amber-600: oklch(66.6% 0.1658 45.1);
+  --color-amber-800: oklch(47.3% 0.137 45.1);
+  --color-amber-900: oklch(41.4% 0.112 45.1);
+  --color-amber-950: oklch(27.9% 0.077 45.1);
+  --color-orange-500: oklch(70.5% 0.1658 45.1);
+  --color-rose-400: oklch(71.2% 0.1864 24.2);
+  --color-rose-500: oklch(64.5% 0.1864 24.2);
+  --color-rose-600: oklch(58.6% 0.1864 24.2);
+  --color-red-200: oklch(88.5% 0.062 24.2);
+  --color-sky-50: oklch(97.7% 0 89.9);
+  --color-sky-200: oklch(90.1% 0 89.9);
+  --color-sky-400: oklch(74.6% 0 89.9);
+  --color-sky-500: oklch(68.5% 0 89.9);
+  --color-sky-600: oklch(58.8% 0 89.9);
+  --color-sky-900: oklch(39.1% 0 89.9);
+  --color-sky-950: oklch(29.3% 0 89.9);
+  --color-blue-500: oklch(62.3% 0 89.9);
+  --color-cyan-500: oklch(71.5% 0 89.9);
+  --color-fuchsia-400: oklch(74% 0.1961 307.1);
+  --color-fuchsia-500: oklch(66.7% 0.1961 307.1);
+  --color-fuchsia-600: oklch(59.1% 0.1961 307.1);
+  --color-violet-500: oklch(60.6% 0.1961 307.1);
+}
+
+/*
+ * macOS 玻璃层（参考项目就是把这条限定在 `:root[data-platform="darwin"]`，
+ * 见 chrome.css:427）。原生 wibrancy 提供模糊，渲染层只叠一层薄 tint + 上下 sheen；
+ * 透明度过高会变成一块"油漆板"、把材质盖掉。同时把外壳让开，好让侧栏那列透出材质。
+ *
+ * 这条必须排在 codex 浅色块之后、codex 深色块之前：两者权重都是 (0,3,0)，
+ * 靠顺序决定胜负，深色块在后面才能在深色下赢回来。
+ */
+:root[data-platform="darwin"][data-appearance="codex"] {
+  --app-sidebar-glass-tint: color-mix(in oklab, #f3f3f3 55%, transparent);
+  --app-sidebar-sheen-top: linear-gradient(
+    180deg,
+    color-mix(in oklab, #ffffff 45%, transparent),
+    transparent 220px
+  );
+  --app-sidebar-sheen-bottom: linear-gradient(
+    0deg,
+    color-mix(in oklab, #ffffff 30%, transparent),
+    transparent 160px
+  );
+  --app-sidebar-blur: blur(30px) saturate(180%);
+  /* 参考项目原文："The main pane and titlebars remain opaque bg-primary"
+   * （chrome.css:426-445）。只有侧栏那一条是玻璃；主区必须不透明，否则
+   * 三列之间的 3px 抓取条会把原生材质漏成三道玻璃竖线。 */
+  --app-main-surface: var(--app-content-surface);
+  --app-shell-surface: transparent;
+  --app-shadow-window: none;
+}
+
+/*
+ * 深色档。注意这里**必须**把浅色档覆盖过的 `--app-*` 再覆盖一遍：默认主题的
+ * `.dark` 是故意不动 `--app-*` 的（它复用浅色字面量），codex 则两档都要自己定义，
+ * 否则深色下会落回 codex 浅色的取值。
+ */
+:root[data-appearance="codex"].dark {
+  color-scheme: dark;
+
+  --background: #181818;
+  --foreground: #ffffff;
+  --card: #212121;
+  --card-foreground: #ffffff;
+  --popover: #282828;
+  --popover-foreground: #ffffff;
+  --primary: #ffffff;
+  --primary-foreground: #181818;
+  --secondary: #212121;
+  --secondary-foreground: #ffffff;
+  --muted: #282828;
+  --muted-foreground: color-mix(in oklab, #ffffff 70%, transparent);
+  --accent: #282828;
+  --accent-foreground: #ffffff;
+  --destructive: #ff6764;
+  --destructive-foreground: #181818;
+  --border: color-mix(in oklab, #ffffff 8%, transparent);
+  --input: color-mix(in oklab, #ffffff 15%, transparent);
+  --ring: #ffffff;
+
+  /* 深色下浮层靠 0.5px 描边 + 黑阴影，没有浅色那种灰影（§6.3 dark / §6.4） */
+  --app-elevation-stroke: 0 0 0 0.5px color-mix(in oklab, #ffffff 12%, transparent);
+  --app-shadow-sm: var(--app-elevation-stroke);
+  --app-shadow-md: var(--app-elevation-stroke);
+  --app-shadow-lg: var(--app-elevation-stroke);
+  --app-shadow-menu: var(--app-elevation-stroke), 0 8px 24px rgba(0, 0, 0, 0.45);
+  --app-shadow-dialog: var(--app-elevation-stroke), 0 16px 48px rgba(0, 0, 0, 0.55);
+  --app-shadow-window: none;
+
+  /* 侧栏：参考项目深色 sidebar 是 under = #000（玻璃层同样只在 darwin 上加） */
+  --app-sidebar-surface: #000000;
+  --app-sidebar-glass-tint: #000000;
+  --app-sidebar-sheen-top: none;
+  --app-sidebar-sheen-bottom: none;
+  --app-sidebar-image: none;
+  --app-sidebar-blur: none;
+  --app-titlebar-surface: var(--background);
+  --app-content-surface: #181818;
+  --app-main-surface: var(--app-content-surface);
+  --app-header-border: transparent;
+  --app-shell-surface: var(--background);
+  --app-shell-border: transparent;
+  --app-composer-border: transparent;
+  --titlebar-height: 46px;
+  --app-shadow-popover: var(--app-shadow-menu);
+  --app-shadow-toast: var(--app-shadow-menu);
+  --app-shadow-drawer-left: var(--app-shadow-menu);
+  --app-shadow-drawer-right: var(--app-shadow-menu);
+  --app-drop-accent: #ffffff;
+  --app-scrim: color-mix(in oklab, #000000 45%, transparent);
+
+  --app-accent: #ffffff;
+  --app-accent-hover: #ededed;
+  --app-accent-strong: #ffffff;
+  --app-accent-ink: #ffffff;
+  --app-accent-wash: #282828;
+  --app-accent-tint: #303030;
+  --app-accent-track: #3a3a3a;
+
+  --app-ink: #ffffff;
+  --app-ink-strong: #ffffff;
+  --app-ink-medium: #ffffff;
+  --app-ink-soft: color-mix(in oklab, #ffffff 70%, transparent);
+  --app-ink-muted: color-mix(in oklab, #ffffff 52%, transparent);
+  --app-ink-faint: color-mix(in oklab, #ffffff 38%, transparent);
+  --app-ink-disabled: color-mix(in oklab, #ffffff 30%, transparent);
+
+  --app-border: color-mix(in oklab, #ffffff 8%, transparent);
+  --app-border-subtle: color-mix(in oklab, #ffffff 5%, transparent);
+  --app-rule: color-mix(in oklab, #ffffff 5%, transparent);
+  --app-surface-tile: color-mix(in oklab, #ffffff 3.5%, transparent);
+  --app-surface-tile-hover: color-mix(in oklab, #ffffff 6%, transparent);
+  --app-surface-inset: #0d0d0d;
+  --app-chip-bg: #ededed;
+  --app-chip-ink: #181818;
+
+  /* 圆角阶梯与浅色同档（明暗不改几何），显式列出满足"完整覆盖"约定 */
+  --radius: 1rem;
+  --app-radius-tiny: 4px;
+  --app-radius-nested: 10px;
+  --app-radius-chip: 8px;
+  --app-radius-tool: 10px;
+  --app-radius-control: 10px;
+  --app-radius-panel-sm: 14px;
+  --app-radius-panel: 18px;
+  --app-radius-code: 14px;
+  --app-radius-composer: 20px;
+  --app-radius-pill: 999px;
+  --app-radius-round: 50%;
+
+  --app-danger: #ff6764;
+  --app-danger-hover: #ff8583;
+  --app-danger-strong: #ff6764;
+  --app-danger-border: color-mix(in oklab, #ff6764 25%, transparent);
+  --app-danger-wash: color-mix(in oklab, #ff6764 12%, #181818);
+  --app-danger-ink: #ff8a87;
+  --app-warning-border: color-mix(in oklab, #ff8549 25%, transparent);
+  --app-warning-wash: color-mix(in oklab, #ff8549 12%, #181818);
+  --app-warning-ink: #ffc46b;
+  --app-info: #afafaf;
+  --app-info-deep: #afafaf;
+  --app-info-wash: #282828;
+  --app-success: #40c977;
+  --app-success-wash: color-mix(in oklab, #40c977 12%, #181818);
+}
+
+/* macOS 深色玻璃层。权重 (0,4,0)，排最后，深色下压过上面所有块。 */
+:root[data-platform="darwin"][data-appearance="codex"].dark {
+  --app-sidebar-glass-tint: color-mix(in oklab, #000000 40%, transparent);
+  --app-sidebar-sheen-top: linear-gradient(
+    180deg,
+    color-mix(in oklab, #ffffff 7%, transparent),
+    transparent 220px
+  );
+  --app-sidebar-sheen-bottom: linear-gradient(
+    0deg,
+    color-mix(in oklab, #ffffff 4%, transparent),
+    transparent 160px
+  );
+  --app-sidebar-blur: blur(30px) saturate(180%);
+  --app-main-surface: var(--app-content-surface);
+  --app-shell-surface: transparent;
+  --app-shadow-window: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * codex 主题的窗口 chrome：三列通高、上沿只有一条留白（参考 PI-Desktop）
+ *
+ * 参考项目在 macOS 用 `titleBarStyle: "hiddenInset"`：侧栏从窗口最顶端开始，红绿灯
+ * 浮在侧栏玻璃上，主面板自带的那条 band 就是「标题栏」（放着会话标题与分支信息），
+ * 上沿没有横向分界线；而且主面板与标题栏始终不透明（chrome.css:426-445 原文注释：
+ * “The main pane and titlebars remain opaque bg-primary”）。
+ *
+ * 我们的骨架是「全宽标题栏 + 底下三列」。对齐办法：把**三列一起抬到窗口顶端**
+ * （`margin-top` 顶出去、高度补回来），侧栏与右侧栏再用等量的 `padding-top` 把内容
+ * 压回红绿灯底下；**会话列不补 padding** —— 它自己的 `conversation-header`（文件夹
+ * 按钮 / 会话名 / 分支徽标）本来就有 45px 高，抬上去正好落在 46px 的带子里，于是
+ * 「下面那一排」就变成了窗口最上面那一排。两条 3px 抓取条也一起抬（右侧那条的
+ * `::before` 是整列常显的 1px 分隔线，抬上去它才会在标题栏那一段接得上）。
+ *
+ * 标题栏本身因此退成纯留白：自己不吃事件（`pointer-events: none`），中格那行居中的
+ * 会话名隐藏（和会话头重复），左格（红绿灯/侧栏开关）与右格（图标）继续当拖拽区；
+ * 主区那一条由会话头自己当拖拽区（里面的控件显式豁免）。
+ *
+ * 默认主题完全不受影响：每条都限定 `[data-appearance="codex"]`，默认档的标题栏
+ * 占位、表面与下边框都保持原样。
+ *
+ * 放这里（而不是 styles.css）是因为要覆盖 Tailwind 的 `h-[calc(100dvh-…)]`、
+ * `[-webkit-app-region:drag]` 这类工具类：styles.css 在 `legacy` 层，`utilities`
+ * 排在它后面，同属性会输。
+ *
+ * 窄屏（<920px）下侧栏是抽屉（`max-[920px]:fixed top-[var(--titlebar-height)]`）、
+ * 抓取条 `hidden`，不参与网格，所以通高那几条只在桌面档生效，别把抽屉也顶出窗口。
+ */
+@media (min-width: 921px) {
+  /* 网格容器默认 `overflow: hidden`，会把抬上去的那 46px 剪掉 —— 侧栏顶部只剩裸材质、
+   * 没有 tint/光泽，于是在 y=46 处露出一道硬缝。放行溢出，让背景从窗口顶端起算。 */
+  :root[data-appearance="codex"] .app-main {
+    overflow: visible;
+    /* 不透明背景要画在**格子**那一层，不能画在 .app-main 上：它会垫到侧栏玻璃底下，
+     * 材质就永远透不上来（实测：侧栏身部比顶部亮 5 阶，因为下面正好是主区的白）。 */
+    background: transparent;
+  }
+
+  /* 参考项目 chrome.css:426-445："The main pane and titlebars remain opaque”.
+   * 除了侧栏（它自己要留玻璃），所有格子 —— 会话列、右侧栏、两条 3px 抓取条 —— 都补上
+   * 不透明底色，这样窗口上沿只有侧栏那一条是玻璃。 */
+  :root[data-appearance="codex"] .app-main > :not(.project-sidebar-surface) {
+    background-color: var(--app-content-surface);
+  }
+
+  /* 会话列的**格子**（包着 .conversation-surface 的那层，不是 surface 自己）默认
+   * `overflow-hidden`，会把往上顶的 45px 裁掉：`getBoundingClientRect` 还报 y=1，但那里
+   * 既画不出来也接不到指针（`elementFromPoint` 只返回外壳）—— 会话头白抬。放行溢出。 */
+  :root[data-appearance="codex"] .conversation-column {
+    overflow: visible;
+  }
+
+  /* 三列都通高。侧栏/右侧栏/抓取条的内容位置不变，只有会话列是真的往上挪。 */
+  :root[data-appearance="codex"] .project-sidebar-surface,
+  :root[data-appearance="codex"] .context-panel-surface,
+  :root[data-appearance="codex"] .panel-resize-handle,
+  :root[data-appearance="codex"] .conversation-surface {
+    margin-top: calc(-1 * var(--titlebar-height));
+    height: calc(100% + var(--titlebar-height));
+  }
+
+  :root[data-appearance="codex"] .project-sidebar-surface,
+  :root[data-appearance="codex"] .context-panel-surface {
+    padding-top: var(--titlebar-height);
+  }
+
+  /* 会话头现在是窗口最上面那一排：整条可拖，只有控件豁免 —— Electron 拖拽命中会把
+   * 没豁免的按钮吃掉（参考 chrome.tsx 里的 `no-drag` 写法）。 */
+  :root[data-appearance="codex"] .conversation-header {
+    -webkit-app-region: drag;
+    position: relative;
+    /* 右边要给标题栏那两个图标（语言 / 面板开关）让位：**右侧面板收起时**主区顶到窗口
+     * 右缘，图标就直接压在分支信息上（实测重叠 59px）。面板自己占的宽度算进可用空间，
+     * 面板宽到 80px 以上时图标已经落在面板那一列里，就不再预留。
+     *
+     * 必须是 `margin` 不能是 `padding`：留位要**缩掉这条 drag 区自己的盒子**。padding 只
+     * 把内容往左挪，盒子照样伸到图标那一格底下 —— 而兄弟子树里的 `no-drag` 挖不动别人的
+     * drag 区（真机症状：面板收起时语言 / 面板两个图标全点不动，`padding-right` 那版就是
+     * 这样；默认主题没事是因为它的 drag 区正好是按钮的祖先，洞挖得掉）。 */
+    margin-right: calc(12px + max(0px, 80px - var(--right-panel-width, 0px)));
+  }
+
+  /* 同一类问题在左边：侧栏收起时主区顶到窗口左缘，红绿灯 / 侧栏开关会落进这条 drag
+   * 区里。用同宗（会话头自己的伪元素）的 no-drag 把左边那条挖掉 —— 侧栏展开时宽度算下来
+   * 是 0，不生效。留 `pointer-events: none`：它只负责拖拽命中，不能在渲染层挡住点击。 */
+  :root[data-appearance="codex"] .conversation-header::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    width: max(0px, 76px - var(--left-sidebar-width, 0px));
+    pointer-events: none;
+    -webkit-app-region: no-drag;
+  }
+
+  :root[data-appearance="codex"] .conversation-header button,
+  :root[data-appearance="codex"] .conversation-header a,
+  :root[data-appearance="codex"] .conversation-header [role="button"] {
+    -webkit-app-region: no-drag;
+  }
+}
+
+/*
+ * 标题栏退成一条留白：它的背景不能再自己画（三列都通高，底色已经由格子铺满），
+ * 自己也不吃事件（否则主区那一列的点击会被它吞掉、会话头里的按钮点不动）。
+ * 左格与右格仍是拖拽区；中格那行居中的会话名隐藏（下面那一排已经显示同一个标题）。
+ * 这三条不需要限定桌面档：窄屏下侧栏是抽屉，标题栏本来就该只是留白。
+ */
+:root[data-appearance="codex"] .app-titlebar {
+  /* 左格贴着侧栏宽度（红绿灯那一段可拖），中格让给会话头，右格仍是窗口图标。 */
+  grid-template-columns: var(--left-sidebar-width) minmax(0, 1fr) auto;
+  background: transparent;
+  border-bottom-color: transparent;
+  pointer-events: none;
+}
+
+:root[data-appearance="codex"] .app-titlebar > * {
+  pointer-events: auto;
+}
+
+/* 图标那一格自己声明 no-drag，不去依赖「按钮往父级挖洞」那条路径：这一格的盒子正好
+ * 覆盖语言 / 面板两个图标，把它整格从拖拽区里摘掉，图标就不会在任何模型下被吞。 */
+:root[data-appearance="codex"] .app-titlebar > :last-child {
+  -webkit-app-region: no-drag;
+}
+
+/* visibility 而不是 display：中格必须留在网格里，否则右格会掉到第二道轨道上。 */
+:root[data-appearance="codex"] .app-titlebar > :nth-child(2) {
+  visibility: hidden;
+}

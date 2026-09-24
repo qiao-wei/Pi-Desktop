@@ -1,10 +1,37 @@
 /**
- * Reads the shadcn/Tailwind custom-property blocks out of `src/app/tailwind.css`.
+ * Reads the shadcn/Tailwind custom-property blocks out of a theme's CSS
+ * (`src/themes/<id>/theme.css`, see `src/themes/README.md`).
  * Shared by the style tests so they resolve `var(--token)` exactly like the browser does.
  */
 import assert from "node:assert/strict";
 
 import type { Tokens } from "./cssColor.ts";
+
+/** shadcn 控件层 token：任何主题都必须定义它们，否则控件会半旧半新。 */
+export const SHADCN_TOKENS = [
+  "--background",
+  "--foreground",
+  "--card",
+  "--card-foreground",
+  "--popover",
+  "--popover-foreground",
+  "--primary",
+  "--primary-foreground",
+  "--secondary",
+  "--secondary-foreground",
+  "--muted",
+  "--muted-foreground",
+  "--accent",
+  "--accent-foreground",
+  "--destructive",
+  "--destructive-foreground",
+  "--border",
+  "--input",
+  "--ring",
+  "--app-sidebar-surface",
+  "--app-content-surface",
+  "--app-header-border",
+];
 
 function blockBody(css: string, selector: string, from: number): { body: string; end: number } {
   const at = css.indexOf(`${selector} {`, from);
@@ -69,9 +96,11 @@ export function appearanceDeclarations(
  * `{ light, dark }` token maps for one colour theme ("appearance").
  *
  * Each appearance overrides the base palette on `<html data-appearance="…">`:
- * a light block plus a darker `…].dark` block. They must sit **after** the base
- * `.dark` block in the file — `blockBody` finds blocks by first-occurrence text
- * search, so a codex block placed earlier would shadow the real `.dark` one.
+ * a light block plus a darker `…].dark` block, both inside that theme's own file.
+ * The caller passes the theme sources concatenated **with the default theme first**
+ * (see `tests/lib/themeSources.ts`): `blockBody` finds blocks by first-occurrence text
+ * search, so `.dark` has to match the real base block and not a
+ * `:root[data-appearance="codex"].dark` one.
  */
 export function appearanceTokens(
   css: string,

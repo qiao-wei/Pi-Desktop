@@ -2,8 +2,9 @@
  * 配色主题（appearance）回归。
  *
  * 背景：`styles.css` 从旧设计长出来，带着近百处写死的颜色。要让「换主题」真的成立，
- * 这些颜色必须先按**角色**收敛成 `--app-*` token（见 `src/app/tailwind.css` 的注释），
- * 一个主题就是对同一批 token 的完整覆盖。
+ * 这些颜色必须先按**角色**收敛成 `--app-*` token（见 `src/themes/default/theme.css` 的注释），
+ * 一个主题就是对同一批 token 的完整覆盖（主题按目录放在 `src/themes/<id>/`，
+ * 见 `src/themes/README.md`）。
  *
  * 这里钉住四类事实，都是「改错了不会报错、只会悄悄退化」的类型：
  * 1. 覆盖的完整性 —— token 是级联的，漏掉一个不会报错，只会掉回原配色；而且
@@ -19,58 +20,51 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { contrast, flatten, resolveColor, type RGB, type Tokens } from "./lib/cssColor.ts";
-import { appearanceDeclarations, appearanceTokens, blockTokens, themeTokens } from "./lib/cssTokens.ts";
+import {
+  appearanceDeclarations,
+  appearanceTokens,
+  blockTokens,
+  SHADCN_TOKENS,
+  themeTokens,
+} from "./lib/cssTokens.ts";
+import { codexThemeCss, defaultThemeCss, orderedThemeIds, themeSourcesCss } from "./lib/themeSources.ts";
 import { normalizeAppearance } from "../src/lib/ui-preferences.ts";
 
+/** Tailwind 骨架：layer 声明、`@theme` 映射、@custom-variant。主题 token 已搬到
+ *  `src/themes/<id>/theme.css`（见 `src/themes/README.md`）。 */
 const tailwindCss = readFileSync(new URL("../src/app/tailwind.css", import.meta.url), "utf8");
 const stylesCss = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");
 const prefsSource = readFileSync(new URL("../src/lib/ui-preferences.ts", import.meta.url), "utf8");
 const appTsx = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
 const indexHtml = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 
-/** shadcn 控件层 token：任何主题都必须定义它们，否则控件会半旧半新。 */
-const SHADCN_TOKENS = [
-  "--background",
-  "--foreground",
-  "--card",
-  "--card-foreground",
-  "--popover",
-  "--popover-foreground",
-  "--primary",
-  "--primary-foreground",
-  "--secondary",
-  "--secondary-foreground",
-  "--muted",
-  "--muted-foreground",
-  "--accent",
-  "--accent-foreground",
-  "--destructive",
-  "--destructive-foreground",
-  "--border",
-  "--input",
-  "--ring",
-  "--app-sidebar-surface",
-  "--app-content-surface",
-  "--app-header-border",
-];
-
 /* ------------------------------------------------------------------ 结构守卫 */
 
-test("codex 覆盖块排在基础 `.dark` 之后，且深色块多带一个选择器权重", () => {
-  const baseDark = tailwindCss.indexOf("\n.dark {");
-  const codexLight = tailwindCss.indexOf(':root[data-appearance="codex"] {');
-  const codexDark = tailwindCss.indexOf(':root[data-appearance="codex"].dark {');
-  assert.notEqual(baseDark, -1, "基础 `.dark` 块不见了");
+test("codex 深色块比浅色块多一个选择器权重，且 darwin 覆盖块各自紧跟在对应明暗之后", () => {
+  const codexLight = codexThemeCss.indexOf(':root[data-appearance="codex"] {');
+  const codexDark = codexThemeCss.indexOf(':root[data-appearance="codex"].dark {');
   assert.notEqual(codexLight, -1, "codex 浅色块不见了");
   assert.notEqual(codexDark, -1, "codex 深色块不见了");
-  // 顺序：`blockBody` 靠首次出现的文本定位，排在前面会把真正的 `.dark` 块顶掉。
-  assert.ok(codexLight > baseDark, "codex 浅色块必须排在 `.dark` 之后");
   assert.ok(codexDark > codexLight, "codex 深色块必须排在它的浅色块之后");
-  // 权重：`:root[data-appearance]` (0,2,0) 会盖过 `.dark` (0,1,0)；
-  // 深色块靠 `.dark` 再加一级，才能反过来盖住浅色块。
+  // 权重：`:root[data-appearance]` (0,2,0) 会盖过 `.dark` (0,1,0)；深色块靠 `.dark`
+  // 再加一级（0,3,0），才能反过来盖住浅色块。
   assert.ok(
-    codexDark > codexLight && tailwindCss.slice(codexDark, codexDark + 60).includes(".dark"),
+    codexThemeCss.slice(codexDark, codexDark + 60).includes(".dark"),
     "codex 深色块必须带 `.dark`，否则深色下会被浅色 token 盖住",
+  );
+  // 主题之间不靠顺序：默认主题是裸 `:root`（基础层 + 未知主题名的回落目标），
+  // 其它主题一律带 `[data-appearance]` 门控，靠权重分出胜负。这条是「不需要
+  // 主题白名单」的前提，所以在这里盯着默认主题的选择器形式（先去掉注释）。
+  const defaultCode = defaultThemeCss.replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(
+    defaultCode,
+    /(?:^|\n):root\s*\{/,
+    "默认主题必须写裸 `:root`（不能写成 :root[data-appearance=\"default\"]），" +
+      "否则未知主题名会渲染成一片没有 token 的白板",
+  );
+  assert.ok(
+    !defaultCode.includes("[data-appearance"),
+    "默认主题不允许出现 [data-appearance] 门控：它要能接住任何未识别的主题名",
   );
 });
 
@@ -83,14 +77,14 @@ test("styles.css 里不再有写死的颜色（否则主题覆盖不到它）", 
     literals,
     ["#000"],
     `styles.css 又出现了写死的颜色：${literals.join(", ")}。` +
-      "请按角色加进 tailwind.css 的 `--app-*` 并在这里的 codex 块里给值。",
+      "请按角色加进 `src/themes/default/theme.css` 的 `--app-*`，并在 codex 的 token 块里给值。",
   );
 });
 
 /* -------------------------------------------------------------- 默认主题不变 */
 
 test("默认主题仍然是原来那几个颜色（浅色与深色都一样）", () => {
-  const classic = themeTokens(tailwindCss);
+  const classic = themeTokens(defaultThemeCss);
   const expected: Record<string, string> = {
     "--app-accent": "#1f7a5b",
     "--app-ink": "#17231e",
@@ -109,8 +103,8 @@ test("默认主题仍然是原来那几个颜色（浅色与深色都一样）",
 /* ------------------------------------------------------------ 覆盖完整性/生效 */
 
 test("codex 在两种明暗下都定义了全部控件 token 与全部 `--app-*` 角色", () => {
-  const base = themeTokens(tailwindCss);
-  const own = appearanceDeclarations(tailwindCss, "codex");
+  const base = themeTokens(defaultThemeCss);
+  const own = appearanceDeclarations(codexThemeCss, "codex");
   const roleTokens = Object.keys(base.light).filter((name) => name.startsWith("--app-"));
   assert.ok(roleTokens.length >= 20, `角色 token 太少（${roleTokens.length}），收敛是不是没做全？`);
 
@@ -126,8 +120,8 @@ test("codex 在两种明暗下都定义了全部控件 token 与全部 `--app-*`
 });
 
 test("codex 的关键角色确实与原配色不同（切换有实际效果）", () => {
-  const classic = themeTokens(tailwindCss);
-  const codex = appearanceTokens(tailwindCss, "codex");
+  const classic = themeTokens(defaultThemeCss);
+  const codex = appearanceTokens(themeSourcesCss(), "codex");
   for (const token of ["--app-accent", "--app-ink", "--app-border", "--app-surface-tile"]) {
     assert.notEqual(codex.light[token], classic.light[token], `codex 浅色 ${token} 与原配色相同`);
     assert.notEqual(codex.dark[token], classic.dark[token], `codex 深色 ${token} 与原配色相同`);
@@ -178,9 +172,11 @@ function resolve(token: string, tokens: Tokens, page: RGB): RGB {
   return flatten(resolveColor(`var(${token})`, tokens), page);
 }
 
-for (const appearance of ["default", "codex"] as const) {
+for (const appearance of orderedThemeIds()) {
   const palettes =
-    appearance === "default" ? themeTokens(tailwindCss) : appearanceTokens(tailwindCss, appearance);
+    appearance === "default"
+      ? themeTokens(defaultThemeCss)
+      : appearanceTokens(themeSourcesCss(), appearance);
   for (const mode of ["light", "dark"] as const) {
     for (const pair of CONTRAST_PAIRS) {
       if (pair.modes && !pair.modes.includes(mode)) continue;
@@ -207,12 +203,18 @@ test("深色下 usage ring 里的百分比有覆盖（存量问题：深绿落�
   );
 });
 
-test("未知的主题 id 落回默认值，不会让 <html> 挂上无样式的值", () => {
+test("主题 id 只做形态卫生；未知/损坏的值落回默认主题", () => {
+  // 形态合法的 id 原样放行：到底有没有对应主题由 `src/themes/` 的目录决定
+  // （`themes/index.ts` 的 `resolveAppearance()`），这里只挡住垃圾值。
   assert.equal(normalizeAppearance("codex"), "codex");
+  assert.equal(normalizeAppearance("nord"), "nord");
   assert.equal(normalizeAppearance("default"), "default");
-  assert.equal(normalizeAppearance("nord"), "default");
-  assert.equal(normalizeAppearance(undefined), "default");
+  // 损坏 / 非字符串 / 不像主题 id 的字符串
+  assert.equal(normalizeAppearance("../../etc/passwd"), "default");
+  assert.equal(normalizeAppearance("Codex"), "default");
   assert.equal(normalizeAppearance(42), "default");
+  assert.equal(normalizeAppearance(undefined), "default");
+  assert.equal(normalizeAppearance(""), "default");
 });
 
 test("首帧之前就贴好主题，且与运行时用同一个 localStorage 键", () => {
@@ -222,8 +224,12 @@ test("首帧之前就贴好主题，且与运行时用同一个 localStorage 键
   assert.match(indexHtml, /classList\.toggle\("dark", dark\)/, "引导脚本要贴 dark class");
   assert.match(
     indexHtml,
-    /dataset\.appearance = prefs\.appearance === "codex" \? "codex" : "default"/,
-    "引导脚本要贴 data-appearance",
+    /root\.dataset\.appearance =\s*typeof prefs\.appearance === "string" \? prefs\.appearance : "default"/,
+    "引导脚本要贴 data-appearance：直接透传 id，不维护主题白名单（未知名由默认主题兑现）",
+  );
+  assert.ok(
+    !/prefs\.appearance === "(?!string)[^"]*"/.test(indexHtml),
+    "index.html 里不该再比较具体的主题 id（那会给每个新主题加一处必改点）",
   );
   // 同一份判断也要在运行期生效，否则 React 挂载后会把首帧的结果覆盖回去。
   assert.match(appTsx, /document\.documentElement\.dataset\.appearance = appearance;/);
@@ -231,17 +237,23 @@ test("首帧之前就贴好主题，且与运行时用同一个 localStorage 键
   assert.match(appTsx, /saveUiPreferences\(\{\s*theme,\s*appearance,/, "主题要持久化");
 });
 
-test("设置页个性化分区提供两个主题选项并立即生效", () => {
-  const options = /const appearanceOptions = \[([\s\S]*?)\] as const satisfies/.exec(appTsx)?.[1];
-  assert.ok(options, "找不到 appearanceOptions");
-  assert.match(options, /value: "default"/);
-  assert.match(options, /value: "codex"/);
+test("设置页主题选项来自主题目录，且点一下立即生效", () => {
+  // 清单和文案都跟着 `src/themes/` 目录走：新增主题不改 App.tsx、不改 i18n。
+  assert.ok(!/appearanceOptions/.test(appTsx), "App.tsx 里不该再有手写的主题选项表");
   assert.match(
     appTsx,
-    /onClick=\{\(\) => onAppearanceChange\(option\.value\)\}/,
+    /import \{[^}]*\bthemes\b[^}]*\} from "\.\.\/themes\/index\.ts"/,
+    "主题清单要从注册表取",
+  );
+  assert.match(appTsx, /themes\.map\(\(theme\) => \(/, "要遍历注册表渲染选项");
+  assert.match(appTsx, /theme\.label\[locale\]/, "标题取主题自己的 meta.ts（双语）");
+  assert.match(appTsx, /theme\.desc\[locale\]/, "说明取主题自己的 meta.ts（双语）");
+  assert.match(
+    appTsx,
+    /onClick=\{\(\) => onAppearanceChange\(theme\.id\)\}/,
     "主题必须点一下立刻生效，不能等「保存个性化」",
   );
-  assert.match(appTsx, /aria-checked=\{appearance === option\.value\}/, "单选组要有可访问状态");
+  assert.match(appTsx, /aria-checked=\{appearance === theme\.id\}/, "单选组要有可访问状态");
 });
 /* ============================================================================
  * codex = 参考项目 PI-Desktop（Codex 视觉系统）的复刻
@@ -257,7 +269,7 @@ const tauriLib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url
 const tauriConf = readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8");
 
 test("codex 的取值逐条等于参考项目 tokens.css", () => {
-  const codex = appearanceDeclarations(tailwindCss, "codex");
+  const codex = appearanceDeclarations(codexThemeCss, "codex");
   const light: Record<string, string> = {
     "--background": "#ffffff",
     "--foreground": "#1a1c1f",
@@ -309,7 +321,7 @@ test("codex 的取值逐条等于参考项目 tokens.css", () => {
 });
 
 test("参考项目的浮层语言：深色只留 0.5px 描边，浅色是三级轻阴影", () => {
-  const codex = appearanceDeclarations(tailwindCss, "codex");
+  const codex = appearanceDeclarations(codexThemeCss, "codex");
   assert.match(codex.light["--app-shadow-sm"], /^0 1px 2px rgba\(0, 0, 0, 0\.05\)$/);
   assert.match(codex.light["--app-shadow-dialog"], /^0 16px 48px /);
   assert.match(
@@ -325,13 +337,13 @@ test("参考项目的浮层语言：深色只留 0.5px 描边，浅色是三级�
 /* ------------------------------------------------------------------ 侧栏玻璃 */
 
 test("玻璃只在 macOS 成立：其它平台退回不透明侧栏，不叠一层洗白的板子", () => {
-  const base = themeTokens(tailwindCss).light;
+  const base = themeTokens(defaultThemeCss).light;
   assert.equal(base["--app-sidebar-glass-tint"], "var(--app-sidebar-surface)");
   assert.equal(base["--app-sidebar-sheen-top"], "none");
   assert.equal(base["--app-sidebar-sheen-bottom"], "none");
   assert.equal(base["--app-sidebar-blur"], "none");
 
-  const codex = appearanceDeclarations(tailwindCss, "codex");
+  const codex = appearanceDeclarations(codexThemeCss, "codex");
   for (const mode of ["light", "dark"] as const) {
     const own = codex[mode];
     assert.equal(
@@ -347,8 +359,8 @@ test("玻璃只在 macOS 成立：其它平台退回不透明侧栏，不叠一�
 
   const DARWIN_LIGHT = ':root[data-platform="darwin"][data-appearance="codex"]';
   const DARWIN_DARK = `${DARWIN_LIGHT}.dark`;
-  const light = blockTokens(tailwindCss, DARWIN_LIGHT);
-  const dark = blockTokens(tailwindCss, DARWIN_DARK);
+  const light = blockTokens(codexThemeCss, DARWIN_LIGHT);
+  const dark = blockTokens(codexThemeCss, DARWIN_DARK);
   for (const [mode, block] of [["light", light], ["dark", dark]] as const) {
     const tokens = block.tokens;
     assert.match(
@@ -369,9 +381,9 @@ test("玻璃只在 macOS 成立：其它平台退回不透明侧栏，不叠一�
   assert.equal(dark.tokens["--app-sidebar-glass-tint"], "color-mix(in oklab, #000000 40%, transparent)");
 
   // 权重都是 (0,3,0)：浅色那条必须排在深色块之前，靠顺序让深色赢回来
-  const lightAt = tailwindCss.indexOf(`${DARWIN_LIGHT} {`);
-  const darkBlockAt = tailwindCss.indexOf(':root[data-appearance="codex"].dark {');
-  const darkAt = tailwindCss.indexOf(`${DARWIN_DARK} {`);
+  const lightAt = codexThemeCss.indexOf(`${DARWIN_LIGHT} {`);
+  const darkBlockAt = codexThemeCss.indexOf(':root[data-appearance="codex"].dark {');
+  const darkAt = codexThemeCss.indexOf(`${DARWIN_DARK} {`);
   assert.ok(lightAt < darkBlockAt, "darwin 浅色玻璃块必须排在 codex 深色块之前");
   assert.ok(darkAt > darkBlockAt, "darwin 深色玻璃块必须排在 codex 深色块之后");
 });
@@ -451,7 +463,7 @@ test("styles.css 里的圆角与浮层阴影都走 token，默认档位保持原
   }
 
   // 用到的每个档位都必须在 :root 里声明，否则会静默解析成空值
-  const base = themeTokens(tailwindCss).light;
+  const base = themeTokens(defaultThemeCss).light;
   const used = new Set(
     [...stylesCss.matchAll(/var\((--app-(?:radius|shadow)-[a-z-]+)/g)].map((m) => m[1]),
   );
@@ -474,7 +486,7 @@ test("App.tsx 里除了系统红绿灯不再有写死的颜色", () => {
   assert.deepEqual(
     literals.filter((value) => !allowed.has(value)),
     [],
-    "App.tsx 又出现写死颜色：请按角色加进 tailwind.css 的 `--app-*`",
+    "App.tsx 又出现写死颜色：请按角色加进 `src/themes/default/theme.css` 的 `--app-*`",
   );
 });
 
@@ -498,9 +510,9 @@ function oklchOf(value: string): { l: number; c: number; h: number } {
 }
 
 test("131 处调色板类靠覆盖 --color-* 变量换色，不改组件", () => {
-  const own = appearanceDeclarations(tailwindCss, "codex").light;
+  const own = appearanceDeclarations(codexThemeCss, "codex").light;
   // 默认主题不接管 Tailwind 调色板，否则那是改默认观感
-  assert.ok(!("--color-emerald-600" in themeTokens(tailwindCss).light));
+  assert.ok(!("--color-emerald-600" in themeTokens(defaultThemeCss).light));
 
   for (const [token, original] of Object.entries(TAILWIND_ORIGINAL)) {
     assert.ok(token in own, `codex 没重定向 ${token}，组件里那批调色板类会保持原色`);
@@ -531,7 +543,7 @@ test("131 处调色板类靠覆盖 --color-* 变量换色，不改组件", () =>
  * 右侧栏、两条抓取条用等量 padding 把内容压回带子下面，会话列不压 —— 它的
  * `conversation-header` 本来就有 45px 高，抬上去就是窗口最上面那一排。
  *
- * 这些规则写在 tailwind.css 的**无 layer** 区（文件尾部），因为要盖过
+ * 这些规则写在 `themes/<id>/theme.css` 的**无 layer** 区（文件尾部），因为要盖过
  * `h-[calc(100dvh-…)]` / `[-webkit-app-region:drag]` 这类工具类：styles.css 在
  * `legacy` 层，`utilities` 排在它后面，同属性会输。
  */
@@ -543,7 +555,7 @@ test("131 处调色板类靠覆盖 --color-* 变量换色，不改组件", () =>
  * 而 `.context-panel-surface` 这种名字会同时出现在「抬起」和「补内边距」两条不同的规则里。
  */
 function codexRule(selector: string, declaration: RegExp): string {
-  const rule = [...tailwindCss.matchAll(/(?:^|\n)([^{}]*?)\{([^{}]*)\}/g)].find(
+  const rule = [...codexThemeCss.matchAll(/(?:^|\n)([^{}]*?)\{([^{}]*)\}/g)].find(
     ([, sel, body]) => sel.includes(selector) && declaration.test(body),
   );
   assert.ok(rule, `找不到同时含「${selector}」与「${declaration}」的 codex 规则`);
@@ -566,7 +578,7 @@ test("codex：三列通高（侧栏/右侧栏/抓取条内容位置不变，只�
   // 这些是「只在 codex」的：默认主题的侧栏必须还在标题栏下面
   assert.ok(
     !stylesCss.includes("calc(-1 * var(--titlebar-height))"),
-    "通高规则要留在 tailwind.css 且限定 codex，别落回 styles.css（legacy 层会被工具类盖掉）",
+    "通高规则要留在主题的 theme.css（无 layer）且限定 codex，别落回 styles.css（legacy 层会被工具类盖掉）",
   );
 });
 
@@ -609,7 +621,7 @@ test("codex：标题栏退成一条留白（不留可见的「栏」，中格那
 test("codex 的结构规则全部限定在 codex 档（默认主题的 chrome 不许被碰）", () => {
   // 只挑「布局类」属性，避免把别处的 padding 误判进来
   const layoutRules = [
-    ...tailwindCss.matchAll(/(^|[^,{]*)\{([^}]*)\}/gm),
+    ...codexThemeCss.matchAll(/(^|[^,{]*)\{([^}]*)\}/gm),
   ].filter(([, selector, body]) =>
     /--titlebar-height|--left-sidebar-width/.test(body) && /(margin-top|height|padding-top|linear-gradient)/.test(body),
   );
@@ -646,7 +658,7 @@ test("codex+darwin：只有侧栏是玻璃，主区保持不透明", () => {
     ':root[data-platform="darwin"][data-appearance="codex"]',
     ':root[data-platform="darwin"][data-appearance="codex"].dark',
   ]) {
-    const { tokens } = blockTokens(tailwindCss, selector);
+    const { tokens } = blockTokens(codexThemeCss, selector);
 
     assert.equal(
       tokens["--app-main-surface"],
@@ -661,9 +673,9 @@ test("codex+darwin：只有侧栏是玻璃，主区保持不透明", () => {
 });
 
 test("codex：不透明底色画在格子上，不画在 .app-main 上（否则垫到玻璃底下）", () => {
-  const at = tailwindCss.indexOf(':root[data-appearance="codex"] .app-main {');
+  const at = codexThemeCss.indexOf(':root[data-appearance="codex"] .app-main {');
   assert.ok(at > 0, "找不到 codex 的 .app-main 规则");
-  const rule = tailwindCss.slice(at, tailwindCss.indexOf("}", at));
+  const rule = codexThemeCss.slice(at, codexThemeCss.indexOf("}", at));
 
   // 网格容器自己不能有底色：它的背景会铺到侧栏那一列底下，材质就透不上来
   assert.match(rule, /background:\s*transparent/);
@@ -671,7 +683,7 @@ test("codex：不透明底色画在格子上，不画在 .app-main 上（否则�
   // 抬起来的侧栏要允许溢出，否则顶部 46px 被父级裁掉、露出一道硬缝
   assert.match(rule, /overflow:\s*visible/);
 
-  const cells = tailwindCss.slice(tailwindCss.indexOf(".app-main > :not(.project-sidebar-surface)"));
+  const cells = codexThemeCss.slice(codexThemeCss.indexOf(".app-main > :not(.project-sidebar-surface)"));
   const cellRule = cells.slice(0, cells.indexOf("}"));
   assert.match(cellRule, /background-color:\s*var\(--app-content-surface\)/, "会话列/右侧栏/3px 抓取条要不透明");
 });

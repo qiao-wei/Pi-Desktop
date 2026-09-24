@@ -112,7 +112,8 @@ import { canOpenTarget, openTarget } from "../lib/open-target";
 import { createId } from "../lib/id";
 import { perfCount } from "../lib/perf";
 import { syncShellAppearance } from "../lib/shell-appearance";
-import { loadUiPreferences, saveUiPreferences, type UiAppearance } from "../lib/ui-preferences";
+import { loadUiPreferences, saveUiPreferences } from "../lib/ui-preferences";
+import { resolveAppearance, themes, type ThemeId } from "../themes/index.ts";
 import { findProjectByCwd } from "../shared/projectPaths";
 import { collectDroppedItems, pickDroppedProjectFolder, supportsDroppedFolderPaths } from "../shared/droppedProjectFolder";
 import { compactActionState, compactionNotice } from "../shared/compactionNotice";
@@ -253,13 +254,12 @@ const personalizationExtensionUiOptions = [
   { value: "webui", labelKey: "settings.extensionUi.webui.label", descKey: "settings.extensionUi.webui.desc" },
 ] as const;
 /**
- * 界面配色主题。与浅色/深色正交：每个主题都有两套完整 token（见 tailwind.css），
+ * 界面配色主题。与浅色/深色正交：每个主题都有两套完整 token（`src/themes/<id>/theme.css`），
  * 标题栏的太阳/月亮按钮仍然管明暗。
+ *
+ * 选项**不在这里列举**：主题清单由 `src/themes/` 的目录自动发现（见 `themes/index.ts`），
+ * 招牌文案也跟着主题目录走（`themes/<id>/meta.ts`）。新增主题不需要改这个文件。
  */
-const appearanceOptions = [
-  { value: "default", labelKey: "settings.appearance.default.label", descKey: "settings.appearance.default.desc" },
-  { value: "codex", labelKey: "settings.appearance.codex.label", descKey: "settings.appearance.codex.desc" },
-] as const satisfies readonly { value: UiAppearance; labelKey: string; descKey: string }[];
 
 interface ComposerAttachment extends ChatAttachment {
   /** Absent for badges pasted from a sent message; the server reuses `sourcePath`. */
@@ -388,8 +388,11 @@ export function App() {
   const [showLeftPanel, setShowLeftPanel] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">(() => loadUiPreferences().theme);
-  // 配色主题（默认 / Codex）：与浅色/深色正交，决定的是同一明暗下用哪套 token。
-  const [appearance, setAppearance] = useState<UiAppearance>(() => loadUiPreferences().appearance);
+  // 配色主题（目录自动发现）：与浅色/深色正交，决定的是同一明暗下用哪套 token。
+  // 持久化里可能是已删主题的残留 id，所以先过一遍 `resolveAppearance()`（未知 → 默认）。
+  const [appearance, setAppearance] = useState<ThemeId>(() =>
+    resolveAppearance(loadUiPreferences().appearance),
+  );
   const [activeMainView, setActiveMainView] = useState<"chat" | "capabilities">("chat");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   // 一次发送失败后，重新打开的编辑框要用它把用户打的字填回去。
@@ -2919,9 +2922,9 @@ function SettingsModal({
   onModelsChanged: () => void;
   personalization: PersonalizationSettings;
   onSavePersonalization: (settings: PersonalizationSettings) => Promise<void>;
-  /** 配色主题；和明暗一样属于 UI 偏好，改完立即生效，不走下面的保存按钮。 */
-  appearance: UiAppearance;
-  onAppearanceChange: (appearance: UiAppearance) => void;
+  /** 配色主题 id（`src/themes/<id>/`）；和明暗一样属于 UI 偏好，改完立即生效，不走下面的保存按钮。 */
+  appearance: ThemeId;
+  onAppearanceChange: (appearance: ThemeId) => void;
   /** 归档会话（跨项目），归「归档聊天」页唯一使用。 */
   archivedSessions: ArchivedSessionSummary[];
   onUnarchiveSession: (projectId: string, sessionPath: string) => Promise<void>;
@@ -2929,6 +2932,7 @@ function SettingsModal({
   onDeleteAllArchivedSessions: (projectId?: string) => Promise<void>;
 }) {
   const t = useT();
+  const locale = useLocale();
   const [activeTab, setActiveTab] = useState<"models" | "personalization" | "archived" | "notifications">("models");
   const [personalizationDraft, setPersonalizationDraft] = useState(personalization);
   const [isSavingPersonalization, setIsSavingPersonalization] = useState(false);
@@ -3045,22 +3049,24 @@ function SettingsModal({
                     role="radiogroup"
                     aria-label={t("settings.appearance.label")}
                   >
-                    {appearanceOptions.map((option) => (
+                    {themes.map((theme) => (
                       <button
-                        key={option.value}
+                        key={theme.id}
                         type="button"
                         role="radio"
-                        aria-checked={appearance === option.value}
-                        data-appearance-option={option.value}
+                        aria-checked={appearance === theme.id}
+                        data-appearance-option={theme.id}
                         className={cn(
                           "grid min-w-0 gap-1.5 rounded-md border p-3.5 text-left hover:bg-accent",
-                          appearance === option.value && "border-primary bg-accent",
+                          appearance === theme.id && "border-primary bg-accent",
                         )}
-                        onClick={() => onAppearanceChange(option.value)}
+                        onClick={() => onAppearanceChange(theme.id)}
                       >
-                        <strong className="text-sm">{t(option.labelKey)}</strong>
+                        {/* 文案跟着主题目录走（`themes/<id>/meta.ts`），不进 i18n 词典：
+                            否则每加一个主题都要在两个语言包里各补两条。 */}
+                        <strong className="text-sm">{theme.label[locale]}</strong>
                         <span className="text-xs leading-relaxed text-muted-foreground">
-                          {t(option.descKey)}
+                          {theme.desc[locale]}
                         </span>
                       </button>
                     ))}
