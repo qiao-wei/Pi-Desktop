@@ -2,7 +2,8 @@
  * 窄屏（≤920px）下右侧 context 面板是贴右边缘的固定浮层。它必须从标题栏**下面**开始：
  *
  * 标题栏是 `z-[100]` 的不透明横条（App.tsx 里 .app-titlebar），浮层只有 z-20。浮层若用
- * `inset-y-0` 从 y=0 铺满，顶部 40px 就被标题栏整条盖住 —— 面板第一行是搜索框，
+ * `inset-y-0` 从 y=0 铺满，顶部那一条（`--titlebar-height`，默认 40px / codex 46px）
+ * 就被标题栏整条盖住 —— 面板第一行是搜索框，
  * 用户看到的是「面板搜索显示不全」（2026-09-21 截图反馈：搜索框只剩一条边）。
  *
  * 左侧项目栏一直是 `top-[var(--titlebar-height)] + bottom-0`，右侧面板跟着对齐。
@@ -33,8 +34,16 @@ test("窄屏浮层面板从标题栏下面开始铺（不是 inset-y-0）", () =
 });
 
 test("左侧项目栏和右侧面板用同一套窄屏定位，不会再次跑偏", () => {
-  const sidebar = sliceBetween(appSource, '"project-sidebar-surface', 'max-\[920px\]:shadow-\[24px_0_54px');
+  // 收口用侧栏自己的 aria-label（语义终点），原来的收口是写死的阴影 class 字符串：
+  // 阴影改走 `--app-*` token 后那种断言就只是「锁住实现细节」了。
+  const sidebar = sliceBetween(
+    appSource,
+    '"project-sidebar-surface',
+    'aria-label={t("sidebar.projectsAria")}',
+  );
 
   assert.match(sidebar, /max-\[920px\]:top-\[var\(--titlebar-height\)\]/);
   assert.match(sidebar, /max-\[920px\]:bottom-0/);
+  // 抽屉阴影也要跟着主题走：默认主题的值就是原来那个 rgba(20,24,22,0.16)
+  assert.match(sidebar, /max-\[920px\]:shadow-\[var\(--app-shadow-drawer-right\)\]/);
 });

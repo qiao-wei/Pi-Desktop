@@ -4,6 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pi Desktop</title>
+    <script>
+      // 在首帧之前把持久化的主题贴到 <html> 上：App.tsx 的 useEffect 要等 React 挂载，
+      // 晚一帧会让「深色主题 + 浅色底 / Codex 主题 + 原配色」闪一下。
+      // 键名与 src/lib/ui-preferences.ts 的 UI_PREFS_KEY 必须一致。
+      (function () {
+        try {
+          var prefs = JSON.parse(localStorage.getItem("pi-desktop.ui.v1") || "{}") || {};
+          var root = document.documentElement;
+          var dark = prefs.theme === "dark";
+          root.classList.toggle("dark", dark);
+          root.style.colorScheme = dark ? "dark" : "light";
+          root.dataset.appearance = prefs.appearance === "codex" ? "codex" : "default";
+          /* 侧栏玻璃只在真有原生 material 的平台上成立（参考 chrome.css:427 的
+             `:root[data-platform="darwin"]`）。没有 material 时 tint 会叠在白画布上，
+             变成一块洗白的板子，所以其它平台退回不透明侧栏。 */
+          if (/mac/i.test(navigator.platform)) {
+            root.dataset.platform = "darwin";
+          }
+        } catch (error) {
+          /* 存储被禁用或内容损坏：交给 React 的缺省值。 */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

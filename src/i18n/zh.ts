@@ -314,6 +314,12 @@ export const zh = {
 
   "models.settings.switchHint": "在发送按钮旁的选择器里切换模型。选择会被记住，并用于下一个新任务。",
   "settings.style.label": "基础风格与语气",
+  "settings.appearance.label": "主题风格",
+  "settings.appearance.desc": "选择界面配色。立即生效，可与标题栏的浅色/深色按钮叠加使用。",
+  "settings.appearance.default.label": "默认",
+  "settings.appearance.default.desc": "原有配色：暖白底、暖色描边，绿色作为强调色。",
+  "settings.appearance.codex.label": "Codex",
+  "settings.appearance.codex.desc": "中性灰阶配色，深色下侧栏更沉，强调色在浅色下是墨色、深色下是白。",
   "settings.style.desc": "选择回应方式，不会改变它的能力。",
   "settings.style.default.label": "默认",
   "settings.style.default.desc": "无预设风格",

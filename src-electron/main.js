@@ -21,6 +21,15 @@ const WINDOW_OPTIONS = {
   frame: false,
   transparent: true,
   backgroundColor: "#00000000",
+  // Codex-style sidebar material. On macOS the native vibrancy supplies the blur;
+  // the renderer only adds a thin tint + sheen on the sidebar surface
+  // (src/app/styles.css `.project-sidebar-surface`). The main pane and titlebars
+  // stay opaque, which is what makes the sidebar read as glass rather than paint.
+  // Other platforms have no equivalent material here, so they keep the opaque
+  // shell and the `backdrop-filter` fallback.
+  ...(process.platform === "darwin"
+    ? { vibrancy: "sidebar", visualEffectState: "followWindow" }
+    : {}),
   hasShadow: true,
   show: false,
   autoHideMenuBar: true,

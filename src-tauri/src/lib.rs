@@ -238,6 +238,20 @@ fn create_main_window(app: &AppHandle, api_base: Option<&str>) -> tauri::Result<
         // 转成 Tauri 事件，composer 里的 HTML5 dragenter/drop 永远不会触发。
         .disable_drag_drop_handler();
 
+    // macOS 侧栏材质。原生 material 负责模糊，渲染层只叠一层薄 tint + sheen
+    // （见 src/app/styles.css 的 `.project-sidebar-surface`）。与 Electron 侧
+    // src-electron/main.js 的 `vibrancy: "sidebar"` 对齐：两个壳同一种观感。
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::window::{Effect, EffectState, EffectsBuilder};
+        builder = builder.effects(
+            EffectsBuilder::new()
+                .effect(Effect::Sidebar)
+                .state(EffectState::FollowWindow)
+                .build(),
+        )?;
+    }
+
     if let Some(url) = api_base {
         // 与 Electron preload 用同一个全局名，两边渲染层只有一套取地址逻辑。
         builder = builder.initialization_script(&format!(
