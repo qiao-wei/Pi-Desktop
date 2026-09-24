@@ -2,7 +2,7 @@ import http from "node:http";
 import { EventEmitter } from "node:events";
 import { appendFileSync, chmodSync, closeSync, cpSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, readlinkSync, readdirSync, readSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { appendFile as appendFileAsync } from "node:fs/promises";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ import { agentRuntimePathDirs, mergePath } from "./agentEnv.mjs";
 import { removeBundledShims, runtimeShimSpecs } from "./agentShimFiles.mjs";
 import { createAgentShims } from "./agentShims.mjs";
 import { capabilityReloadPlan, reloadRuntimeSkills, sameCapabilityIds } from "./capabilityReload.mjs";
+import { canonicalPath, extensionCapabilityId, isPathInside, isSkillPathUnderRoots } from "./capabilityPathIdentity.mjs";
 import { describeLoadStatus, isUnhealthyLoadStatus, summarizePackageHealth } from "./capabilityHealth.mjs";
 import { absolutizeInstalledUserPackage, installTargetPath, packageSourceForPi } from "./capabilityPackageSource.mjs";
 import { emptyPackageResources, findPackageResourceEntry, MAX_RESOURCE_PREVIEW_BYTES, packageProgressEvent, packageResourceDetails, resourcePreview, summarizePackageResources } from "./capabilityPackageResources.mjs";
@@ -20,6 +21,7 @@ import { commitGitChanges, createGitBranch, initGitRepo, readCommitDiff, readGit
 import {
   createManagedWorktree,
   isManagedWorktreePath,
+  linkProjectPiIntoWorktree,
   listManagedWorktrees,
   managedWorktreeId,
   readWorktreeChanges,
@@ -1849,6 +1851,10 @@ async function createRuntime(project, sessionPath, trace = {}) {
   // SettingsManager / 能力清单（package、skill 目录）仍然锚在项目根 —— 那是仓库级配置，
   // 不属于某一个 worktree（Codex 的 linked worktree 也是回主检出读项目配置）。
   const workspaceCwd = sessionWorkspaceCwd(project, sessionManager);
+  // worktree 会话靠一条 `<worktree>/.pi` 软链看项目的 skills / extensions / 包配置。建 worktree
+  // 时会链好，这里再幂等保一次：项目 `.pi` 是 worktree 建完才出现的、软链被别的东西删过、
+  // 或者 worktree 是早先版本建的，都会在这里补上。
+  ensureWorktreePiLink(project, workspaceCwd, trace);
   diagnosticLog("session.switch.runtime.workspace_resolved", {
     ...trace,
     sessionPath: sessionManager.getSessionFile(),
@@ -1892,7 +1898,7 @@ async function createRuntime(project, sessionPath, trace = {}) {
             if (String(extension.path).startsWith("<inline:")) {
               return true;
             }
-            const normalized = resolve(extension.path);
+            const normalized = canonicalPath(extension.path);
             if (capabilityPaths.disabledPackageRoots.some((root) => isPathInside(root, normalized))) {
               return false;
             }
@@ -1905,7 +1911,7 @@ async function createRuntime(project, sessionPath, trace = {}) {
         skillsOverride: (base) => ({
           ...base,
           skills: base.skills.filter((skill) => {
-            const normalized = resolve(skill.filePath);
+            const normalized = canonicalPath(skill.filePath);
             if (capabilityPaths.disabledPackageRoots.some((root) => isPathInside(root, normalized))) {
               return false;
             }
@@ -2100,13 +2106,13 @@ async function resolveRuntimeCapabilityPaths({ project, settingsManager, session
   }
 
   return {
-    extensionPaths: [...new Set(extensionPaths.map((path) => resolve(path)))],
-    skillPaths: [appSkillsDir, ...new Set(skillPaths.map((path) => resolve(path)))],
+    extensionPaths: [...new Set(extensionPaths.map((path) => canonicalPath(path)))],
+    skillPaths: [appSkillsDir, ...new Set(skillPaths.map((path) => canonicalPath(path)))],
     disabledPackageRoots: packages
       .filter((pkg) => !selectedPackageIds.has(packageCapabilityId(pkg)))
       .map((pkg) => pkg.installedPath)
       .filter(Boolean)
-      .map((path) => resolve(path)),
+      .map((path) => canonicalPath(path)),
     standaloneExtensionIds: new Set(standaloneExtensionPaths.map(extensionCapabilityId)),
     activeExtensionIds: new Set([...selectedExtensionIds]),
     activeSkillIds: new Set(selection.skills ?? []),
@@ -2903,17 +2909,11 @@ function managedSkills(skills, project = activeProject()) {
 }
 
 function isManagedSkillPath(filePath, project = activeProject()) {
-  const normalized = resolve(filePath);
-  return [appSkillsDir, agentSkillsDir, join(project.cwd, ".pi", "skills")]
-    .some((root) => isPathInside(resolve(root), normalized));
+  return isSkillPathUnderRoots(filePath, [appSkillsDir, agentSkillsDir, join(project.cwd, ".pi", "skills")]);
 }
 
 function packageCapabilityId(pkg) {
   return `${pkg.scope}:${pkg.source}`;
-}
-
-function extensionCapabilityId(filePath) {
-  return resolve(filePath);
 }
 
 function packageDefaultEnabled(config, pkg) {
@@ -2962,7 +2962,7 @@ async function packageResourcesForRuntime(targetRuntime, pkg) {
 function enabledResourcePaths(resolved, type) {
   return (resolved?.[type] ?? [])
     .filter((resource) => resource.enabled)
-    .map((resource) => resolve(resource.path));
+    .map((resource) => canonicalPath(resource.path));
 }
 
 function commandMatchesPackage(command, pkg, extensionPaths) {
@@ -2975,7 +2975,7 @@ function commandMatchesPackage(command, pkg, extensionPaths) {
     return true;
   }
 
-  return extensionPaths.has(resolve(sourceInfo.path));
+  return extensionPaths.has(canonicalPath(sourceInfo.path));
 }
 
 function packageAutoloadEnabled(settingsManager, pkg) {
@@ -3166,7 +3166,9 @@ async function buildCapabilitiesSnapshot(targetRuntime = runtime, options = {}) 
     activeIds: sessionSelection.packages ?? [],
   });
   const loadedExtensionPaths = new Set(
-    extensionReport.loaded.flatMap((entry) => [entry.path, entry.resolvedPath].filter(Boolean).map((path) => resolve(path))),
+    extensionReport.loaded.flatMap((entry) => [entry.path, entry.resolvedPath]
+      .filter((path) => path && !String(path).startsWith("<"))
+      .map((path) => canonicalPath(path))),
   );
   reportUnhealthyLoads(loadHealth, packages);
   const activeToolNames = new Set(targetRuntime.session.getActiveToolNames?.() ?? []);
@@ -3194,7 +3196,7 @@ async function buildCapabilitiesSnapshot(targetRuntime = runtime, options = {}) 
           path: skill.filePath,
           source: isBuiltinSkillPath(skill.filePath)
             ? "builtin"
-            : isPathInside(resolve(agentSkillsDir), resolve(skill.filePath))
+            : isPathInside(canonicalPath(agentSkillsDir), canonicalPath(skill.filePath))
               ? "agent"
               : "project",
           disableModelInvocation: skill.disableModelInvocation,
@@ -3236,14 +3238,14 @@ async function buildCapabilitiesSnapshot(targetRuntime = runtime, options = {}) 
       name: basename(dirname(path)) === "extensions" ? basename(path) : basename(dirname(path)),
       description: path,
       path,
-      source: isPathInside(resolve(join(project.cwd, ".pi", "extensions")), resolve(path))
+      source: isPathInside(canonicalPath(join(project.cwd, ".pi", "extensions")), canonicalPath(path))
         ? "project"
-        : isPathInside(resolve(agentDir), resolve(path))
+        : isPathInside(canonicalPath(agentDir), canonicalPath(path))
           ? "agent"
           : "settings",
       defaultEnabled: extensionDefaultEnabled(config, extensionCapabilityId(path)),
       active: activeExtensions.has(extensionCapabilityId(path)),
-      loaded: loadedExtensionPaths.has(resolve(path)),
+      loaded: loadedExtensionPaths.has(canonicalPath(path)),
       pinned: Boolean(config.extensions[extensionCapabilityId(path)]?.pinned),
       readonly: false,
     })).sort(compareCapabilityCards),
@@ -3854,20 +3856,20 @@ async function deleteSkillFromCapabilityPage(body) {
 
 function inferInstalledSkillScope(project, skillRoot) {
   const normalized = resolve(skillRoot);
-  if (isPathInside(resolve(agentSkillsDir), normalized)) {
+  if (isPathInside(canonicalPath(agentSkillsDir), canonicalPath(normalized))) {
     return "user";
   }
-  if (isPathInside(resolve(join(project.cwd, ".pi", "skills")), normalized)) {
+  if (isPathInside(canonicalPath(join(project.cwd, ".pi", "skills")), canonicalPath(normalized))) {
     return "project";
   }
   return "project";
 }
 
 function readSkillContent(filePath) {
-  const normalizedPath = resolve(filePath);
+  const normalizedPath = canonicalPath(filePath);
   const project = findProject(runtime.projectId);
   const allSkills = allDiscoveredSkillsForLoader(runtime.resourceLoader);
-  const skill = allSkills.find((candidate) => resolve(candidate.filePath) === normalizedPath)
+  const skill = allSkills.find((candidate) => canonicalPath(candidate.filePath) === normalizedPath)
     ?? discoverSkillFromKnownRoots(project, normalizedPath);
 
   if (!skill) {
@@ -3882,18 +3884,19 @@ function readSkillContent(filePath) {
 }
 
 function discoverSkillFromKnownRoots(project, normalizedPath) {
-  const roots = [appSkillsDir, agentSkillsDir, join(project.cwd, ".pi", "skills")].map((path) => resolve(path));
-  if (!roots.some((root) => isPathInside(root, normalizedPath))) {
+  const roots = [appSkillsDir, agentSkillsDir, join(project.cwd, ".pi", "skills")].map((path) => canonicalPath(path));
+  const candidate = canonicalPath(normalizedPath);
+  if (!roots.some((root) => isPathInside(root, candidate))) {
     return null;
   }
-  if (!existsSync(normalizedPath) || basename(normalizedPath) !== "SKILL.md") {
+  if (!existsSync(candidate) || basename(candidate) !== "SKILL.md") {
     return null;
   }
 
   return {
-    name: basename(dirname(normalizedPath)),
+    name: basename(dirname(candidate)),
     description: "",
-    filePath: normalizedPath,
+    filePath: candidate,
     disableModelInvocation: false,
   };
 }
@@ -4315,6 +4318,11 @@ async function reloadRuntimeTargets(targets, { skillsOnly = false } = {}) {
     if (isSessionBusy(candidate.session)) {
       return;
     }
+    // 刚装的项目技能 / 包就在项目根的 `.pi` 里：先保证 worktree 会话能看到它，再重载。
+    const project = projects.find((entry) => entry.id === candidate.projectId);
+    if (project) {
+      ensureWorktreePiLink(project, candidate.workspaceCwd);
+    }
     if (skillsOnly) {
       // The loader's filter reads `capabilityPaths` by reference, so refresh it first and
       // then let pi re-run its own skill pass. Fall through to the full reload only when
@@ -4436,13 +4444,6 @@ function isBuiltinSkillPath(path) {
   } catch {
     return false;
   }
-}
-
-function isPathInside(root, candidate) {
-  const normalizedRoot = resolve(root);
-  const normalizedCandidate = resolve(candidate);
-  const rel = relative(normalizedRoot, normalizedCandidate);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 function directoriesHaveSameContent(left, right) {
@@ -5449,6 +5450,7 @@ async function createSessionWorktree(project, request = {}) {
     base: created.base,
     includedFiles: created.included.copied.length,
     skippedIncludeFiles: created.included.skipped,
+    piLink: created.piLink?.reason ?? "",
   });
   return created;
 }
@@ -7326,6 +7328,38 @@ function sessionWorkspaceCwd(project, sessionManager) {
     diagnosticLog("worktree.missing", { projectId: project.id, worktreePath: String(sessionManager?.getCwd?.() ?? "") });
   }
   return resolved.cwd;
+}
+
+/**
+ * 保证 worktree 会话能看到项目根的 `.pi`（项目级 skills / extensions / 包配置）。
+ *
+ * 幂等、不抛错：差的是「项目级能力看不见」，不该让开会话 / 重载失败，诊断里留 reason 即可。
+ * 只在 workspace 真的落在托管 worktree 里时动手；普通会话和其它目录一律不碰（绝不在项目
+ * 子目录里凭空造出一个 `.pi` 软链）。
+ */
+function ensureWorktreePiLink(project, workspaceCwd, trace = {}) {
+  if (!project || !workspaceCwd || workspaceCwd === project.cwd) {
+    return null;
+  }
+  if (!isManagedWorktreePath(worktreesRoot, workspaceCwd)) {
+    return null;
+  }
+  const piLink = linkProjectPiIntoWorktree(project.cwd, workspaceCwd);
+  if (piLink.reason === "error") {
+    console.error(
+      `[pi-desktop:worktree] 项目 .pi 无法链进 worktree：${piLink.error instanceof Error ? piLink.error.message : String(piLink.error ?? "")}`,
+    );
+  }
+  if (piLink.reason !== "already" && piLink.reason !== "no-project-pi" && piLink.reason !== "existing-pi") {
+    diagnosticLog("worktree.pi_link", {
+      projectId: project.id,
+      worktreePath: workspaceCwd,
+      linked: piLink.linked,
+      reason: piLink.reason,
+      ...trace,
+    });
+  }
+  return piLink;
 }
 
 /** 按会话路径解析 workspace：优先已打开的 runtime，其次会话索引里的 cwd。 */

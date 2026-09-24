@@ -9,7 +9,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -20,6 +20,7 @@ import {
   copyWorktreeIncludeFiles,
   createManagedWorktree,
   isManagedWorktreePath,
+  linkProjectPiIntoWorktree,
   listManagedWorktrees,
   managedWorktreeId,
   matchesWorktreeInclude,
@@ -27,13 +28,16 @@ import {
   parseStatusPorcelainZ,
   parseWorktreeInclude,
   parseWorktreeListPorcelain,
+  piLinkSymlinkType,
   readWorktreeChanges,
   removeManagedWorktree,
+  removeWorktreePiLink,
   selectWorktreeIncludeFiles,
   worktreeDisplayName,
   worktreeRemovalBlocked,
   worktreeRootFor,
 } from "../server/gitWorktree.mjs";
+import { isProjectPiLinkEntry, isWorktreePiLink } from "../server/worktreePiLink.mjs";
 
 test("worktreeRootFor / managedWorktreeId：根目录跟着 agentDir，目录名可读且只含安全字符", () => {
   assert.equal(worktreeRootFor("/agent"), join("/agent", "worktrees"));
@@ -296,6 +300,104 @@ test("copyWorktreeIncludeFiles：不覆盖 worktree 里已存在的文件，超�
 test("worktreeDisplayName：取路径最后一段", () => {
   assert.equal(worktreeDisplayName("/a/b/app-1"), "app-1");
   assert.equal(worktreeDisplayName("/a/b/app-1/"), "app-1");
+});
+
+test("piLinkSymlinkType：Windows 用 junction（不需要管理员），其余平台 dir", () => {
+  assert.equal(piLinkSymlinkType("win32"), "junction");
+  assert.equal(piLinkSymlinkType("darwin"), "dir");
+  assert.equal(piLinkSymlinkType("linux"), "dir");
+});
+
+test("isProjectPiLinkEntry：只认共享 .pi 本条目及其子路径", () => {
+  assert.equal(isProjectPiLinkEntry(".pi"), true);
+  assert.equal(isProjectPiLinkEntry(".pi/"), true);
+  assert.equal(isProjectPiLinkEntry(".pi/skills"), true);
+  assert.equal(isProjectPiLinkEntry(".pi-other"), false);
+  assert.equal(isProjectPiLinkEntry("src/.pi"), false);
+  assert.equal(isProjectPiLinkEntry(""), false);
+});
+
+test("linkProjectPiIntoWorktree：项目没有 .pi 就不链；有了就链且幂等；指向别处时换掉", () => {
+  const repo = createRepo();
+  const root = mkdtempSync(join(tmpdir(), "pi-worktree-root-"));
+  try {
+    const worktree = join(root, "app-link");
+    mkdirSync(worktree, { recursive: true });
+
+    assert.deepEqual(linkProjectPiIntoWorktree(repo.dir, worktree), { linked: false, reason: "no-project-pi" });
+    assert.equal(existsSync(join(worktree, ".pi")), false, "项目没东西可共享就不建链");
+
+    mkdirSync(join(repo.dir, ".pi", "skills", "demo"), { recursive: true });
+    writeFileSync(join(repo.dir, ".pi", "skills", "demo", "SKILL.md"), "---\nname: demo\n---\n");
+
+    const first = linkProjectPiIntoWorktree(repo.dir, worktree);
+    assert.deepEqual(first, { linked: true, reason: "linked" });
+    assert.equal(isWorktreePiLink(worktree), true);
+    assert.equal(readFileSync(join(worktree, ".pi", "skills", "demo", "SKILL.md"), "utf8").includes("demo"), true);
+    assert.deepEqual(linkProjectPiIntoWorktree(repo.dir, worktree), { linked: true, reason: "already" }, "幂等");
+
+    // 指向别处的残链（项目移动过 / 上一个项目留下）：托管检出归应用管，换成项目那份。
+    const elsewhere = mkdtempSync(join(tmpdir(), "pi-elsewhere-"));
+    rmSync(join(worktree, ".pi"), { force: true });
+    symlinkSync(elsewhere, join(worktree, ".pi"), "dir");
+    assert.deepEqual(linkProjectPiIntoWorktree(repo.dir, worktree), { linked: true, reason: "relinked" });
+    assert.equal(realpathSync(join(worktree, ".pi")), realpathSync(join(repo.dir, ".pi")));
+    rmSync(elsewhere, { recursive: true, force: true });
+
+    assert.equal(removeWorktreePiLink(worktree), true);
+    assert.equal(existsSync(join(worktree, ".pi")), false);
+    assert.equal(existsSync(join(repo.dir, ".pi", "skills", "demo", "SKILL.md")), true, "摘链不碰项目 .pi");
+    assert.equal(removeWorktreePiLink(worktree), false, "重复摘是 no-op");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(repo.dir, { recursive: true, force: true });
+  }
+});
+
+test("linkProjectPiIntoWorktree：分支自己提交了 .pi 时不覆盖检出内容", async () => {
+  const repo = createRepo();
+  const root = mkdtempSync(join(tmpdir(), "pi-worktree-root-"));
+  try {
+    mkdirSync(join(repo.dir, ".pi"), { recursive: true });
+    writeFileSync(join(repo.dir, ".pi", "settings.json"), '{ "packages": [] }\n');
+    repo.git("add", "-A");
+    repo.git("commit", "-qm", "track pi");
+
+    const created = await createManagedWorktree(repo.dir, { root, id: "app-tracked-pi" });
+    assert.equal(created.piLink.reason, "existing-pi");
+    assert.equal(isWorktreePiLink(created.path), false, "检出里的是真实目录，不是链");
+    assert.equal(readFileSync(join(created.path, ".pi", "settings.json"), "utf8"), '{ "packages": [] }\n');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(repo.dir, { recursive: true, force: true });
+  }
+});
+
+test("createManagedWorktree + readWorktreeChanges：共享 .pi 链不算脏，删除也不需要 force", async () => {
+  const repo = createRepo();
+  const root = mkdtempSync(join(tmpdir(), "pi-worktree-root-"));
+  try {
+    mkdirSync(join(repo.dir, ".pi", "skills", "demo"), { recursive: true });
+    writeFileSync(join(repo.dir, ".pi", "skills", "demo", "SKILL.md"), "---\nname: demo\n---\n");
+
+    const created = await createManagedWorktree(repo.dir, { root, id: "app-shared-pi" });
+    assert.equal(created.piLink.reason, "linked");
+    assert.equal(isWorktreePiLink(created.path), true);
+
+    // git 眼里 .pi 是未跟踪（--ignored 也会列出来），但那是应用自己放的，不算用户的活。
+    const changes = await readWorktreeChanges(created.path);
+    assert.deepEqual(changes, { changed: [], untracked: [], ignored: [] });
+    assert.equal(worktreeRemovalBlocked(changes), "");
+
+    const removed = await removeManagedWorktree(repo.dir, created.path, { root });
+    assert.equal(removed.piLinkRemoved, true, "删之前先摘链");
+    assert.equal(existsSync(created.path), false);
+    assert.equal(existsSync(join(repo.dir, ".pi", "skills", "demo", "SKILL.md")), true, "项目的 .pi 必须原封不动");
+    assert.deepEqual(await listManagedWorktrees(repo.dir, { root }), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(repo.dir, { recursive: true, force: true });
+  }
 });
 /** workspace 判定（会话跑在哪个目录）—— 错了就是 agent 在错的检出里改文件。 */
 test("resolveSessionWorkspaceCwd：只有托管 worktree 里的活目录才采信，其余退回项目目录", async () => {

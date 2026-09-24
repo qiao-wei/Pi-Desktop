@@ -7,6 +7,8 @@
  * - 基于所选起点（默认当前 HEAD）建 **detached HEAD**，这样同一个分支不会被两个检出同时占住；
  * - 仓库里被 gitignore 的本地文件（`.env` 之类）用仓库根的 `.worktreeinclude` 声明后复制进新
  *   worktree，因为 git 不会带它们过去；
+ * - 项目根的 `.pi`（项目级 skills / extensions / 包配置）不在 git 里，用一条软链共享进每个
+ *   worktree（见 `worktreePiLink.mjs`）；
  * - 删 worktree 前先数一遍未提交 / 未跟踪 / 被忽略的文件，不确认就不删（git 自己的
  *   "contains modified or untracked files" 太含糊，也不知道被忽略的文件会被一起清掉）。
  *
@@ -16,10 +18,11 @@
  * 可以直接对 porcelain 文本做用例，不需要机器上装 git。
  */
 import { execFile } from "node:child_process";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 import { GIT_TIMEOUT_MS, createGitRunner, isSafeBranchName } from "./gitInfo.mjs";
+import { WORKTREE_PI_DIR_NAME, isProjectPiLinkEntry, isWorktreePiLink } from "./worktreePiLink.mjs";
 
 /** 托管 worktree 默认保留数量（参考 Codex 的 `desktop.worktree-keep-count`）。 */
 export const WORKTREE_KEEP_COUNT = 15;
@@ -351,13 +354,17 @@ export async function createManagedWorktree(cwd, { root, id, baseRef = "HEAD" } 
   }
 
   const included = await copyWorktreeIncludeFiles(project, target, options);
+  // 复制完 include 文件之后再链 `.pi`：万一 `.worktreeinclude` 里声明了 `.pi/...`，那份是
+  // 用户要带过去的真实文件，先让 copy 建出目录，链就自然跳过（见 linkProjectPiIntoWorktree）。
+  const piLink = linkProjectPiIntoWorktree(project, target);
   // git 自己记的是解析过符号链接的真实路径（`worktree list` 报的也是它），返回值跟着保持一致，
   // 否则会话存下来的 cwd 与 git 的清单会是同一目录的两个写法。
-  return { path: realOrResolved(target), id, base, included };
+  return { path: realOrResolved(target), id, base, included, piLink };
 }
 
-/** 建 worktree 失败时的回滚：先摘注册，再删目录。 */
+/** 建 worktree 失败时的回滚：先摘链，再摘注册，最后删目录。 */
 async function rollbackWorktree(project, target, options) {
+  removeWorktreePiLink(target);
   const git = createGitRunner(worktreeOptions(options));
   await git(["worktree", "remove", "--force", target], { cwd: project }).catch(() => undefined);
   await git(["worktree", "prune"], { cwd: project }).catch(() => undefined);
@@ -436,8 +443,107 @@ export async function listManagedWorktrees(cwd, { root } = {}, options = {}) {
 }
 
 /**
+ * 目录软链的类型：Windows 上建目录链接需要开发者模式/管理员权限，junction 不需要；
+ * Node 在非 Windows 平台忽略这个 type，等价普通软链，所以两边可以传同一个值。
+ */
+export function piLinkSymlinkType(platform = process.platform) {
+  return platform === "win32" ? "junction" : "dir";
+}
+
+/**
+ * 把项目根的 `.pi` 链进 worktree（幂等）。
+ *
+ * 四种结果都返回而不是抛错 —— 调用方（建 worktree / 开会话 / 重载能力）都不该因为共享失败
+ * 而彻底失败，失败时差的是「项目级 skills/packages 看不到」，会在诊断里留下 reason。
+ * - `no-project-pi`：项目还没有 `.pi`，无从共享（之后出现时开会话/重载会补上）；
+ * - `existing-pi`：worktree 里已经有一份真实的 `.pi`（分支提交的，或 `.worktreeinclude`
+ *   复制过去的），那份比共享链更具体，绝不覆盖；
+ * - `already` / `linked` / `relinked`：成功；
+ * - `error`：建链失败（权限、Windows 无 junction），带 `error`。
+ */
+export function linkProjectPiIntoWorktree(projectCwd, worktreePath, { platform = process.platform } = {}) {
+  const project = String(projectCwd ?? "").trim();
+  const worktree = String(worktreePath ?? "").trim();
+  if (!project || !worktree) {
+    return { linked: false, reason: "missing-input" };
+  }
+
+  const source = realOrResolved(join(project, WORKTREE_PI_DIR_NAME));
+  if (!existsSync(source)) {
+    return { linked: false, reason: "no-project-pi" };
+  }
+
+  const destination = join(worktree, WORKTREE_PI_DIR_NAME);
+  let existing = null;
+  try {
+    existing = lstatSync(destination);
+  } catch {
+    existing = null;
+  }
+
+  if (existing) {
+    if (!existing.isSymbolicLink()) {
+      return { linked: false, reason: "existing-pi" };
+    }
+    let current = "";
+    try {
+      current = realpathSync(destination);
+    } catch {
+      current = "";
+    }
+    if (current === source) {
+      return { linked: true, reason: "already" };
+    }
+    // 托管检出归应用管：指向别处的软链换成项目那份，避免上一个项目 / 移动后的残留。
+    try {
+      unlinkSync(destination);
+    } catch (error) {
+      return { linked: false, reason: "error", error };
+    }
+  }
+
+  try {
+    symlinkSync(source, destination, piLinkSymlinkType(platform));
+    return { linked: true, reason: existing ? "relinked" : "linked" };
+  } catch (error) {
+    return { linked: false, reason: "error", error };
+  }
+}
+
+/**
+ * 摘掉 worktree 里的共享 `.pi` 链（不递归、不碰真实目录）。
+ *
+ * 删 worktree 前必须先把链摘掉，原因有两个：git 看到未跟踪的 `.pi` 会拒绝删除；更重要的
+ * 是删除动作绝不能顺着链把项目的 `.pi` 带走。
+ */
+export function removeWorktreePiLink(worktreePath) {
+  const target = String(worktreePath ?? "").trim();
+  if (!target) {
+    return false;
+  }
+  const link = join(target, WORKTREE_PI_DIR_NAME);
+  try {
+    if (!lstatSync(link).isSymbolicLink()) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  try {
+    unlinkSync(link);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * worktree 里的未提交 / 未跟踪 / 被忽略文件。
  * UI 用它显示「这个 worktree 脏不脏」，删除前也用它做安全闸。
+ *
+ * 共享 `.pi` 链是应用自己放的，不算用户改动（`git status --ignored` 一定会列出来，所以这条
+ * 过滤跟 `.gitignore` / `info/exclude` 无关）。只在该链存在时过滤，分支自带的真实 `.pi`
+ * 里真的有改动时不会被藏起来。
  */
 export async function readWorktreeChanges(worktreePath, options = {}) {
   const target = String(worktreePath ?? "").trim();
@@ -455,10 +561,13 @@ export async function readWorktreeChanges(worktreePath, options = {}) {
   }
 
   const parsed = parseStatusPorcelainZ(status.stdout);
+  const dropPiLink = isWorktreePiLink(target)
+    ? (paths) => paths.filter((path) => !isProjectPiLinkEntry(path))
+    : (paths) => paths;
   return {
-    changed: cleanPaths(parsed.changed),
-    untracked: cleanPaths(parsed.untracked),
-    ignored: cleanPaths(parsed.ignored),
+    changed: dropPiLink(cleanPaths(parsed.changed)),
+    untracked: dropPiLink(cleanPaths(parsed.untracked)),
+    ignored: dropPiLink(cleanPaths(parsed.ignored)),
   };
 }
 
@@ -505,12 +614,16 @@ export async function removeManagedWorktree(cwd, targetPath, { root, force = fal
     return { path: target, pruned: true };
   }
 
+  // 先摘共享 `.pi` 链：git 看到未跟踪的 `.pi` 会拒绝 remove；而且先把链解开，删除动作就
+  // 绝无可能顺着它删到项目的 `.pi`。分支自带的真实 `.pi` 不是软链，这里不动它。
+  const piLinkRemoved = removeWorktreePiLink(target);
+
   const removed = await git(["worktree", "remove", ...(force ? ["--force"] : []), target], { cwd: project });
   if (!removed.ok) {
     throw new Error(gitFailureReason(removed));
   }
   await git(["worktree", "prune"], { cwd: project }).catch(() => undefined);
-  return { path: target };
+  return { path: target, piLinkRemoved };
 }
 
 /** worktree 的显示名：`<项目名>-<id>` 的最后两段，给徽标用。 */
