@@ -1,18 +1,17 @@
 import { existsSync } from "node:fs";
 
 /**
- * SQLite access for the bridge, which has to run under both runtimes:
- *   - bun (dev: `bun server/index.mjs`, and the historical compiled sidecar), and
- *   - the app's bundled Node (production, once the bridge stopped being compiled into a
- *     single executable — extensions then resolve pi's modules from disk instead of from
- *     whatever symbol names the bundler happened to pick for this build).
+ * SQLite access for the bridge. There is exactly one runtime in play: the Node that boots the
+ * bridge (dev: the dev stack's own `node`; packaged: the app's bundled `node-runtime` through the
+ * `pi-desktop-server` launcher). `node:sqlite` is therefore the binding, not a fallback.
  *
- * bun's `bun:sqlite` exposes two conveniences Node does not: `db.query(sql)` and
- * `db.transaction(fn)`. Everything else the bridge uses (`exec`, `prepare`, `run`, `get`,
- * `all`, `close`, `$name` parameters) exists in `node:sqlite` with the same shape.
+ * `node:sqlite` lacks two conveniences the bridge's callers are written against - `db.query(sql)`
+ * and `db.transaction(fn)`. Everything else used here (`exec`, `prepare`, `run`, `get`, `all`,
+ * `close`, `$name` parameters) exists with the same shape, so the shim below is the only thing
+ * standing between the session index and a crash on startup.
  */
 
-export function withBunSqliteCompat(db) {
+export function withSqliteConveniences(db) {
   if (typeof db.query !== "function") {
     db.query = (sql) => db.prepare(sql);
   }
@@ -49,21 +48,15 @@ export function withBunSqliteCompat(db) {
   return db;
 }
 
-/** Open a database with whichever runtime this is, always returning the bun-shaped API. */
+/** Open a database and hand back the API shape the rest of the bridge expects. */
 export async function openSqliteDatabase(path, options) {
-  try {
-    const { Database } = await import("bun:sqlite");
-    return new Database(path, options);
-  } catch {
-    // Not bun (or bun:sqlite unavailable): fall back to the platform sqlite binding.
-  }
   const { DatabaseSync } = await import("node:sqlite");
-  // `node:sqlite` opens the file inside the constructor, so bun's `{ create: false }` maps to
+  // `node:sqlite` opens the file inside the constructor, so a read-only open maps to
   // `readOnly: true` (which refuses a missing file) rather than to a check we could run later.
   const readOnly = options?.create === false;
   try {
     const db = new DatabaseSync(path, { readOnly, readBigInts: false });
-    return withBunSqliteCompat(db);
+    return withSqliteConveniences(db);
   } catch (error) {
     if (readOnly && !existsSync(path)) {
       throw new Error(`database not found: ${path}`);
