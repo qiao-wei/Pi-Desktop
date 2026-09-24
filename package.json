@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:web": "vite --host 127.0.0.1 --port 5176",
-    "dev:api": "bun server/index.mjs",
+    "dev:api": "node server/index.mjs",
     "build": "tsc -b && vite build",
     "test": "PI_DESKTOP_LOCALE=zh node --test \"tests/**/*.test.ts\"",
     "bridge:build": "node scripts/build-bridge-runtime.mjs",
