@@ -14,6 +14,7 @@ const HOST_COMMANDS = new Set([
   "toggle_window_maximize",
   "minimize_window",
   "close_window",
+  "set_window_appearance",
   "notify_turn_complete",
 ]);
 

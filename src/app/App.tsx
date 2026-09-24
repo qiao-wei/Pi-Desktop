@@ -111,6 +111,7 @@ import { cn } from "@/lib/utils";
 import { canOpenTarget, openTarget } from "../lib/open-target";
 import { createId } from "../lib/id";
 import { perfCount } from "../lib/perf";
+import { syncShellAppearance } from "../lib/shell-appearance";
 import { loadUiPreferences, saveUiPreferences, type UiAppearance } from "../lib/ui-preferences";
 import { findProjectByCwd } from "../shared/projectPaths";
 import { collectDroppedItems, pickDroppedProjectFolder, supportsDroppedFolderPaths } from "../shared/droppedProjectFolder";
@@ -569,6 +570,9 @@ export function App() {
     document.documentElement.style.colorScheme = theme;
     // 首帧之前 index.html 的引导脚本已经贴过一次（防闪）；这里是运行期的唯一权威。
     document.documentElement.dataset.appearance = appearance;
+    // macOS 的原生侧栏材质只认窗口外观（NSAppearance），不认 `<html class="dark">`；
+    // 不同步的话系统浅色 + 界面深色会得到一块发白的玻璃（见 lib/shell-appearance.ts）。
+    syncShellAppearance(theme);
     saveUiPreferences({
       theme,
       appearance,

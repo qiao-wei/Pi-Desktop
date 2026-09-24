@@ -22,6 +22,16 @@
           if (/mac/i.test(navigator.platform)) {
             root.dataset.platform = "darwin";
           }
+          /* 原生侧栏材质（macOS 的 vibrancy / Tauri 的 Effect::Sidebar）明暗只跟随
+             窗口外观，不认 <html class="dark">。首帧就同步过去，省掉 React 挂载前
+             那一帧浅色玻璃（运行期由 src/lib/shell-appearance.ts 负责）。 */
+          var shell = window.__TAURI_INTERNALS__;
+          if (shell && typeof shell.invoke === "function") {
+            var synced = shell.invoke("set_window_appearance", {
+              appearance: dark ? "dark" : "light",
+            });
+            if (synced && synced.catch) synced.catch(function () {});
+          }
         } catch (error) {
           /* 存储被禁用或内容损坏：交给 React 的缺省值。 */
         }

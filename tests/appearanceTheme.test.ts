@@ -409,7 +409,20 @@ test("原生 material 接线：Electron vibrancy 与 Tauri windowEffects 都只�
   );
   assert.match(tauriLib, /#\[cfg\(target_os = "macos"\)\]/);
   assert.match(tauriLib, /Effect::Sidebar/);
-  assert.match(tauriLib, /EffectState::FollowWindow/);
+  // tauri-utils 的 `WindowEffectState` 只有 Active / Inactive / FollowsWindowActiveState；
+  // 名字是 `FollowsWindowActiveState`，与 Electron 的 `visualEffectState: "followWindow"` 同义。
+  // （写错名字只会 编译不过，不会静默退化 —— 但真的要去 cargo check。）
+  assert.match(tauriLib, /EffectState::FollowsWindowActiveState/);
+  assert.ok(
+    !/EffectState::FollowWindow\b/.test(tauriLib),
+    "EffectState 没有 FollowWindow 这个变体，写成它会编译不过",
+  );
+  // `effects()` 返回 builder 本身（不是 Result），调用必须收在 `.build(),\n);`
+  assert.match(
+    tauriLib.slice(tauriLib.indexOf("EffectsBuilder")),
+    /\.build\(\),\s*\n\s*\);/,
+    "effects() 不是 Result，调用不能带问号再解包",
+  );
   assert.match(tauriConf, /"macOSPrivateApi": true/);
 });
 
