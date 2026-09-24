@@ -4,6 +4,7 @@ import type {
   CapabilitiesState,
   ChatMessagePart,
   ConversationStats,
+  ExtensionUiMode,
   ModelSummary,
   ProjectSummary,
   SkillSummary,
@@ -163,6 +164,8 @@ export type ExtensionUiRequest =
       method: "custom";
       title: string;
       lines: string[];
+      /** How the host should present these lines; absent means the historical `tui` view. */
+      renderMode?: ExtensionUiMode;
       overlay?: boolean;
       closed?: boolean;
     }
@@ -181,6 +184,12 @@ export type ExtensionUiResponse =
   | { id: string; value: string }
   | { id: string; confirmed: boolean }
   | { id: string; input: string }
+  /**
+   * A batch of keystrokes replayed in order. A click on an extension panel has no protocol of its
+   * own - the panel contract is keyboard-only - so the host sends the keys a keyboard user would
+   * (`down,down,enter`) and the server replays them synchronously before re-rendering.
+   */
+  | { id: string; inputs: string[] }
   | { id: string; action: string; values?: Record<string, string | boolean>; data?: unknown };
 
 export type StreamProcessBlock =

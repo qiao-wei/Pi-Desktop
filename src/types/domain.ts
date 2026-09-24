@@ -148,10 +148,18 @@ export interface ConversationStats {
   lastMessageAt?: number;
 }
 
+/**
+ * 扩展面板（`ctx.ui.custom()`）的呈现方式：
+ * - `tui`（默认）：原样显示终端文本行，只提供键盘操作。
+ * - `webui`：解析同一批文本行，把颜色/字重/链接还原成 DOM 样式，可点的行翻译成同样的按键。
+ */
+export type ExtensionUiMode = "tui" | "webui";
+
 export interface PersonalizationSettings {
   style: string;
   customInstructions: string;
   persona: string;
+  extensionUi: ExtensionUiMode;
 }
 
 export interface ProjectSessionSummary {

@@ -334,6 +334,12 @@ export const en = {
   "settings.instructions.label": "Custom instructions",
   "settings.instructions.desc": "Tell the assistant rules and preferences to follow in every conversation.",
   "settings.instructions.placeholder": "For example: Give the conclusion first, then explain key assumptions.",
+  "settings.extensionUi.label": "Extension panels",
+  "settings.extensionUi.desc": "How interactive panels opened by extensions (the /mcp server list, for example) appear in the window.",
+  "settings.extensionUi.tui.label": "Terminal style",
+  "settings.extensionUi.tui.desc": "Show the raw terminal text, keyboard only",
+  "settings.extensionUi.webui.label": "Web style",
+  "settings.extensionUi.webui.desc": "Keep colours and styling, and let list rows be clicked",
   "settings.savePersonalization": "Save personalization",
 
   /* ---- sidebar & project dialogs ---- */
@@ -641,5 +647,7 @@ export const en = {
   "terminal.key.enter": "Enter",
   "terminal.key.save": "Save",
   "terminal.key.close": "Close",
+  "terminal.rowHint": "Click to move the cursor here and confirm (same as typing the keys)",
+  "terminal.scrollHint": "Scroll to move the selection · Shift + scroll to pan the view",
   "common.busy": "Working...",
 } as const satisfies Record<keyof ZhDictionary, string>;

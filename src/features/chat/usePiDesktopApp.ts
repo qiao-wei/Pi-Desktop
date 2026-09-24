@@ -284,6 +284,7 @@ function normalizeBootstrapValue(bootstrap: BootstrapResponse): BootstrapRespons
       style: bootstrap.personalization?.style ?? "default",
       customInstructions: bootstrap.personalization?.customInstructions ?? "",
       persona: bootstrap.personalization?.persona ?? "",
+      extensionUi: bootstrap.personalization?.extensionUi ?? "tui",
     },
   };
 }
@@ -968,7 +969,9 @@ export function usePiDesktopApp() {
 
   const respondExtensionUi = useCallback(async (response: ExtensionUiResponse) => {
     await postExtensionUiResponse(response);
-    if ("input" in response || "action" in response) {
+    // `input`/`inputs`/`action` keep the panel open: the server re-renders it and streams the
+    // updated `extension_ui_request` back, so dropping it here would close the panel mid-edit.
+    if ("input" in response || "inputs" in response || "action" in response) {
       return;
     }
     extensionUiRequestsRef.current = extensionUiRequestsRef.current.filter((request) => request.id !== response.id);
@@ -2792,6 +2795,7 @@ function createDefaultBootstrap(): BootstrapResponse {
       style: "default",
       customInstructions: "",
       persona: "",
+      extensionUi: "tui",
     },
   };
 }
