@@ -73,7 +73,39 @@ test("ProjectSidebar 声明并接收 onFocusComposer，App 用 composerEditorRef
   const usage = region(appTsx, 'onSelectSession={selectSession}', 'activeMainView={activeMainView}');
   assert.match(
     usage,
-    /onFocusComposer=\{\(\) => composerEditorRef\.current\?\.focus\(\{ preventScroll: true \}\)\}/,
-    "App 侧应把 onFocusComposer 实现为聚焦 composer 编辑器",
+    /onFocusComposer=\{focusComposerQuietly\}/,
+    "App 侧应把 onFocusComposer 实现为聚焦 composer 编辑器（且不亮绿框）",
+  );
+});
+
+test("程序化聚焦压住绿色聚焦框：聚焦前同步打 data-focus-quiet，用户一碰就摘掉", () => {
+  const focusFn = region(appTsx, "function focusComposerQuietly", "async function handleSubmit");
+  // 属性必须在 focus() 之前设上：先 focus 再 setAttribute 会闪一帧绿框。
+  assert.ok(
+    focusFn.indexOf('setAttribute("data-focus-quiet", "true")') < focusFn.indexOf("editor.focus({"),
+    "data-focus-quiet 应在 focus() 之前设置",
+  );
+  assert.ok(
+    focusFn.includes('editor.closest<HTMLElement>(".composer-surface")'),
+    "标记要打在 composer-surface 上",
+  );
+
+  const clearFn = region(appTsx, "function restoreComposerFocusRing", "function focusComposerQuietly");
+  assert.match(clearFn, /currentTarget\.removeAttribute\("data-focus-quiet"\)/, "用户交互后应摘掉标记");
+
+  // surface 上要真的接上清理事件（点、键、输入三种入口）。
+  const surface = region(appTsx, 'className={`composer-surface ${isDraggingFiles', "onDragEnter={handleDragEnter}");
+  for (const handler of ["onPointerDown", "onKeyDown", "onInput"]) {
+    assert.ok(
+      surface.includes(`${handler}={restoreComposerFocusRing}`),
+      `composer-surface 应接 ${handler}`,
+    );
+  }
+
+  const stylesCss = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");
+  assert.match(
+    stylesCss,
+    /\.composer-surface:focus-within:not\(\[data-focus-quiet="true"\]\)\s*\{/,
+    "绿框规则要被 data-focus-quiet 门控",
   );
 });
