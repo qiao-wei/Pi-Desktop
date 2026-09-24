@@ -337,6 +337,12 @@ export const zh = {
   "settings.instructions.label": "自定义指令",
   "settings.instructions.desc": "告诉它每轮对话都要遵守的规则与偏好。",
   "settings.instructions.placeholder": "例如：先给结论，再解释关键假设。",
+  "settings.extensionUi.label": "扩展面板的样式与操作",
+  "settings.extensionUi.desc": "面板的版式由扩展自己决定，两种方式显示的是同一份文本；区别只在颜色样式与鼠标能不能直接操作。",
+  "settings.extensionUi.tui.label": "终端风格",
+  "settings.extensionUi.tui.desc": "去掉颜色，只显示纯文本，行用键盘或下方按键移动",
+  "settings.extensionUi.webui.label": "网页风格",
+  "settings.extensionUi.webui.desc": "还原颜色与链接，列表行可直接点选，滚轮移动选中行",
   "settings.savePersonalization": "保存个性化设置",
 
   /* ---- 侧栏与项目对话框 ---- */
@@ -677,5 +683,7 @@ export const zh = {
   "terminal.key.enter": "回车",
   "terminal.key.save": "保存",
   "terminal.key.close": "关闭",
+  "terminal.rowHint": "点击这一行：把光标移过去并确认（等同键盘操作）",
+  "terminal.scrollHint": "滚轮移动选中行 · Shift + 滚轮 滚动视图",
   "common.busy": "处理中...",
 } as const;
