@@ -4,6 +4,8 @@ import { App } from "./app/App";
 import { perfStartReporter } from "./lib/perf";
 // tailwind.css pulls in styles.css via `layer(legacy)`. Importing styles.css
 // directly here would add a second, unlayered copy that outranks every utility.
+// 配色主题的样式不在这里列举：`App.tsx` 从 `src/themes/index.ts` 导入注册表，
+// 后者用 `import.meta.glob` 按目录注入每个主题的 theme.css（见 src/themes/README.md）。
 import "./app/tailwind.css";
 
 perfStartReporter();

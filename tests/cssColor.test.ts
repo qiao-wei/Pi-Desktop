@@ -14,14 +14,13 @@ import test from "node:test";
 
 import { contrast, flatten, resolveColor, type Tokens } from "./lib/cssColor.ts";
 import { themeTokens } from "./lib/cssTokens.ts";
+import { defaultThemeCss } from "./lib/themeSources.ts";
 
 const goldens = JSON.parse(
   readFileSync(new URL("./fixtures/chromiumColors.json", import.meta.url), "utf8"),
 ) as { light: Record<string, number[]>; dark: Record<string, number[]> };
 
-const TOKENS = themeTokens(
-  readFileSync(new URL("../src/app/tailwind.css", import.meta.url), "utf8"),
-);
+const TOKENS = themeTokens(defaultThemeCss);
 
 /** Chromium rasterised over opaque black, so the engine has to be flattened the same way. */
 const BACKDROP: [number, number, number] = [0, 0, 0];
