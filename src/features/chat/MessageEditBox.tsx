@@ -16,6 +16,9 @@ import { Plus } from "lucide-react";
 import { useT } from "../../i18n/react";
 import type { CapabilitiesState, ChatAttachment, ChatMessagePart } from "../../types";
 import type { PromptAttachmentInput, PromptMessagePartInput } from "../../lib/api";
+import { collectDroppedItems, type DroppedProjectFolder } from "../../shared/droppedProjectFolder";
+import { attachmentKindFromMimeType, DIRECTORY_MIME_TYPE } from "../../shared/attachmentKind";
+import { pickNewFolderDrops, planComposerDrop } from "../../shared/composerDrop";
 import { htmlToSanitizedMarkup, escapeHtml } from "./pasteSanitize";
 import {
   applyAttachmentBadgeAttributes,
@@ -104,7 +107,12 @@ function escapeCssIdent(value: string) {
     : value.replace(/["\\]/g, "\\$&");
 }
 
-function createAttachmentBadgeNode(attachment: ChatAttachment, onRemove: (id: string) => void) {
+function createAttachmentBadgeNode(
+  attachment: ChatAttachment,
+  onRemove: (id: string) => void,
+  /** 目录徽标的副标题。模块级函数拿不到 `t`，所以由组件侧传进来。 */
+  folderLabel: string,
+) {
   const badge = document.createElement("span");
   badge.className = `attachment-badge ${attachment.kind}`;
   badge.dataset.attachmentId = attachment.id;
@@ -119,7 +127,9 @@ function createAttachmentBadgeNode(attachment: ChatAttachment, onRemove: (id: st
   } else {
     const icon = document.createElement("span");
     icon.className = "attachment-badge-icon";
-    icon.textContent = "F";
+    // 这个编辑框的徽标是字母凸排（文件是 "F"），目录用路径分隔符；真正的文件夹图标
+    // 在主编输入框和气泡里。
+    icon.textContent = attachment.kind === "directory" ? "/" : "F";
     badge.appendChild(icon);
   }
 
@@ -129,7 +139,7 @@ function createAttachmentBadgeNode(attachment: ChatAttachment, onRemove: (id: st
   title.title = attachment.name;
   title.textContent = attachment.name;
   const size = document.createElement("small");
-  size.textContent = formatFileSize(attachment.size);
+  size.textContent = attachment.kind === "directory" ? folderLabel : formatFileSize(attachment.size);
   copy.append(title, size);
 
   const remove = document.createElement("button");
@@ -324,7 +334,7 @@ export function MessageEditBox({
       }
       if (part.kind === "attachment") {
         attachmentByIdRef.current.set(part.attachment.id, part.attachment);
-        fragment.appendChild(createAttachmentBadgeNode(part.attachment, removeAttachment));
+        fragment.appendChild(createAttachmentBadgeNode(part.attachment, removeAttachment, t("composer.attachment.folder")));
         fragment.appendChild(document.createTextNode(CARET_MARKER));
         continue;
       }
@@ -398,10 +408,53 @@ export function MessageEditBox({
     syncState();
   }
 
-  function addFiles(files: FileList | File[]) {
-    const incoming = Array.from(files).filter((file) => file.size > 0);
+  /**
+   * 与主编输入框同样的一次 drop 落地（两边的判定必须在 `shared/composerDrop` 里，不能分叉）。
+   * 这里只把结果接到这个编辑框自己的 ref / 光标插入上。
+   */
+  function applyComposerDrop(plan: ReturnType<typeof planComposerDrop>) {
+    const fileError = addFiles(plan.files);
+    const folderError = addFolderAttachments(plan.folders);
+    const refusedError = plan.refusedFolders.length
+      ? t("composer.error.folderNotAttachable", { name: plan.refusedFolders[0] })
+      : "";
+    setError(refusedError || folderError || fileError);
+  }
+
+  function addFolderAttachments(folders: readonly DroppedProjectFolder[]): string {
+    const existingPaths = [...attachmentByIdRef.current.values()]
+      .filter((attachment) => attachment.kind === "directory")
+      .map((attachment) => attachment.sourcePath)
+      .filter((path): path is string => Boolean(path));
+    const { folders: picked, overflow } = pickNewFolderDrops(
+      folders,
+      existingPaths,
+      Math.max(0, MAX_ATTACHMENT_COUNT - attachmentByIdRef.current.size),
+    );
+
+    for (const folder of picked) {
+      const attachment: ChatAttachment = {
+        id: createAttachmentId(),
+        name: folder.name,
+        mimeType: DIRECTORY_MIME_TYPE,
+        size: 0,
+        kind: "directory",
+        sourcePath: folder.path,
+      };
+      attachmentByIdRef.current.set(attachment.id, attachment);
+      insertAtCursor(createAttachmentBadgeNode(attachment, removeAttachment, t("composer.attachment.folder")));
+    }
+
+    return overflow ? t("composer.error.tooManyAttachments", { count: MAX_ATTACHMENT_COUNT }) : "";
+  }
+
+  /** Returns the message to show, or "" when nothing went wrong. */
+  function addFiles(files: FileList | File[]): string {
+    // 目录在 `planComposerDrop` 里就被分走了，这里剩下的都是文件；刻意不过滤 size === 0，
+    // 空文件是合法附件（旧写法用 size > 0 挡目录，顺手把空文件也默默丢了）。
+    const incoming = Array.from(files);
     if (!incoming.length) {
-      return;
+      return "";
     }
     const existing = Array.from(attachmentByIdRef.current.values());
     const availableSlots = Math.max(0, MAX_ATTACHMENT_COUNT - existing.length);
@@ -429,7 +482,8 @@ export function MessageEditBox({
       }
       totalSize += file.size;
       const id = createAttachmentId();
-      const isImage = file.type.startsWith("image/");
+      const kind = attachmentKindFromMimeType(file.type);
+      const isImage = kind === "image";
       accepted.push({
         file,
         attachment: {
@@ -437,7 +491,7 @@ export function MessageEditBox({
           name: file.name,
           mimeType: file.type || "application/octet-stream",
           size: file.size,
-          kind: isImage ? "image" : "file",
+          kind,
           previewUrl: isImage ? URL.createObjectURL(file) : undefined,
         },
       });
@@ -446,9 +500,9 @@ export function MessageEditBox({
     for (const { attachment, file } of accepted) {
       attachmentByIdRef.current.set(attachment.id, attachment);
       fileByIdRef.current.set(attachment.id, file);
-      insertAtCursor(createAttachmentBadgeNode(attachment, removeAttachment));
+      insertAtCursor(createAttachmentBadgeNode(attachment, removeAttachment, t("composer.attachment.folder")));
     }
-    setError(errorMessage);
+    return errorMessage;
   }
 
   function removeSlashBeforeRange(range: Range) {
@@ -636,7 +690,7 @@ export function MessageEditBox({
     if (file) {
       fileByIdRef.current.set(attachment.id, file);
     }
-    return createAttachmentBadgeNode(attachment, removeAttachment);
+    return createAttachmentBadgeNode(attachment, removeAttachment, t("composer.attachment.folder"));
   }
 
   function insertPastedMarkup(markup: string, badges: ClipboardBadge[] = []) {
@@ -678,7 +732,7 @@ export function MessageEditBox({
       .filter((file): file is File => Boolean(file));
     if (images.length) {
       event.preventDefault();
-      addFiles(images.map((file, index) => renamePastedImage(file, index)));
+      setError(addFiles(images.map((file, index) => renamePastedImage(file, index))));
       return;
     }
 
@@ -764,7 +818,8 @@ export function MessageEditBox({
             event.preventDefault();
             dragDepthRef.current = 0;
             setIsDragging(false);
-            addFiles(event.dataTransfer.files);
+            // 与主编输入框同一条规则：Entries API 只在同步段有效，先读 facts 再决策。
+            applyComposerDrop(planComposerDrop(collectDroppedItems(event.dataTransfer, window.__PI_DESKTOP_FILES__)));
           }}
         >
           <input
@@ -775,7 +830,7 @@ export function MessageEditBox({
             tabIndex={-1}
             onChange={(event) => {
               if (event.target.files) {
-                addFiles(event.target.files);
+                setError(addFiles(event.target.files));
               }
               event.target.value = "";
             }}

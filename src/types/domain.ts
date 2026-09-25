@@ -1,6 +1,7 @@
 export type MessageRole = "user" | "assistant" | "system";
 export type MessageKind = "text" | "audio";
-export type AttachmentKind = "image" | "file";
+/** `directory` is a path *reference* to a dropped folder, never bytes — see `src/shared/composerDrop.ts`. */
+export type AttachmentKind = "image" | "file" | "directory";
 export type SkillId =
   | "small-talk"
   | "gentle-correction"

@@ -98,7 +98,7 @@ test("collectDroppedItems：目录条目用 entries API 判类型，路径从零
     { pathForFile: () => "/Users/me/proj" },
   );
 
-  assert.deepEqual(facts, [{ name: "proj", path: "/Users/me/proj", isDirectory: true }]);
+  assert.deepEqual(facts, [{ name: "proj", path: "/Users/me/proj", isDirectory: true, file: folderFile }]);
 });
 
 test("collectDroppedItems：getAsFile 返回 null 的目录用 files 里的 File 拿路径", () => {
@@ -111,7 +111,7 @@ test("collectDroppedItems：getAsFile 返回 null 的目录用 files 里的 File
     { pathForFile: () => "/Users/me/proj" },
   );
 
-  assert.deepEqual(facts, [{ name: "proj", path: "/Users/me/proj", isDirectory: true }]);
+  assert.deepEqual(facts, [{ name: "proj", path: "/Users/me/proj", isDirectory: true, file: folderFile }]);
 });
 
 test("collectDroppedItems：items 的 File 解析不出路径时回退到 files 的同位 File", () => {
@@ -125,7 +125,8 @@ test("collectDroppedItems：items 的 File 解析不出路径时回退到 files 
     { pathForFile: (file) => (file === fallbackFile ? "/Users/me/proj" : "") },
   );
 
-  assert.deepEqual(facts, [{ name: "proj", path: "/Users/me/proj", isDirectory: true }]);
+  // 同位回退拿到的 File 也要挂在 facts 上，否则目录引用成不成、文件字节读不读得到都会丢。
+  assert.deepEqual(facts, [{ name: "proj", path: "/Users/me/proj", isDirectory: true, file: itemFile }]);
 });
 
 test("collectDroppedItems：entries API 抛错时类型未知，但名字仍取到", () => {
@@ -145,7 +146,7 @@ test("collectDroppedItems：entries API 抛错时类型未知，但名字仍取�
     undefined,
   );
 
-  assert.deepEqual(facts, [{ name: "proj", path: undefined, isDirectory: undefined }]);
+  assert.deepEqual(facts, [{ name: "proj", path: undefined, isDirectory: undefined, file }]);
 });
 
 test("collectDroppedItems：非 file 条目被忽略；没有 items 时退回 files", () => {
@@ -160,11 +161,11 @@ test("collectDroppedItems：非 file 条目被忽略；没有 items 时退回 fi
       },
       undefined,
     ),
-    [{ name: "notes.md", path: undefined, isDirectory: false }],
+    [{ name: "notes.md", path: undefined, isDirectory: false, file }],
   );
 
   assert.deepEqual(collectDroppedItems({ files: [file] }, undefined), [
-    { name: "notes.md", path: undefined },
+    { name: "notes.md", path: undefined, file },
   ]);
 });
 
