@@ -334,6 +334,39 @@ test("参考项目的浮层语言：深色只留 0.5px 描边，浅色是三级�
   assert.match(codex.dark["--app-shadow-dialog"], /rgba\(0, 0, 0, 0\.55\)/);
 });
 
+/* -------------------------------------------------------- composer 的分区 */
+
+test("composer 去掉描边时必须给载体阴影（codex 的白色板子靠阴影立住）", () => {
+  // 参考项目 D297：composer 是一条实心板，focus 也不加描边，分区全靠 --ds-shadow-composer。
+  // 浅色下 composer 与画布同为 #ffffff，漏掉这层阴影 = 输入框整个消失。
+  const codex = appearanceDeclarations(codexThemeCss, "codex");
+  for (const mode of ["light", "dark"] as const) {
+    assert.equal(codex[mode]["--app-composer-border"], "transparent", `codex ${mode} 又开始给 composer 描边了`);
+    assert.equal(
+      codex[mode]["--app-shadow-composer"],
+      "0 3px 7.5px #0000000a, 0 0 20px #0000000d",
+      `codex ${mode} 的 composer 载体阴影与参考项目 --ds-shadow-composer 不一致`,
+    );
+  }
+
+  // 默认主题保持原样：有描边，载体阴影是空占位（`none` 不能出现在 box-shadow 列表里）。
+  const base = themeTokens(defaultThemeCss).light;
+  assert.equal(base["--app-composer-border"], "var(--border)");
+  assert.equal(base["--app-shadow-composer"], "0 0 0 0 transparent");
+
+  // token 加了但规则没消费 = 白加。
+  assert.match(
+    stylesCss,
+    /box-shadow: var\(--app-shadow-composer, 0 0 0 0 transparent\)/,
+    "composer-surface 没消费 --app-shadow-composer",
+  );
+  assert.match(
+    stylesCss,
+    /box-shadow: var\(--app-shadow-composer, 0 0 0 0 transparent\),\s*\n?\s*0 0 0 3px color-mix\(in oklab, var\(--app-accent\) 14%, transparent\)/,
+    "focus 时 ring 必须追加在载体阴影后面，不能把它顶掉",
+  );
+});
+
 /* ------------------------------------------------------------------ 侧栏玻璃 */
 
 test("玻璃只在 macOS 成立：其它平台退回不透明侧栏，不叠一层洗白的板子", () => {

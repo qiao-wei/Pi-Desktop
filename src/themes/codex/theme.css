@@ -92,7 +92,10 @@
   --app-header-border: transparent;
   --app-shell-surface: var(--background);
   --app-shell-border: transparent;
+  /* 参考 D297：composer 是一条实心板，**永远不加描边** —— 分区靠这层载体阴影
+     （参考项目 --ds-shadow-composer，浅色 composer 与画布同为 #ffffff，没有它就看不见）。 */
   --app-composer-border: transparent;
+  --app-shadow-composer: 0 3px 7.5px #0000000a, 0 0 20px #0000000d;
   /* 参考 §6.3/§10：工具条 46px（我们原本是 40px） */
   --titlebar-height: 46px;
   --app-shadow-popover: var(--app-shadow-menu);
@@ -281,6 +284,7 @@
   --app-shell-surface: var(--background);
   --app-shell-border: transparent;
   --app-composer-border: transparent;
+  --app-shadow-composer: 0 3px 7.5px #0000000a, 0 0 20px #0000000d;
   --titlebar-height: 46px;
   --app-shadow-popover: var(--app-shadow-menu);
   --app-shadow-toast: var(--app-shadow-menu);
