@@ -923,6 +923,9 @@ p {
   border: 1px solid var(--app-composer-border, var(--app-border));
   border-radius: var(--app-radius-composer);
   background: var(--card);
+  /* 边框之外的第二条分区路径：codex 的 composer 与画布同为白色且无描边，
+     全靠这层载体阴影（默认主题是空占位，观感不变）。 */
+  box-shadow: var(--app-shadow-composer, 0 0 0 0 transparent);
   transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
 
@@ -930,7 +933,10 @@ p {
    用户点/敲一下（见 clearComposerFocusQuiet）属性就被摘掉，绿框恢复。 */
 .composer-surface:focus-within:not([data-focus-quiet="true"]) {
   border-color: var(--app-accent);
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--app-accent) 14%, transparent);
+  /* 把 focus ring 追加在载体阴影后面：codex 的 composer 聚焦时既不能丢掉那层板，
+     也不该被 3px ring 顶掉。默认主题的 `--app-shadow-composer` 是空一层，等价于原样。 */
+  box-shadow: var(--app-shadow-composer, 0 0 0 0 transparent),
+    0 0 0 3px color-mix(in oklab, var(--app-accent) 14%, transparent);
 }
 
 .composer-surface.is-dragging {

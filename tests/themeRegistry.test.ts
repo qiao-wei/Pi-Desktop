@@ -175,6 +175,23 @@ test("每个主题在浅色与深色下都定义了全套 token（漏一个只�
   }
 });
 
+test("composer 的两种分区不会同时缺席：去掉描边就必须给载体阴影", () => {
+  // 白色画布上的白色输入框只能靠描边或阴影立住。这个坑不报错，只是"输入框消失了"：
+  // codex 浅色的 composer 与画布同为 #ffffff，只把 border 设成 transparent 是看不出来。
+  for (const id of listThemeIds()) {
+    const own = id === "default" ? themeTokens(defaultThemeCss) : appearanceDeclarations(themeSourcesCss(), id);
+    for (const mode of ["light", "dark"] as const) {
+      const border = (own[mode]["--app-composer-border"] ?? "").trim();
+      if (border !== "transparent" && border !== "none") continue;
+      const shadow = (own[mode]["--app-shadow-composer"] ?? "").trim();
+      assert.ok(
+        shadow && shadow !== "none" && shadow !== "0 0 0 0 transparent",
+        `${id} 的 ${mode} 档把 composer 边框去掉了却没有载体阴影 —— 输入框会在画布上隐形`,
+      );
+    }
+  }
+});
+
 test("主题 id 只出现在 src/themes/ 里（注释除外）", () => {
   const root = fileURLToPath(new URL("..", import.meta.url));
   const files = [...walkFiles(path.join(root, "src")), path.join(root, "index.html")];
