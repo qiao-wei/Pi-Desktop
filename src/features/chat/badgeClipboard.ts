@@ -10,7 +10,8 @@
  * The paste sanitiser turns those attributes into positional placeholders, and
  * the editors resolve their placeholder into a real badge with the data here.
  */
-import type { CapabilityKind, ChatAttachment, ChatMessagePart } from "../../types";
+import type { AttachmentKind, CapabilityKind, ChatAttachment, ChatMessagePart } from "../../types";
+import { attachmentKindFromMimeType } from "../../shared/attachmentKind.ts";
 
 /** Placeholder element the paste sanitiser emits for a badge it recognised. */
 export const PASTE_BADGE_ATTRIBUTE = "data-tender-paste-badge";
@@ -100,6 +101,11 @@ function formatFileSize(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
 }
 
+/** 目录没有「大小」这回事；副标题与能力徽标的 "Skill" 同一口径，是写死的英文。 */
+function attachmentSubtitle(attachment: ChatAttachment): string {
+  return attachment.kind === "directory" ? "Folder" : formatFileSize(attachment.size);
+}
+
 /**
  * `text/html` the message Copy button writes: badge identity plus the same text
  * the inline bubble shows. Pasting into our composer restores the badges;
@@ -125,7 +131,7 @@ export function userMessageClipboardHtml(
       return attachment
         ? badgeSpanHtml(
             attachmentBadgeAttributes(attachment),
-            `<strong>${escapeHtml(attachment.name)}</strong><small>${escapeHtml(formatFileSize(attachment.size))}</small>`,
+            `<strong>${escapeHtml(attachment.name)}</strong><small>${escapeHtml(attachmentSubtitle(attachment))}</small>`,
           )
         : "";
     })
@@ -134,6 +140,18 @@ export function userMessageClipboardHtml(
 
 function stringValue(value: string | undefined): string {
   return typeof value === "string" ? value : "";
+}
+
+/**
+ * 徽标自己带着 kind；只有老徽标或手工拼的 HTML 没有时才按 MIME 兜底（目录是
+ * `inode/directory`，见 `shared/attachmentKind.ts`）。
+ */
+function readAttachmentKind(dataset: Record<string, string | undefined>): AttachmentKind {
+  const explicit = dataset.attachmentKind;
+  if (explicit === "image" || explicit === "file" || explicit === "directory") {
+    return explicit;
+  }
+  return attachmentKindFromMimeType(dataset.attachmentMimeType);
 }
 
 /**
@@ -178,7 +196,7 @@ export function readBadgeDescriptor(node: {
         name: stringValue(dataset.attachmentName) || "Attachment",
         mimeType: stringValue(dataset.attachmentMimeType) || "application/octet-stream",
         size: Number(dataset.attachmentSize ?? 0) || 0,
-        kind: dataset.attachmentKind === "image" ? "image" : "file",
+        kind: readAttachmentKind(dataset),
         previewUrl: stringValue(dataset.attachmentPreviewUrl) || undefined,
         sourcePath: stringValue(dataset.attachmentSourcePath) || undefined,
       },
