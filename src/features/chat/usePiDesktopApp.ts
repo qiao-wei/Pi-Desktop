@@ -2299,7 +2299,7 @@ export function usePiDesktopApp() {
   );
 
   const createSession = useCallback(
-    async (projectId = bootstrap.activeProjectId, name?: string) => {
+    async (projectId = bootstrap.activeProjectId, name?: string, options?: { worktree?: boolean }) => {
       if (!projectId) {
         return;
       }
@@ -2309,6 +2309,8 @@ export function usePiDesktopApp() {
         const next = await postJson<BootstrapResponse>("/api/sessions", {
           projectId,
           name: name?.trim() || undefined,
+          // 会话级选择：这条会话建在托管 worktree 里（基于当前 HEAD 的 detached 检出）。
+          worktree: options?.worktree ? { enabled: true } : undefined,
         });
         activeSessionPathRef.current = next.activeSessionPath;
         replaceBootstrap(next);
@@ -2715,6 +2717,7 @@ export function usePiDesktopApp() {
     dismissError,
     reportError,
     dismissCompactionNotice,
+    replaceBootstrap,
   };
 }
 

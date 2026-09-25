@@ -35,6 +35,7 @@ import {
   Wrench,
   Loader2,
   Sun,
+  GitFork,
   X,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
@@ -125,6 +126,7 @@ import { expandProjectForNewSession } from "../shared/sidebarProjectExpansion";
 import { platformRevealFolderLabelKey } from "../shared/revealFolderLabel";
 import { cachePercent, formatCacheDetail, formatTokens, percentOf } from "./usageFormat";
 import { sidebarHoverActionClass } from "../shared/sidebarActionVisibility";
+import { worktreeSessionBadgeKind } from "../shared/sessionWorktree";
 import { createAttachmentHoverGate } from "../shared/attachmentHoverGate";
 import {
   SidebarArchiveIcon,
@@ -150,6 +152,7 @@ import { AutoHideScroll } from "../components/AutoHideScroll";
 import { ExtensionCustomUiPanel } from "../components/ExtensionCustomUiPanel";
 import { stripTerminalSequences } from "../shared/terminalText.ts";
 import { GitStatusBadge } from "../components/GitStatusBadge";
+import { SessionWorktreeBadge } from "../components/SessionWorktreeBadge";
 import {
   CAPABILITY_TABS,
   SKILL_SOURCE_CATEGORIES,
@@ -164,6 +167,7 @@ import {
 } from "../shared/capabilityScope";
 import { usePiDesktopApp } from "../features/chat/usePiDesktopApp";
 import { useProjectGit } from "../features/chat/useProjectGit";
+import { useSessionWorktree } from "../features/chat/useSessionWorktree";
 import {
   selectRestorableQueuedEntries,
   type ClearedComposerQueue,
@@ -356,14 +360,8 @@ export function App() {
     dismissError,
     reportError,
     dismissCompactionNotice,
+    replaceBootstrap,
   } = usePiDesktopApp();
-
-  // 会话头部右侧的 git 徽标：只读、可失败、非轮询（切项目 / 一轮结束 / 窗口重新聚焦时刷新）。
-  const projectGit = useProjectGit({
-    projectId: bootstrap.activeProjectId,
-    isStreaming: state.isStreaming,
-    onError: reportError,
-  });
 
   // 输入框旁的模型列表和设置页读同一份自定义模型，设置页保存后这里跟着刷新。
   const customModels = useCustomModels();
@@ -527,6 +525,24 @@ export function App() {
     pendingQueues: bootstrap.pendingQueues,
   });
   const visibleSessionPath = bootstrap.activeSessionPath ?? conversation.sessionFile ?? "local-bootstrap";
+
+  // 会话头部右侧的 git 徽标：只读、可失败、非轮询（切项目 / 切会话 / 一轮结束 / 窗口重新聚焦时刷新）。
+  // 带上 sessionPath：worktree 会话看到、提交的就是 worktree 自己那份状态。
+  const projectGit = useProjectGit({
+    projectId: bootstrap.activeProjectId,
+    sessionPath: visibleSessionPath,
+    isStreaming: state.isStreaming,
+    onError: reportError,
+  });
+
+  // worktree 徽标：同样按会话取（worktree 是会话级的，不是项目级的）。
+  const sessionWorktree = useSessionWorktree({
+    projectId: bootstrap.activeProjectId,
+    sessionPath: visibleSessionPath,
+    isStreaming: state.isStreaming,
+    onError: reportError,
+    onBootstrap: replaceBootstrap,
+  });
   // 本窗口自己拥有的运行不会写进 bootstrap.streamingSessionPaths（那会启动 watchdog），
   // 所以侧栏的时钟要把本地 isStreaming 合进去，否则刚提交的会话整轮都不显示时钟。
   const streamingSessionPaths = useMemo(
@@ -2109,6 +2125,16 @@ export function App() {
             {conversation.title}
           </h1>
           <div className="flex shrink-0 items-center gap-2">
+            <SessionWorktreeBadge
+              info={sessionWorktree.info}
+              isCreatingBranch={sessionWorktree.isCreatingBranch}
+              isRemoving={sessionWorktree.isRemoving}
+              isStreaming={state.isStreaming}
+              onRefresh={() => void sessionWorktree.refresh()}
+              onReveal={() => void sessionWorktree.revealWorktree()}
+              onCreateBranch={sessionWorktree.createBranch}
+              onRemove={sessionWorktree.removeWorktree}
+            />
             <GitStatusBadge
               info={projectGit.info}
               isInitializing={projectGit.isInitializing}
@@ -5126,7 +5152,7 @@ function ProjectSidebar({
   onReorderProjects: (projectIds: string[]) => Promise<void>;
   onRemoveProject: (projectId: string) => Promise<void>;
   onRevealProject: (projectId: string) => Promise<void>;
-  onCreateSession: (projectId?: string, name?: string) => Promise<void>;
+  onCreateSession: (projectId?: string, name?: string, options?: { worktree?: boolean }) => Promise<void>;
   onUpdateSession: (projectId: string, sessionPath: string, name: string) => Promise<void>;
   onPinSession: (projectId: string, sessionPath: string, pinned: boolean) => Promise<void>;
   onArchiveSession: (projectId: string, sessionPath: string) => Promise<void>;
@@ -5561,7 +5587,7 @@ function ProjectSidebar({
     toggleProject(projectId);
   }
 
-  function createSessionFromSidebar(projectId: string) {
+  function createSessionFromSidebar(projectId: string, options?: { worktree?: boolean }) {
     // Switch the main area first, then create: while the Global skills & packages
     // page is open the sidebar is the only thing that would otherwise react to the
     // click, so the new conversation would look like it never happened.
@@ -5573,7 +5599,7 @@ function ProjectSidebar({
     // bootstrap 落地（新会话已被选中）后把焦点交给 composer：点「＋」的人十有八九
     // 接下来就是要打字，焦点留在侧栏按钮上还得再点一次输入框。
     // capabilities 页此时已被 onOpenChat() 切走，会话区不再 inert，focus 能生效。
-    void onCreateSession(projectId).then(() => onFocusComposer());
+    void onCreateSession(projectId, undefined, options).then(() => onFocusComposer());
   }
 
   async function selectSessionFromSidebar(projectId: string, sessionPath: string) {
@@ -5752,7 +5778,7 @@ function ProjectSidebar({
                     onPinSession={onPinSession}
                     onHoverSession={showSessionCard}
                     onHoverEnd={scheduleHideHoverCard}
-                    onArchive={(title) => setDialog({ kind: "archive-session", projectId, sessionPath: session.path, title })}
+                    onArchive={(title) => setDialog({ kind: "archive-session", projectId, sessionPath: session.path, title, inWorktree: Boolean(session.inWorktree) })}
                   />
                 ))}
               </div>
@@ -5848,6 +5874,13 @@ function ProjectSidebar({
                           {project.pinned ? t("sidebar.unpinProject") : t("sidebar.pinProject")}
                         </DropdownMenuItem>
                       ) : null}
+                      {/* worktree 会话的发现入口。worktree 必须在建会话之前定下来（cwd 就是
+                          那时写进会话头的），所以它属于「新建」而不是可以在 composer 里后补的开关；
+                          放在这里是为了让「＋」保持一次点击。 */}
+                      <DropdownMenuItem onSelect={() => createSessionFromSidebar(project.id, { worktree: true })}>
+                        <GitFork size={16} />
+                        {t("sidebar.newSessionInWorktree")}
+                      </DropdownMenuItem>
                       <DropdownMenuItem onSelect={() => void onRevealProject(project.id)}>
                         <FolderOpen />
                         {revealLabel}
@@ -5862,15 +5895,18 @@ function ProjectSidebar({
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
+                  {/* 一次点击就建普通会话（原来的手感）。worktree 是「这条会话跑在隔离检出里」，
+                      必须在建会话之前定下来（会话文件头里的 cwd 就是那时写进去的），所以不放在
+                      composer 里做事后开关：按住 ⌥/Alt 点击走 worktree，另一个发现入口在项目 ⋯ 菜单里。 */}
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    onClick={() => createSessionFromSidebar(project.id)}
                     disabled={sidebarLock.locked}
                     className={cn("size-6", sidebarLock.lockClass)}
                     aria-label={t("sidebar.newSession")}
-                    title={t("sidebar.newSession")}
+                    title={t("sidebar.newSessionHint")}
+                    onClick={(event) => createSessionFromSidebar(project.id, event.altKey ? { worktree: true } : undefined)}
                   >
                     <SidebarNewSessionIcon size={16} />
                   </Button>
@@ -5894,7 +5930,7 @@ function ProjectSidebar({
                       onPinSession={onPinSession}
                       onHoverSession={showSessionCard}
                       onHoverEnd={scheduleHideHoverCard}
-                      onArchive={(title) => setDialog({ kind: "archive-session", projectId: project.id, sessionPath: session.path, title })}
+                      onArchive={(title) => setDialog({ kind: "archive-session", projectId: project.id, sessionPath: session.path, title, inWorktree: Boolean(session.inWorktree) })}
                     />
                   ))}
                   {hasMoreSessions ? (
@@ -6148,7 +6184,7 @@ function SidebarSessionRow({
       ) : (
         <span
           className={cn(
-            "min-w-0 flex-1 truncate py-1 pr-2 pl-9 group-hover:pr-[54px] group-focus-within:pr-[54px]",
+            "flex min-w-0 flex-1 items-center gap-1.5 py-1 pr-2 pl-9 group-hover:pr-[54px] group-focus-within:pr-[54px]",
             // Pinned session rows (codex-ui `.chat-row-wrap.pinned`) keep their actions visible.
             session.pinned && "pr-[54px]",
           )}
@@ -6157,7 +6193,20 @@ function SidebarSessionRow({
             setEditingSession({ projectId, sessionPath: session.path, title: session.title });
           }}
         >
-          {session.title}
+          <span className="min-w-0 flex-1 truncate">{session.title}</span>
+          {/* A chat started in a managed worktree gets a small fork glyph after the title,
+              so the isolated-checkout rows are tellable at a glance without opening each one.
+              It sits before the hover-action padding, so it never slides under the buttons. */}
+          {worktreeSessionBadgeKind(session) === "worktree" ? (
+            <span
+              className="inline-flex shrink-0 items-center"
+              role="img"
+              aria-label={t("worktree.badge")}
+              title={t("worktree.badge")}
+            >
+              <GitFork className="size-3 text-muted-foreground" />
+            </span>
+          ) : null}
         </span>
       )}
       <div
@@ -6204,7 +6253,7 @@ type SidebarDialog =
   | { kind: "create-project"; name: string; cwd: string }
   | { kind: "edit-project"; project: ProjectSummary; name: string; cwd: string }
   | { kind: "remove-project"; project: ProjectSummary }
-  | { kind: "archive-session"; projectId: string; sessionPath: string; title: string };
+  | { kind: "archive-session"; projectId: string; sessionPath: string; title: string; inWorktree?: boolean };
 
 function SidebarDialogView({
   dialog,
@@ -6268,7 +6317,7 @@ function SidebarDialogView({
             <AlertDialogDescription>
               {dialog.kind === "remove-project"
                 ? t("dialog.removeProjectDesc", { name: dialog.project.name })
-                : t("dialog.archiveSessionDesc", { title: dialog.title })}
+                : t(dialog.inWorktree ? "dialog.archiveSessionDescWorktree" : "dialog.archiveSessionDesc", { title: dialog.title })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -18,7 +18,8 @@ Two native shells share one React renderer and one local Node "bridge":
 The bridge (`server/index.mjs`) embeds pi - `ModelRuntime`, `SessionManager`, `SettingsManager`,
 `DefaultResourceLoader` - and serves the HTTP/WebSocket API the renderer talks to. Pi resources are
 loaded through `DefaultResourceLoader`: global from `~/.pi/agent`, project from `<project>/.pi`, plus
-the bundled system skills in `skills/`.
+the bundled system skills in `skills/`. A session's cwd can be a managed git worktree; that worktree's
+`.pi` is a symlink back to the project's, so project skills/extensions/packages resolve to one copy.
 
 [中文说明](README.zh-CN.md)
 
