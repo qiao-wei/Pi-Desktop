@@ -115,7 +115,9 @@ import { syncShellAppearance } from "../lib/shell-appearance";
 import { loadUiPreferences, saveUiPreferences } from "../lib/ui-preferences";
 import { resolveAppearance, themes, type ThemeId } from "../themes/index.ts";
 import { findProjectByCwd } from "../shared/projectPaths";
-import { collectDroppedItems, pickDroppedProjectFolder, supportsDroppedFolderPaths } from "../shared/droppedProjectFolder";
+import { collectDroppedItems, pickDroppedProjectFolder, supportsDroppedFolderPaths, type DroppedProjectFolder } from "../shared/droppedProjectFolder";
+import { attachmentKindFromMimeType, DIRECTORY_MIME_TYPE } from "../shared/attachmentKind";
+import { pickNewFolderDrops, planComposerDrop, type ComposerDropPlan } from "../shared/composerDrop";
 import { compactActionState, compactionNotice } from "../shared/compactionNotice";
 import { t, setLocale } from "../i18n/index.ts";
 import { useT, useLocale } from "../i18n/react";
@@ -759,7 +761,16 @@ export function App() {
     setComposerError("");
     setIsPreparingAttachments(true);
     try {
-      const payload = await Promise.all(orderedAttachments.map(readAttachment));
+      const payload = await Promise.all(
+        orderedAttachments.map((attachment) =>
+          // FileReader 对目录、以及拖进来之后又被移走的文件，只给平台原文一句
+          // （"A requested file or directory could not be found at the time an operation
+          // was processed."）—— 指名道姓地报是哪一条读不出来，否则用户无从下手。
+          readAttachment(attachment).catch(() => {
+            throw new Error(t("composer.error.attachmentUnreadable", { name: attachment.name }));
+          }),
+        ),
+      );
       const submitPromise = submitTurn(orderedText, payload, messageParts);
       const preservedPreviewUrls = new Set(
         orderedAttachments.map((attachment) => attachment.previewUrl).filter((url): url is string => Boolean(url)),
@@ -789,10 +800,57 @@ export function App() {
     }
   }
 
-  function addFiles(fileList: FileList | File[]) {
+  /**
+   * 一次 drop 的落地：目录（宿主给了绝对路径）成引用徽标，文件读字节，读不到的当场说。
+   *
+   * 拒绝必须是可见的：静默吞掉会让用户以为拖进去了，直到提交才发现少东西。一条 drop 只能
+   * 显示一条消息，优先级是「完全没接住」>「装不下」>「这条读不出来」。
+   */
+  function applyComposerDrop(plan: ComposerDropPlan) {
+    const fileError = addFiles(plan.files);
+    const folderError = addFolderAttachments(plan.folders);
+    const refusedError = plan.refusedFolders.length
+      ? t("composer.error.folderNotAttachable", { name: plan.refusedFolders[0] })
+      : "";
+    setComposerError(refusedError || folderError || fileError);
+  }
+
+  /**
+   * 目录附件只带 `sourcePath`（绝对路径），不带字节也没有 `file`。服务端照 MIME 认出它，
+   * 把路径原样交给模型，不复制、不计大小。同一个目录拖两次只留一个徽标。
+   */
+  function addFolderAttachments(folders: readonly DroppedProjectFolder[]): string {
+    const existingPaths = [...composerAttachmentMapRef.current.values()]
+      .filter((attachment) => attachment.kind === "directory")
+      .map((attachment) => attachment.sourcePath)
+      .filter((path): path is string => Boolean(path));
+    const { folders: picked, overflow } = pickNewFolderDrops(
+      folders,
+      existingPaths,
+      Math.max(0, maxAttachmentCount - composerAttachmentMapRef.current.size),
+    );
+
+    if (picked.length) {
+      insertAttachmentsAtCursor(
+        picked.map((folder) => ({
+          id: createAttachmentId(),
+          name: folder.name,
+          mimeType: DIRECTORY_MIME_TYPE,
+          size: 0,
+          kind: "directory" as const,
+          sourcePath: folder.path,
+        })),
+      );
+    }
+
+    return overflow ? t("composer.error.tooManyAttachments", { count: maxAttachmentCount }) : "";
+  }
+
+  /** Returns the message to show, or "" when nothing went wrong. */
+  function addFiles(fileList: FileList | File[]): string {
     const incoming = Array.from(fileList);
     if (!incoming.length) {
-      return;
+      return "";
     }
 
     const availableSlots = Math.max(0, maxAttachmentCount - attachments.length);
@@ -812,7 +870,8 @@ export function App() {
         break;
       }
 
-      const isImage = file.type.startsWith("image/");
+      const kind = attachmentKindFromMimeType(file.type);
+      const isImage = kind === "image";
       const previewUrl = isImage ? URL.createObjectURL(file) : undefined;
       const id = createAttachmentId();
       next.push({
@@ -820,7 +879,7 @@ export function App() {
         name: file.name || (isImage ? "Screenshot.png" : "Untitled file"),
         mimeType: file.type || "application/octet-stream",
         size: file.size,
-        kind: isImage ? "image" : "file",
+        kind,
         previewUrl,
         file,
       });
@@ -830,7 +889,7 @@ export function App() {
     if (next.length) {
       insertAttachmentsAtCursor(next);
     }
-    setComposerError(errorMessage);
+    return errorMessage;
   }
 
   /**
@@ -873,7 +932,7 @@ export function App() {
       .filter((file): file is File => Boolean(file));
     if (images.length) {
       event.preventDefault();
-      addFiles(images.map((file, index) => renamePastedImage(file, index)));
+      setComposerError(addFiles(images.map((file, index) => renamePastedImage(file, index))));
       return;
     }
 
@@ -1075,7 +1134,9 @@ export function App() {
     dragDepthRef.current = 0;
     setIsDraggingFiles(false);
     rememberComposerSelectionFromPoint(event.clientX, event.clientY);
-    addFiles(event.dataTransfer.files);
+    // 判目录只认 Entries API，而它和 File 句柄都只在 drop 回调的同步段里有效：先把这一拖
+    // 读成 facts，再决定哪些是目录引用、哪些走字节。
+    applyComposerDrop(planComposerDrop(collectDroppedItems(event.dataTransfer, window.__PI_DESKTOP_FILES__)));
   }
 
   function handleComposerInput() {
@@ -1593,7 +1654,9 @@ export function App() {
     } else {
       const icon = document.createElement("span");
       icon.className = "attachment-badge-icon";
-      icon.innerHTML = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/></svg>`;
+      icon.innerHTML = attachment.kind === "directory"
+        ? `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>`
+        : `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/></svg>`;
       badge.appendChild(icon);
     }
 
@@ -1603,7 +1666,9 @@ export function App() {
     title.title = attachment.name;
     title.textContent = attachment.name;
     const size = document.createElement("small");
-    size.textContent = formatFileSize(attachment.size);
+    size.textContent = attachment.kind === "directory"
+      ? t("composer.attachment.folder")
+      : formatFileSize(attachment.size);
     copy.append(title, size);
 
     const remove = document.createElement("button");
@@ -2223,7 +2288,7 @@ export function App() {
             tabIndex={-1}
             onChange={(event) => {
               if (event.target.files) {
-                addFiles(event.target.files);
+                setComposerError(addFiles(event.target.files));
               }
               event.target.value = "";
             }}
@@ -6399,6 +6464,7 @@ function projectDialogWithCwd(dialog: SidebarDialog, cwd: string): SidebarDialog
 function AttachmentHoverCard({ hover }: { hover: AttachmentHoverState }) {
   const { attachment, rect } = hover;
   const isImage = attachment.kind === "image";
+  const isDirectory = attachment.kind === "directory";
   const cardWidth = 300;
   const cardHeight = isImage ? 260 : 110;
   const left = Math.max(12, Math.min(rect.left, window.innerWidth - cardWidth - 12));
@@ -6417,13 +6483,18 @@ function AttachmentHoverCard({ hover }: { hover: AttachmentHoverState }) {
         <img src={attachment.previewUrl} alt={attachment.name} />
       ) : (
         <span className="attachment-hover-file-icon">
-          <FileText size={18} />
+          {isDirectory ? <Folder size={18} /> : <FileText size={18} />}
         </span>
       )}
       <div className="attachment-hover-copy">
         <strong>{attachment.name}</strong>
+        {/* 目录的"内容"就是它自己那条绝对路径：不复制成字节，回放时读的也是它。 */}
         <span>{attachment.sourcePath || attachment.name}</span>
-        <small>{attachment.mimeType} · {formatFileSize(attachment.size)}</small>
+        <small>
+          {isDirectory
+            ? t("composer.attachment.folder")
+            : `${attachment.mimeType} · ${formatFileSize(attachment.size)}`}
+        </small>
       </div>
     </aside>
   );
