@@ -63,6 +63,7 @@ import {
   CopyIcon,
   DownloadIcon,
   FileTextIcon,
+  FolderIcon,
   MicIcon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -1198,16 +1199,24 @@ function InlineAttachmentBadge({
   onAttachmentHoverStart,
   onAttachmentHoverEnd,
 }: { attachment: ChatAttachment } & UserMessageInlineAttachmentHandlers) {
+  const t = useT();
   const content = (
     <>
       {attachment.kind === "image" && attachment.previewUrl ? (
         <img src={attachment.previewUrl} alt="" />
       ) : (
-        <span className="attachment-badge-icon"><FileTextIcon size={12} /></span>
+        <span className="attachment-badge-icon">
+          {attachment.kind === "directory" ? <FolderIcon size={12} /> : <FileTextIcon size={12} />}
+        </span>
       )}
       <span className="attachment-badge-copy">
         <strong title={attachment.name}>{attachment.name}</strong>
-        <small>{formatInlineFileSize(attachment.size)}</small>
+        {/* 目录没有「大小」：副标题报种类，鼠标悬停时卡片里给的是它的绝对路径。 */}
+        <small>
+          {attachment.kind === "directory"
+            ? t("composer.attachment.folder")
+            : formatInlineFileSize(attachment.size)}
+        </small>
       </span>
     </>
   );
