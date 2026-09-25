@@ -168,6 +168,9 @@ const capabilitiesDefaultsFile = process.env.PI_DESKTOP_CAPABILITIES_DEFAULTS_FI
 const maxAttachmentCount = 10;
 const maxAttachmentBytes = 25 * 1024 * 1024;
 const maxAttachmentTotalBytes = 50 * 1024 * 1024;
+// 目录附件的类型。客户端拖进文件夹时带的就是它（
+// 见 `src/shared/attachmentKind.ts`），两边要一起改。
+const directoryMimeType = "inode/directory";
 const generatedTitleMaxChars = 16;
 const piCliFlag = "--pi-cli";
 const http429StatusPatterns = [
@@ -6603,8 +6606,30 @@ function persistPromptAttachments(activeRuntime, values) {
   let totalBytes = 0;
 
   return attachmentValues.map((attachment, index) => {
+    const originalName = String(attachment?.name ?? `attachment-${index + 1}`).trim() || `attachment-${index + 1}`;
+    const id = sanitizePathPart(String(attachment?.id ?? randomUUID())) || randomUUID();
     const sourcePath = typeof attachment?.sourcePath === "string" ? attachment.sourcePath : "";
     const resolvedSource = sourcePath ? resolve(sourcePath) : "";
+
+    // 目录是一条「引用」，不是字节。客户端只把宿主解析到的绝对路径交过来（详见
+    // src/shared/composerDrop.ts），这里既不复制也不当文件读：复制一个目录没有意义（模型
+    // 要的是可以在原地 ls/grep 的那份），而且可能巨大。代价是这份路径是「活」的 —— 文件是
+    // 快照，目录不是；回放旧消息时它可能已经不在，所以先校验再说清楚。
+    if (String(attachment?.mimeType ?? "").trim().toLowerCase() === directoryMimeType) {
+      if (!resolvedSource || !existsSync(resolvedSource) || !statSync(resolvedSource).isDirectory()) {
+        throw new Error(`Folder "${originalName}" is no longer available at ${resolvedSource || "(no path)"}.`);
+      }
+      return {
+        id,
+        name: originalName,
+        mimeType: directoryMimeType,
+        size: 0,
+        kind: "directory",
+        path: resolvedSource,
+        data: "",
+      };
+    }
+
     const reusablePath = resolvedSource.startsWith(`${resolve(projectAttachmentRoot)}/`)
       && existsSync(resolvedSource)
       && statSync(resolvedSource).isFile()
@@ -6630,8 +6655,6 @@ function persistPromptAttachments(activeRuntime, values) {
       throw new Error("Attachments exceed the 50 MB total limit.");
     }
 
-    const originalName = String(attachment?.name ?? `attachment-${index + 1}`).trim() || `attachment-${index + 1}`;
-    const id = sanitizePathPart(String(attachment?.id ?? randomUUID())) || randomUUID();
     const fileName = `${id}-${sanitizeAttachmentName(originalName)}`;
     const path = reusablePath || join(attachmentDir, fileName);
     const mimeType = String(attachment?.mimeType ?? "application/octet-stream");
@@ -6677,7 +6700,7 @@ function appendAttachmentContext(input, displayInput, attachments, messageParts 
     "",
     ...(attachments.length
       ? [
-          "Attached files are available at these local paths. Inspect them with the appropriate tools when needed:",
+          "Attached files and folders are available at these local paths. Inspect them with the appropriate tools when needed:",
           ...attachments.map((attachment) => `- ${attachment.name}: ${attachment.path}`),
           "",
         ]
@@ -6789,12 +6812,18 @@ function normalizeMessageCapabilityPart(value) {
 }
 
 function toConversationAttachment(attachment) {
-  const kind = attachment?.kind === "image" ? "image" : "file";
+  const mimeType = String(attachment?.mimeType ?? "application/octet-stream");
+  // 目录和图片一样是自成一类：旧消息里只有 image/file 两种 kind，所以两边都看。
+  const kind = attachment?.kind === "directory" || mimeType.trim().toLowerCase() === directoryMimeType
+    ? "directory"
+    : attachment?.kind === "image" || mimeType.startsWith("image/")
+      ? "image"
+      : "file";
   const path = String(attachment?.path ?? "");
   return {
     id: String(attachment?.id ?? randomUUID()),
     name: String(attachment?.name ?? "Attachment"),
-    mimeType: String(attachment?.mimeType ?? "application/octet-stream"),
+    mimeType,
     size: Number(attachment?.size ?? 0),
     kind,
     sourcePath: path || undefined,
@@ -6892,9 +6921,11 @@ function sanitizePathPart(value) {
 }
 
 function attachmentOnlyPrompt(attachments) {
-  return attachments.length === 1
-    ? `Please review the attached file: ${attachments[0].name}`
-    : `Please review these ${attachments.length} attached files.`;
+  if (attachments.length === 1) {
+    const only = attachments[0];
+    return `Please review the attached ${only?.kind === "directory" ? "folder" : "file"}: ${only?.name}`;
+  }
+  return `Please review these ${attachments.length} attached files.`;
 }
 
 function inferAttachmentMimeType(path) {

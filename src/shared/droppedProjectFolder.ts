@@ -14,6 +14,11 @@
  * `isDirectory` is `undefined` when the platform did not say (no
  * `webkitGetAsEntry`, or it threw), which is treated as "probably a folder"
  * rather than silently ignoring the user's action.
+ *
+ * The composer reads the same facts through {@link collectDroppedItems} but
+ * decides differently (see `composerDrop.ts`): there a folder is only useful
+ * when the host could resolve its absolute path, and files still travel as
+ * bytes through the `File` handle carried on the facts.
  */
 
 export interface DroppedItemFacts {
@@ -21,6 +26,8 @@ export interface DroppedItemFacts {
   path?: string;
   /** `undefined` means "the platform did not tell us", not "it is a file". */
   isDirectory?: boolean;
+  /** The dropped `File`, for the hosts that hand one over. A folder's is zero-length. */
+  file?: File;
 }
 
 export interface DroppedProjectFolder {
@@ -159,7 +166,7 @@ export function collectDroppedItems(
       if (!name && !path) {
         continue;
       }
-      facts.push({ name, path, isDirectory });
+      facts.push({ name, path, isDirectory, file: file ?? fallbackFile });
     }
   }
 
@@ -167,7 +174,7 @@ export function collectDroppedItems(
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
       if (file) {
-        facts.push({ name: file.name, path: droppedFilePath(file, bridge) });
+        facts.push({ name: file.name, path: droppedFilePath(file, bridge), file });
       }
     }
   }
