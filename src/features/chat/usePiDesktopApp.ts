@@ -37,6 +37,7 @@ import {
   replaceTurnWithProvisional,
 } from "../../shared/chatBubbles";
 import { compactionOutcome } from "../../shared/compactionNotice";
+import { attachmentKindFromMimeType } from "../../shared/attachmentKind";
 import { composeTurnNotificationBody, resolveTurnNotificationLabel, shouldNotifyTurnSettled } from "../../shared/turnNotifications";
 import { deriveSessionTitle } from "../../shared/sessionTitle";
 import { isSessionBusy } from "../../shared/sessionBusy";
@@ -2746,7 +2747,7 @@ function toChatAttachment(attachment: PromptAttachmentInput): ChatAttachment {
     name: attachment.name,
     mimeType: attachment.mimeType,
     size: attachment.size,
-    kind: attachment.mimeType.startsWith("image/") ? "image" : "file",
+    kind: attachmentKindFromMimeType(attachment.mimeType),
     previewUrl: attachment.previewUrl,
     sourcePath: attachment.sourcePath,
   };
@@ -2782,9 +2783,10 @@ function normalizeMessageParts(
 }
 
 function attachmentOnlyPrompt(attachments: ChatAttachment[]) {
-  return attachments.length === 1
-    ? `Please review the attached file: ${attachments[0].name}`
-    : `Please review these ${attachments.length} attached files.`;
+  if (attachments.length === 1) {
+    return `Please review the attached ${attachments[0].kind === "directory" ? "folder" : "file"}: ${attachments[0].name}`;
+  }
+  return `Please review these ${attachments.length} attached files.`;
 }
 
 function createDefaultBootstrap(): BootstrapResponse {

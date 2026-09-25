@@ -304,7 +304,7 @@ test("附件上下文仍然能还原成用户看到的原文（steer 认领不�
   const wrapped = [
     "看下这个文件",
     "",
-    "Attached files are available at these local paths. Inspect them with the appropriate tools when needed:",
+    "Attached files and folders are available at these local paths. Inspect them with the appropriate tools when needed:",
     "- a.txt: /tmp/a.txt",
     "",
     ATTACHMENT_CONTEXT_START,
