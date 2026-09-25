@@ -25,6 +25,8 @@ import { openSync, closeSync, readSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { dropProjectPiLinkEntries } from "./worktreePiLink.mjs";
+
 /** 单条 git 命令的超时（毫秒）。大仓库 `git status` 可能到秒级，给足余量但不无限等。 */
 export const GIT_TIMEOUT_MS = 5000;
 
@@ -86,8 +88,11 @@ function gitEnv() {
  * 存在的唯一理由是避坑：`execFileResult` 有 4 个参数，`execImpl` 是最后一个，直接调很容易
  * 漏传（漏了就是 undefined 被当函数调）。这里建一次、后面只传 argv，漏不掉；测试注入的
  * 假 execFile 也只会通过这一个口子生效。
+ *
+ * 导出给 `gitWorktree.mjs`（worktree 的 add/remove/list 是另一组写操作，不能混进本模块的
+ * 只读白名单），共用同一套 env / timeout / maxBuffer 设置。
  */
-function gitRunner({ execImpl = execFile, timeoutMs = GIT_TIMEOUT_MS } = {}) {
+export function createGitRunner({ execImpl = execFile, timeoutMs = GIT_TIMEOUT_MS } = {}) {
   return (args, options = {}) =>
     execFileResult(
       "git",
@@ -112,7 +117,7 @@ export async function runReadOnlyGit(cwd, args, options = {}) {
     throw new Error(`refusing to run non read-only git command: git ${args.join(" ")}`);
   }
 
-  return gitRunner(options)(args, { cwd });
+  return createGitRunner(options)(args, { cwd });
 }
 
 /** 空载荷：没装 git，或项目不是仓库。UI 靠 `gitInstalled` / `isRepo` 决定显示什么。 */
@@ -454,7 +459,7 @@ export function parseGitVersion(text) {
  */
 export async function readGitInfo(cwd, { execImpl = execFile, timeoutMs = GIT_TIMEOUT_MS } = {}) {
   // `--version` 不是子命令，走 gitRunner 直接调；其余全部经过只读白名单。
-  const git = gitRunner({ execImpl, timeoutMs });
+  const git = createGitRunner({ execImpl, timeoutMs });
   const options = { execImpl, timeoutMs };
 
   // 真正的"没装"只有 spawn 失败（ENOENT / EACCES）这一种；`git --version` 退出码非零
@@ -482,7 +487,8 @@ export async function readGitInfo(cwd, { execImpl = execFile, timeoutMs = GIT_TI
   const chunks = status.stdout.split("\0");
   const header = parseBranchHeader(chunks);
   const counts = await readLineCounts(project, options);
-  const { files, added, removed } = summarizeChanges(parsePorcelainV2(chunks), counts);
+  // 托管 worktree 里的共享 `.pi` 链是应用放的未跟踪条目：不进徽标、不进提交列表。
+  const { files, added, removed } = summarizeChanges(dropProjectPiLinkEntries(project, parsePorcelainV2(chunks)), counts);
 
   const branches = await runReadOnlyGit(project, ["for-each-ref", `--format=${BRANCH_FORMAT}`, "refs/heads"], options);
 
@@ -552,7 +558,7 @@ export async function initGitRepo(cwd, { execImpl = execFile, timeoutMs = GIT_TI
     throw new Error("Cannot initialize git without a project folder");
   }
 
-  const result = await gitRunner({ execImpl, timeoutMs })(["init"], { cwd: project });
+  const result = await createGitRunner({ execImpl, timeoutMs })(["init"], { cwd: project });
 
   if (!result.ok) {
     const reason = result.stderr.trim() || (result.killed ? "git init timed out" : `git init failed (${result.code})`);
@@ -584,7 +590,7 @@ export async function switchGitBranch(cwd, branch, { execImpl = execFile, timeou
   }
 
   const options = { execImpl, timeoutMs };
-  const git = gitRunner(options);
+  const git = createGitRunner(options);
 
   const listed = await runReadOnlyGit(project, ["for-each-ref", `--format=${BRANCH_FORMAT}`, "refs/heads"], options);
   const branches = parseBranches(listed.ok ? listed.stdout : "");
@@ -629,7 +635,7 @@ export async function createGitBranch(cwd, name, { execImpl = execFile, timeoutM
   }
 
   const options = { execImpl, timeoutMs };
-  const git = gitRunner(options);
+  const git = createGitRunner(options);
 
   const listed = await runReadOnlyGit(project, ["for-each-ref", `--format=${BRANCH_FORMAT}`, "refs/heads"], options);
   const branches = parseBranches(listed.ok ? listed.stdout : "");
@@ -676,7 +682,7 @@ export async function renameGitBranch(cwd, name, { execImpl = execFile, timeoutM
   }
 
   const options = { execImpl, timeoutMs };
-  const git = gitRunner(options);
+  const git = createGitRunner(options);
 
   const listed = await runReadOnlyGit(project, ["for-each-ref", `--format=${BRANCH_FORMAT}`, "refs/heads"], options);
   const branches = parseBranches(listed.ok ? listed.stdout : "");
@@ -725,7 +731,7 @@ export async function commitGitChanges(cwd, { message, paths } = {}, { execImpl 
   }
 
   const options = { execImpl, timeoutMs };
-  const git = gitRunner(options);
+  const git = createGitRunner(options);
 
   const status = await runReadOnlyGit(
     project,
@@ -736,7 +742,7 @@ export async function commitGitChanges(cwd, { message, paths } = {}, { execImpl 
     throw new Error(gitFailureReason(status));
   }
 
-  const entries = parsePorcelainV2(status.stdout.split("\u0000"));
+  const entries = dropProjectPiLinkEntries(project, parsePorcelainV2(status.stdout.split("\u0000")));
   const { paths: allowed, conflicted } = commitablePaths(entries);
   const requestedPaths = [...new Set(requested)];
   for (const path of requestedPaths) {
@@ -790,7 +796,7 @@ export async function readChangedEntries(cwd, { execImpl = execFile, timeoutMs =
   }
 
   const chunks = status.stdout.split("\u0000");
-  return { header: parseBranchHeader(chunks), entries: parsePorcelainV2(chunks) };
+  return { header: parseBranchHeader(chunks), entries: dropProjectPiLinkEntries(project, parsePorcelainV2(chunks)) };
 }
 
 /**
@@ -846,7 +852,7 @@ export async function readCommitDiff(cwd, paths, { execImpl = execFile, timeoutM
 
   const chunks = status.stdout.split("\u0000");
   const header = parseBranchHeader(chunks);
-  const entries = parsePorcelainV2(chunks);
+  const entries = dropProjectPiLinkEntries(project, parsePorcelainV2(chunks));
   const counts = await readLineCounts(project, options);
   const { files } = summarizeChanges(entries, counts);
   const byPath = new Map(entries.map((entry) => [entry.path, entry]));

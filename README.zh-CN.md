@@ -17,7 +17,8 @@
 桥（`server/index.mjs`）把 pi 嵌进来 —— `ModelRuntime`、`SessionManager`、`SettingsManager`、
 `DefaultResourceLoader` —— 并对外提供渲染层要用的 HTTP/WebSocket 接口。Pi 的资源走
 `DefaultResourceLoader` 加载：全局的来自 `~/.pi/agent`，项目级的来自 `<project>/.pi`，
-再加上内置的系统技能 `skills/`。
+再加上内置的系统技能 `skills/`。会话的工作目录可以是托管 worktree，那条 worktree 的 `.pi`
+是指回项目 `.pi` 的软链，项目级 skills / 扩展 / 包因此共用同一份。
 
 [English README](README.md)
 

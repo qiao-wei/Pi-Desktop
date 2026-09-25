@@ -74,7 +74,12 @@ test("the sidebar's delete action opens a dialog with archive AND direct delete"
   assert.match(sidebar, /onDeleteSession\(dialog\.projectId, dialog\.sessionPath\)/);
 
   assert.match(app, /kind: "archive-session"; projectId: string; sessionPath: string; title: string/);
-  assert.match(app, /t\("dialog\.archiveSessionDesc", \{ title: dialog\.title \}\)/);
+  // 说明文案按会话是否跑在 worktree 里分岔：worktree 会话要多讲一句「worktree 会被一起删」，
+  // 普通会话仍走原文案（实现有意改动，断言跟着更新，不是回归）。
+  assert.match(
+    app,
+    /t\(dialog\.inWorktree \? "dialog\.archiveSessionDescWorktree" : "dialog\.archiveSessionDesc", \{ title: dialog\.title \}\)/,
+  );
 
   const dialogView = topLevelFunctionSource(app, "SidebarDialogView");
   assert.match(dialogView, /t\("dialog\.deleteSessionForever"\)/);
