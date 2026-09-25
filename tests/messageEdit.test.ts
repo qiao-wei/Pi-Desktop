@@ -173,7 +173,11 @@ test("editor keeps the composer surface: slash skills, paste sanitising, files, 
   assert.match(editBox, /matchSlashTrigger/);
   assert.match(editBox, /htmlToSanitizedMarkup/);
   assert.match(editBox, /renamePastedImage/);
-  assert.match(editBox, /dataTransfer\.files/);
+  // 拖放仍归这个编辑框处理，但入口换成 `shared/composerDrop` 的决策：直接把
+  // `dataTransfer.files` 交给 addFiles 会让拖进来的文件夹变成零长附件，提交时 FileReader 报错。
+  // （行为级覆盖在 tests/composerDrop.test.ts，接线守卫在 tests/dragDropGuard.test.ts。）
+  assert.match(editBox, /collectDroppedItems\(event\.dataTransfer/);
+  assert.doesNotMatch(editBox, /addFiles\(event\.dataTransfer\.files\)/);
   assert.match(editBox, /className="composer-editor message-edit-editor"/);
   assert.match(editBox, /capability-badge/);
   // No run-configuration controls in edit mode.
