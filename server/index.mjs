@@ -15,6 +15,7 @@ import { applySkillSelection, createSkillSelectionPolicy, replaceSkillSelectionP
 import { describeLoadStatus, isUnhealthyLoadStatus, summarizePackageHealth } from "./capabilityHealth.mjs";
 import { absolutizeInstalledUserPackage, installTargetPath, packageSourceForPi } from "./capabilityPackageSource.mjs";
 import { emptyPackageResources, findPackageResourceEntry, MAX_RESOURCE_PREVIEW_BYTES, packageProgressEvent, packageResourceDetails, resourcePreview, summarizePackageResources } from "./capabilityPackageResources.mjs";
+import { extensionWidgetRequest } from "./extensionUiRequests.mjs";
 import { openSqliteDatabase } from "./sqlite.mjs";
 import { ensureSessionArchiveColumn, listArchivedSessionRows, listProjectSessionRows } from "./sessionArchive.mjs";
 import { revealFolder } from "./revealFolder.mjs";
@@ -788,16 +789,16 @@ function createExtensionUiBridge() {
       setWorkingIndicator: () => {},
       setHiddenThinkingLabel: () => {},
       setWidget: (widgetKey, content, options) => {
-        if (!Array.isArray(content)) {
+        // `undefined` 是「清除」；漏掉它会让扩展在 session_shutdown 里清掉的 widget 留在编辑器上方。
+        const request = extensionWidgetRequest(widgetKey, content, options);
+        if (!request) {
           return;
         }
         emit({
           type: "extension_ui_request",
           id: randomUUID(),
           method: "setWidget",
-          widgetKey,
-          widgetLines: content,
-          widgetPlacement: options?.placement ?? "aboveEditor",
+          ...request,
         });
       },
       setFooter: () => {},
