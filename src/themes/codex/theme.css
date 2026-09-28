@@ -439,6 +439,13 @@
   :root[data-appearance="codex"] .conversation-header {
     -webkit-app-region: drag;
     position: relative;
+    /* 会话头必须和标题栏**等高**（46px）。整列被抬起 `--titlebar-height`，而「Global
+     * skills & packages」页的遮罩（App.tsx 里 `absolute inset-0 z-20`）挂在**没抬起的**
+     * 格子上，顶边 = 格子上沿。会话头的自然高度只有 45px（28 内容 + 16 内边距 + 1 下边框），
+     * 于是遮罩顶比会话头底边低 1px，会话列最上面那 1px 露在遮罩外 —— 聊天内容刚好滚到
+     * 那条线上时，就会在「Skills / Packages」上面渗出一条文字（用户实测）。`min-height`
+     * 把两者钉在一起：无论外壳有没有 1px 边框、滚到什么位置，遮罩顶都落在会话头底边上。 */
+    min-height: var(--titlebar-height);
     /* 右边要给标题栏那两个图标（语言 / 面板开关）让位：**右侧面板收起时**主区顶到窗口
      * 右缘，图标就直接压在分支信息上（实测重叠 59px）。面板自己占的宽度算进可用空间，
      * 面板宽到 80px 以上时图标已经落在面板那一列里，就不再预留。
