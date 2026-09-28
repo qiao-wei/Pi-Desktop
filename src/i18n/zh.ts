@@ -449,6 +449,8 @@ export const zh = {
   "capability.slashMenu.aria": "技能与指令",
   "capability.slashMenu.skills": "技能 ({count})",
   "capability.slashMenu.commands": "指令 ({count})",
+  "capability.slashMenu.arguments": "参数 ({count})",
+  "capability.slashMenu.commandHint": "选中后填入输入框 · 回车执行",
   "capability.slashMenu.empty": "没有匹配的技能或指令",
   "common.close": "关闭",
   "capability.market.importSkill": "导入技能",

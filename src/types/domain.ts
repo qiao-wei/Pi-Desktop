@@ -333,6 +333,15 @@ export interface CapabilityPackageFilePreview {
 export interface CapabilityCommand {
   name: string;
   description?: string;
+  /** pi 侧该命令注册了 getArgumentCompletions（TUI 参数补全）。 */
+  hasArgumentCompletions?: boolean;
+}
+
+/** 一条包命令的参数补全候选（pi AutocompleteItem 的精简透传）。 */
+export interface CapabilityCommandArgument {
+  value: string;
+  label: string;
+  description?: string;
 }
 
 export interface CapabilityPackage {

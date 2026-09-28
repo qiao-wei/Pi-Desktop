@@ -191,7 +191,9 @@ import { chatScrollToBottomBus } from "../shared/chatScrollBus";
 import { sessionControlsDisabled } from "../shared/sessionBusy";
 import {
   buildSlashMenuItems,
+  findSlashCommand,
   findSlashStart,
+  matchSlashCommandArgs,
   matchSlashTrigger,
   moveHighlight,
   readTriggerText,
@@ -213,6 +215,7 @@ import type {
   CapabilitiesState,
   ArchivedSessionSummary,
   CapabilityCommand,
+  CapabilityCommandArgument,
   CapabilityKind,
   CapabilityPackage,
   CapabilityPackageResourceDetails,
@@ -356,6 +359,7 @@ export function App() {
     removePackage,
     updatePackage,
     runPackageCommand,
+    loadPackageCommandArguments,
     deleteSkill,
     importSkill,
     respondExtensionUi,
@@ -401,6 +405,9 @@ export function App() {
   const [showCapabilityPicker, setShowCapabilityPicker] = useState(false);
   const [slashQuery, setSlashQuery] = useState("");
   const [slashHighlight, setSlashHighlight] = useState(0);
+  /** 已选中的包命令：`/name` 已在编辑器里，正在给它补参数（TUI 参数补全）。 */
+  const [slashCommandContext, setSlashCommandContext] = useState<{ packageId: string; name: string; prefix: string } | null>(null);
+  const [slashArgumentItems, setSlashArgumentItems] = useState<CapabilityCommandArgument[]>([]);
   const [customUiCancelVersion, setCustomUiCancelVersion] = useState(0);
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(() => loadUiPreferences().leftSidebarWidth);
   const [rightPanelWidth, setRightPanelWidth] = useState(() => loadUiPreferences().rightPanelWidth);
@@ -463,11 +470,50 @@ export function App() {
     : true;
 
   // "/" 自动补全：技能在前、包指令在后，查询词取斜杠之后的文本。
-  const slashItems = useMemo(
-    () => buildSlashMenuItems(capabilities, slashQuery),
-    [capabilities, slashQuery],
-  );
+  // 一旦进入"命令参数"态，菜单换成该命令的参数候选（TUI 的 getArgumentCompletions）。
+  const slashItems = useMemo<SlashMenuItem[]>(() => {
+    if (slashCommandContext) {
+      return slashArgumentItems.map((item) => ({
+        kind: "argument" as const,
+        value: item.value,
+        label: item.label,
+        ...(item.description ? { description: item.description } : {}),
+      }));
+    }
+    return buildSlashMenuItems(capabilities, slashQuery);
+  }, [capabilities, slashArgumentItems, slashCommandContext, slashQuery]);
   const activeSlashIndex = Math.min(slashHighlight, Math.max(0, slashItems.length - 1));
+  // 参数候选是异步拿的：context 每变一次（换了命令 / 参数前缀）就重新问服务端，
+  // 旧请求的返回靠 cancelled 丢弃，避免慢响应盖掉新前缀的结果。
+  useEffect(() => {
+    if (!slashCommandContext) {
+      setSlashArgumentItems([]);
+      return;
+    }
+    let cancelled = false;
+    // 每个键都会改前缀，防抖一下再问服务端（TUI 的 autocomplete 同样防抖）。
+    const timer = setTimeout(() => {
+      void loadPackageCommandArguments(slashCommandContext.packageId, slashCommandContext.name, slashCommandContext.prefix)
+        .then((items) => {
+          if (cancelled) {
+            return;
+          }
+          setSlashArgumentItems(items);
+          setSlashHighlight(0);
+          setShowCapabilityPicker(items.length > 0);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSlashArgumentItems([]);
+          }
+        });
+    }, 120);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [slashCommandContext, loadPackageCommandArguments]);
+
   const contextPercent = normalizePercent(stats.contextPercent);
   const handleComposerModelChange = useCallback(
     (provider: string, model: string) => {
@@ -753,6 +799,26 @@ export function App() {
       setComposerError(t("composer.error.stopping"));
       return;
     }
+
+    // TUI 语义：提交的如果是已加载的包命令（`/name [args]`），执行动作而不是当问题发给
+    // 模型。只认精确命中的包命令；未知的 `/xxx` 仍走聊天（服务端
+    // expandPromptTemplates:false），所以「问题里以 / 开头」不会再触发意外命令。
+    const submittedCommand = matchSlashCommandArgs(orderedText);
+    const slashCommand = submittedCommand ? findSlashCommand(capabilities, submittedCommand.name) : null;
+    if (
+      slashCommand
+      && !state.isBootstrapping
+      && orderedAttachments.length === 0
+      && !orderedParts.some((part) => part.kind === "capability")
+    ) {
+      setComposerError("");
+      clearComposer();
+      void runPackageCommand(slashCommand.packageId, slashCommand.name, submittedCommand?.prefix ?? "").catch((error) => {
+        setComposerError(error instanceof Error ? error.message : String(error));
+      });
+      return;
+    }
+
     if (!canSubmitPrompt) {
       if (!modelConfig.provider || !modelConfig.model) {
         setComposerError(t("composer.error.noModel"));
@@ -1065,6 +1131,7 @@ export function App() {
       if (event.key === "Escape") {
         event.preventDefault();
         setShowCapabilityPicker(false);
+        setSlashCommandContext(null);
         return;
       }
 
@@ -1078,6 +1145,17 @@ export function App() {
         if (event.key === "ArrowUp") {
           event.preventDefault();
           setSlashHighlight((current) => moveHighlight(current, -1, slashItems.length));
+          return;
+        }
+
+        // 对齐 pi TUI 编辑器：Tab / Enter 都只是「把选中的项落进编辑器」——
+        // 选中命令不执行，只把 /name 写进 composer，等参数补完后回车才提交执行。
+        if (event.key === "Tab" && !event.shiftKey) {
+          event.preventDefault();
+          const item = slashItems[activeSlashIndex];
+          if (item) {
+            selectSlashItem(item);
+          }
           return;
         }
 
@@ -1161,22 +1239,45 @@ export function App() {
     const editor = composerEditorRef.current;
     // textContent 会把徽章内部文字（图标/名字/×）算进去，导致徽章后打 / 看似词中；
     // 触发检测只看真实文本节点。
-    const query = editor ? matchSlashTrigger(readTriggerText(editor)) : null;
-    if (query == null) {
-      if (showCapabilityPicker) {
-        setShowCapabilityPicker(false);
-        setSlashQuery("");
+    const triggerText = editor ? readTriggerText(editor) : "";
+    const query = matchSlashTrigger(triggerText);
+    if (query != null) {
+      // 命令名 / 技能补全。
+      setSlashCommandContext(null);
+      if (!showCapabilityPicker) {
+        setSlashHighlight(0);
+        setShowCapabilityPicker(true);
+      }
+      if (query !== slashQuery) {
+        setSlashQuery(query);
+        setSlashHighlight(0);
       }
       return;
     }
 
-    if (!showCapabilityPicker) {
-      setSlashHighlight(0);
-      setShowCapabilityPicker(true);
+    // 已过命令名阶段：`/command args` 时接着补参数（TUI 的 getArgumentCompletions）。
+    const commandArgs = editor ? matchSlashCommandArgs(triggerText) : null;
+    const command = commandArgs ? findSlashCommand(capabilities, commandArgs.name) : null;
+    if (commandArgs && command?.hasArgumentCompletions) {
+      const changed = slashCommandContext?.packageId !== command.packageId
+        || slashCommandContext.name !== command.name
+        || slashCommandContext.prefix !== commandArgs.prefix;
+      if (changed) {
+        setSlashQuery("");
+        setSlashCommandContext({ packageId: command.packageId, name: command.name, prefix: commandArgs.prefix });
+        setSlashHighlight(0);
+        // 新前缀的候选还没到，先收起，等 effect 拿到后自己打开。
+        setShowCapabilityPicker(false);
+      }
+      return;
     }
-    if (query !== slashQuery) {
-      setSlashQuery(query);
-      setSlashHighlight(0);
+
+    setSlashCommandContext(null);
+    if (showCapabilityPicker) {
+      setShowCapabilityPicker(false);
+    }
+    if (slashQuery) {
+      setSlashQuery("");
     }
   }
 
@@ -1528,41 +1629,121 @@ export function App() {
     syncComposerState();
   }
 
-  /** Packages 页点击指令的同款逻辑：立即执行 /api/capabilities/package/command，
-   *  并把 composer 里已输入的 "/命令" 文本清除（不等发送）。 */
-  function runCommandFromSlash(item: Extract<SlashMenuItem, { kind: "command" }>) {
+  /**
+   * TUI 的补全：把选中的 /命令 落成普通文本（`/name `），不执行，
+   * 光标停在后面等用户填参数；命令注册了参数补全时顺手把参数/实例菜单切上来。
+   */
+  function insertCommandAtCursor(item: Extract<SlashMenuItem, { kind: "command" }>) {
     const editor = composerEditorRef.current;
-    if (editor) {
-      const selection = window.getSelection();
-      rememberComposerSelection();
-      let range = composerSelectionRef.current?.cloneRange();
-      if (!range || !editor.contains(range.startContainer) || !editor.contains(range.endContainer)) {
-        range = document.createRange();
-        range.selectNodeContents(editor);
-        range.collapse(false);
-      }
-      removeSlashBeforeRange(range);
-      if (selection) {
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
-      composerSelectionRef.current = range.cloneRange();
-      syncComposerState();
+    if (!editor) {
+      return;
     }
 
-    void runPackageCommand(item.packageId, item.name).catch((error) => {
-      setComposerError(error instanceof Error ? error.message : String(error));
-    });
+    const selection = window.getSelection();
+    rememberComposerSelection();
+    let range = composerSelectionRef.current?.cloneRange();
+    if (!range || !editor.contains(range.startContainer) || !editor.contains(range.endContainer)) {
+      range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+    }
+
+    editor.focus({ preventScroll: true });
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    removeSlashBeforeRange(range);
+
+    const commandNode = document.createTextNode(`/${item.name} `);
+    range.insertNode(commandNode);
+    range.setStart(commandNode, commandNode.textContent?.length ?? 0);
+    range.collapse(true);
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    composerSelectionRef.current = range.cloneRange();
+    syncComposerState();
+
+    if (item.hasArgumentCompletions) {
+      setSlashQuery("");
+      setSlashHighlight(0);
+      setSlashCommandContext({ packageId: item.packageId, name: item.name, prefix: "" });
+    }
   }
 
+  /**
+   * 应用一条参数候选：用候选值替换命令后已输入的整段参数（同 pi TUI 的
+   * applyCompletion 参数分支），末尾补一个空格，并自动拉下一级候选
+   * （如 `/mcp disable ` → server 实例列表）；没有下一级就收菜单，等回车提交。
+   */
+  function applyArgumentCompletion(item: Extract<SlashMenuItem, { kind: "argument" }>) {
+    const editor = composerEditorRef.current;
+    const context = slashCommandContext;
+    if (!editor || !context) {
+      return;
+    }
+
+    const selection = window.getSelection();
+    rememberComposerSelection();
+    let range = composerSelectionRef.current?.cloneRange();
+    if (!range || !editor.contains(range.startContainer) || !editor.contains(range.endContainer)) {
+      range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+    }
+    const container = range.startContainer;
+    if (container.nodeType === Node.TEXT_NODE) {
+      const text = container.textContent ?? "";
+      const before = text.slice(0, range.startOffset);
+      const commandStart = before.lastIndexOf(`/${context.name}`);
+      if (commandStart !== -1) {
+        // 末尾留一个空格：pi 的参数补全靠这个空格区分下一级 token（`/mcp disable `
+        // 才能拿到 server 实例列表），同时交给下面的 effect 自动拉下一级候选。
+        const trailing = /\s$/u.test(item.value) ? "" : " ";
+        const replacement = `/${context.name} ${item.value}${trailing}`;
+        container.textContent = `${text.slice(0, commandStart)}${replacement}${text.slice(range.startOffset)}`;
+        range.setStart(container, commandStart + replacement.length);
+        range.collapse(true);
+        if (selection) {
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+        composerSelectionRef.current = range.cloneRange();
+      }
+    }
+
+    // 先把菜单收起来（旧候选会闪），再把 context 设成刚填入的值 + 空格：
+    // 若该命令还有下一级（如实例列表），effect 会拉到候选后自动重新展开；没有就保持收起。
+    setShowCapabilityPicker(false);
+    setSlashArgumentItems([]);
+    setSlashQuery("");
+    setComposerError("");
+    setSlashCommandContext({ packageId: context.packageId, name: context.name, prefix: `${item.value} ` });
+    syncComposerState();
+  }
+
+  /**
+   * 菜单项的落点（Tab / Enter / 鼠标点选都一样）：
+   * - skill → 插能力徽章
+   * - command → 只把 `/name ` 写进 composer（**不执行**）
+   * - argument → 应用参数候选
+   * 执行只发生在表单提交（handleSubmit）——命令文本写完后回车才跑。
+   */
   function selectSlashItem(item: SlashMenuItem) {
     setShowCapabilityPicker(false);
     setSlashQuery("");
     if (item.kind === "skill") {
+      setSlashCommandContext(null);
       insertCapabilityAtCursor({ kind: "skill", id: item.id, name: item.name, description: item.description, active: true });
       return;
     }
-    runCommandFromSlash(item);
+    if (item.kind === "argument") {
+      applyArgumentCompletion(item);
+      return;
+    }
+    insertCommandAtCursor(item);
   }
 
   function insertCapabilityAtCursor(capability: ComposerCapability) {
@@ -3403,7 +3584,13 @@ function ConversationCapabilitiesSettings({
 }
 
 function slashMenuItemKey(item: SlashMenuItem) {
-  return item.kind === "skill" ? `skill:${item.id}` : `command:${item.packageId}:${item.name}`;
+  if (item.kind === "skill") {
+    return `skill:${item.id}`;
+  }
+  if (item.kind === "argument") {
+    return `argument:${item.value}`;
+  }
+  return `command:${item.packageId}:${item.name}`;
 }
 
 function SlashMenu({
@@ -3427,6 +3614,7 @@ function SlashMenu({
   const entries = items.map((item, index) => ({ item, index }));
   const skills = entries.filter((entry) => entry.item.kind === "skill");
   const commands = entries.filter((entry) => entry.item.kind === "command");
+  const argumentEntries = entries.filter((entry) => entry.item.kind === "argument");
 
   const renderRow = ({ item, index }: { item: SlashMenuItem; index: number }) => (
     <button
@@ -3442,10 +3630,10 @@ function SlashMenu({
       className={`capability-picker-row ${index === highlightIndex ? "is-active" : ""}`}
     >
       <span className={`capability-dot ${item.kind === "skill" ? "skill" : "command"}`}>
-        {item.kind === "skill" ? "S" : "/"}
+        {item.kind === "skill" ? "S" : item.kind === "argument" ? "→" : "/"}
       </span>
       <span className="slash-menu-row-text">
-        <strong>{item.name}</strong>
+        <strong>{item.kind === "argument" ? item.label : item.name}</strong>
         {item.description ? <small>{item.description}</small> : null}
       </span>
       {item.kind === "command" ? <small className="slash-menu-package">{item.packageName}</small> : null}
@@ -3466,14 +3654,22 @@ function SlashMenu({
     </div>
   ) : null;
 
+  const renderArguments = argumentEntries.length ? (
+    <div className="slash-menu-section">
+      <p className="slash-menu-section-label">{t("capability.slashMenu.arguments", { count: argumentEntries.length })}</p>
+      {argumentEntries.map(renderRow)}
+    </div>
+  ) : null;
+
   // 分组顺序由 items 决定（buildSlashMenuItems 已把含最佳匹配的分组排前面）。
   const commandsFirst = items[0]?.kind === "command";
 
   return (
     <div className="capability-picker slash-menu" role="listbox" aria-label={t("capability.slashMenu.aria")}>
-      {commandsFirst ? renderCommands : renderSkills}
-      {commandsFirst ? renderSkills : renderCommands}
+      {argumentEntries.length ? renderArguments : commandsFirst ? renderCommands : renderSkills}
+      {argumentEntries.length ? null : commandsFirst ? renderSkills : renderCommands}
       {!items.length ? <p className="empty-text">{t("capability.slashMenu.empty")}</p> : null}
+      {commands.length ? <p className="slash-menu-hint">{t("capability.slashMenu.commandHint")}</p> : null}
     </div>
   );
 }
