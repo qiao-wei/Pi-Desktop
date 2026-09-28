@@ -309,6 +309,7 @@ function normalizeCapabilities(capabilities?: CapabilitiesState | null): Capabil
     packages: capabilities?.packages ?? [],
     extensions: capabilities?.extensions ?? [],
     mcpServers: capabilities?.mcpServers ?? [],
+    builtinCommands: capabilities?.builtinCommands ?? [],
     session: {
       ...defaults.session,
       ...(capabilities?.session ?? {}),
@@ -2492,8 +2493,14 @@ export function usePiDesktopApp() {
       // shipping, parsing and normalising the entire conversation for a switch that never
       // touched it - which used to be a second full `/api/bootstrap` on every toggle.
       if (result && typeof result === "object" && "snapshot" in result && result.snapshot) {
+        // 服务端两种形状都出现过：整份 bootstrap 就在顶层（`/api/projects`），以及包一层
+        // `{ snapshot: <整份 bootstrap> }`（`/api/compact`、skills/import、`/api/builtin-command`）。
+        // 按 `snapshot` 里有没有 `conversation` 判定，绝不能把嵌套的那层当 AppSnapshot ——
+        // 那会让 normalizeBootstrap 在 `snapshot.conversation.sessionFile` 上崩。
+        const answered = result.snapshot as unknown as { conversation?: unknown };
+        const bootstrap = (answered.conversation ? result : result.snapshot) as unknown as BootstrapResponse;
         if (activeSessionPathRef.current === sessionPath) {
-          replaceBootstrap(result as BootstrapResponse, sessionPath);
+          replaceBootstrap(bootstrap, sessionPath);
         }
         return result;
       }
@@ -2654,6 +2661,15 @@ export function usePiDesktopApp() {
     [bootstrap.activeSessionPath, conversation.sessionFile],
   );
 
+  /**
+   * pi 内置命令（目前只有 `/reload`）。走和 capability 变更同一条 POST + 整包对账路径：
+   * 服务端重载后回整份 snapshot，这里 replaceBootstrap，工具/提示词/能力列表一起刷新。
+   */
+  const runBuiltinCommand = useCallback(
+    (command: string, args = "") => updateCapability("/api/builtin-command", { command, args }),
+    [updateCapability],
+  );
+
   const addExtension = useCallback(
     (path: string, scope: "user" | "project" = "user") =>
       updateCapability("/api/capabilities/extension/add", { path, scope }),
@@ -2730,6 +2746,7 @@ export function usePiDesktopApp() {
     updatePackage,
     runPackageCommand,
     loadPackageCommandArguments,
+    runBuiltinCommand,
     addExtension,
     removeExtension,
     deleteSkill,
@@ -2840,6 +2857,7 @@ function createDefaultCapabilities(): CapabilitiesState {
       packages: [],
       extensions: [],
       mcpServers: [],
+      builtinCommands: [],
       session: {
       version: 3,
       skills: [],

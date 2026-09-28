@@ -101,3 +101,11 @@ export function t(key: string, params?: TranslationParams): string {
   }
   return interpolate(template, params);
 }
+
+/**
+ * `t` 的「有没有这条文案」版本，给需要「专用措辞优先、否则退到通用措辞」的场景用
+ * （见 shared/builtinCommandNotice.ts）。查表顺序与 `t` 完全一致，避免两者判断不一致。
+ */
+export function hasTranslation(key: string): boolean {
+  return dictionaries[currentLocale][key] !== undefined || dictionaries.zh[key] !== undefined;
+}

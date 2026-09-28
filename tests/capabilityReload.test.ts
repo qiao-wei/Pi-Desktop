@@ -211,3 +211,21 @@ test("the client folds the capability slice back instead of re-fetching the tran
   assert.match(updateCapability, /case|"snapshot" in result/, "a full bootstrap answer must still be honoured");
   assert.match(source, /case "replace-capabilities":/, "the reducer must own the slice merge");
 });
+
+// 2026-09-28 真机报错：`/reload` 后 "Cannot read properties of undefined (reading 'sessionFile')"。
+// 根因是服务端两种应答形状：整份 bootstrap 在顶层（/api/projects），以及包一层
+// `{ snapshot: <整份 bootstrap> }`（/api/compact、skills/import、/api/builtin-command）。
+// updateCapability 把嵌套的那层直接当 AppSnapshot 交给 replaceBootstrap，normalizeBootstrap
+// 读 `snapshot.conversation.sessionFile` 就炸。
+test("updateCapability unwraps a bootstrap nested under `snapshot` before reconciling", () => {
+  const source = readFileSync(join(ROOT, "src/features/chat/usePiDesktopApp.ts"), "utf8");
+  const start = source.indexOf("const updateCapability = useCallback(");
+  const end = source.indexOf("const setCapabilityDefault = useCallback(", start);
+  const updateCapability = source.slice(start, end);
+
+  // 按有没有顶层 conversation 判定哪层是 bootstrap，两种形状都不能再误传给 replaceBootstrap。
+  assert.match(updateCapability, /const answered = result\.snapshot as unknown as \{ conversation\?: unknown \}/);
+  assert.match(updateCapability, /const bootstrap = \(answered\.conversation \? result : result\.snapshot\) as unknown as BootstrapResponse/);
+  assert.match(updateCapability, /replaceBootstrap\(bootstrap, sessionPath\)/);
+  assert.doesNotMatch(updateCapability, /replaceBootstrap\(result as BootstrapResponse/, "旧的双层嵌套缺陷断言必须消失");
+});

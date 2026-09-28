@@ -14,6 +14,7 @@ import { canonicalPath, extensionCapabilityId, isPathInside, isSkillPathUnderRoo
 import { applySkillSelection, createSkillSelectionPolicy, replaceSkillSelectionPolicy, skillEnabledBySelection } from "./capabilitySkillSelection.mjs";
 import { describeLoadStatus, isUnhealthyLoadStatus, summarizePackageHealth } from "./capabilityHealth.mjs";
 import { normalizeCommandArgumentItems } from "./commandArguments.mjs";
+import { PI_DESKTOP_BUILTIN_COMMANDS, planBuiltinCommand } from "./builtinCommands.mjs";
 import { absolutizeInstalledUserPackage, installTargetPath, packageSourceForPi } from "./capabilityPackageSource.mjs";
 import { emptyPackageResources, findPackageResourceEntry, MAX_RESOURCE_PREVIEW_BYTES, packageProgressEvent, packageResourceDetails, resourcePreview, summarizePackageResources } from "./capabilityPackageResources.mjs";
 import { extensionWidgetRequest } from "./extensionUiRequests.mjs";
@@ -1272,6 +1273,12 @@ undefined
 
     if (req.method === "POST" && url.pathname === "/api/capabilities/package/command") {
       await streamCapabilityPackageCommand(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/builtin-command") {
+      const body = await readJson(req);
+      sendJson(res, 200, await runBuiltinCommand(body));
       return;
     }
 
@@ -3329,6 +3336,7 @@ async function buildCapabilitiesSnapshot(targetRuntime = runtime, options = {}) 
       readonly: false,
     })).sort(compareCapabilityCards),
     mcpServers,
+    builtinCommands: PI_DESKTOP_BUILTIN_COMMANDS,
     session: sessionSelection,
     extensionErrors: loadHealth.unattributedErrors.map((error) => (error.path ? `${error.message}（${error.path}）` : error.message)),
   };
@@ -3374,6 +3382,29 @@ async function resolveCapabilityPackageCommand(body) {
  * CombinedAutocompleteProvider 就是直接调它。没注册的命令返回空列表，composer 静默
  * 收起参数菜单，不当成错误。
  */
+/**
+ * 内置命令的唯一实现点（目前只有 `/reload`）。语义对齐 pi 的 `/reload`：重读 settings /
+ * prompts / extensions / themes / context files —— `reloadRuntimeTargets` 就是 Pi Desktop
+ * 安装/更新包之后走的那条全量重载路径。回合中途不能重载（pi 的 loader 会在半途换掉工具/
+ * 提示词），先让用户停掉再试。
+ */
+async function runBuiltinCommand(body) {
+  const targetRuntime = getRuntimeForRequest(body);
+  const plan = planBuiltinCommand(body?.command, body?.args);
+  if (plan.kind === "unknown") {
+    throw new Error("Unknown built-in command.");
+  }
+  if (plan.kind === "invalid") {
+    throw new Error(plan.reason);
+  }
+  if (isSessionBusy(targetRuntime.session)) {
+    throw new Error("Stop the running response before reloading.");
+  }
+
+  await reloadRuntimeTargets([targetRuntime]);
+  return { command: plan.command.name, snapshot: await buildSnapshot(targetRuntime) };
+}
+
 async function readCapabilityCommandArguments(req, res) {
   const body = await readJson(req);
   const targetRuntime = getRuntimeForRequest(body);

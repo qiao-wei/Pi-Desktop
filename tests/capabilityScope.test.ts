@@ -218,11 +218,13 @@ test("package `/` commands render through the shared panel, not an expanded row"
   assert.doesNotMatch(appSource, /aria-label="Package commands" onClick=\{\(event\) => event\.stopPropagation\(\)\}>\s*\{item\.commands\.map/);
 });
 
-test("the Packages tab card no longer expands every command as its own button", () => {
+test("the Packages tab card fills the composer instead of running the command", () => {
   const card = functionBody(appSource, "function CapabilityMarketCard");
 
   assert.doesNotMatch(card, /void onRunPackageCommand\(item\.id, command\.name\)/);
-  assert.match(card, /onRun=\{\(command\) => void onRunPackageCommand\(item\.id, command\)\}/);
+  // 2026-09-28 用户要求：能力卡右下角 action 点击只把命令填进 composer，执行留给回车提交。
+  assert.match(card, /onRun=\{\(command\) => onInsertPackageCommand\(item\.id, command\)\}/);
+  assert.doesNotMatch(card, /runPackageCommand/, "卡片不再直接执行命令");
 });
 
 /* --------------------------- context panel search ------------------------- */
@@ -242,12 +244,74 @@ test("the context panel has a search box filtering both Skills and Packages", ()
 test("the context panel packages expose the same `/` command menu as the page", () => {
   const panel = functionBody(appSource, "function ProjectCapabilitiesPanel");
 
-  assert.match(panel, /onRunPackageCommand: \(packageId: string, command: string, args\?: string\) => Promise<unknown>/);
+  assert.match(panel, /onInsertPackageCommand: \(packageId: string, command: string\) => void/);
   assert.match(
     appSource,
-    /<ProjectCapabilitiesPanel[\s\S]*?onRunPackageCommand=\{runPackageCommand\}[\s\S]*?\/>/,
+    /<ProjectCapabilitiesPanel[\s\S]*?onInsertPackageCommand=\{insertPackageCommandIntoComposer\}[\s\S]*?\/>/,
   );
   assert.match(panel, /<CapabilityCommandMenu\n\s+commands=\{item\.commands\}/);
+  // 项目级 package 的 action 同样只填 composer，不再走 async 执行 + busy/error。
+  assert.match(panel, /onRun=\{\(command\) => onInsertPackageCommand\(item\.id, command\)\}/);
+  assert.doesNotMatch(panel, /onRunPackageCommand/, "项目面板不再直接执行命令");
+});
+
+/* --------------- card actions fill the composer, never execute -------------- */
+
+// 2026-09-28 用户要求：Packages 页 / 项目面板右下角 actions（含项目级 package）
+// 点击后「直接将命令输入到当前对话的 composer 里」，而不是立刻执行。
+
+test("both capability surfaces hand package actions to the composer filler", () => {
+  assert.match(
+    appSource,
+    /<CapabilitiesPage[\s\S]*?onInsertPackageCommand=\{insertPackageCommandIntoComposer\}[\s\S]*?customUiCancelVersion/,
+    "全局 Packages 页的 action 要接 composer 填充器",
+  );
+  assert.match(
+    appSource,
+    /<ProjectCapabilitiesPanel[\s\S]*?onInsertPackageCommand=\{insertPackageCommandIntoComposer\}[\s\S]*?\/>/,
+    "项目级能力面板的 action 也要接 composer 填充器",
+  );
+});
+
+test("insertPackageCommandIntoComposer lands `/name ` in the composer, never executes", () => {
+  const fill = functionBody(appSource, "function insertPackageCommandIntoComposer");
+
+  assert.match(fill, /kind: "command"/);
+  assert.match(fill, /hasArgumentCompletions: Boolean\(command\.hasArgumentCompletions\)/, "带上参数补全标记，填完才会自动弹参数列表");
+  assert.match(fill, /insertCommandAtCursor\([\s\S]*?\{ atEnd: true, trailingSpace: false \}/, "从卡片点进来一律追加到末尾，且先不加尾随空格");
+  assert.match(fill, /setActiveMainView\("chat"\)/, "在能力页点时先切回对话，composer 才可见");
+  assert.doesNotMatch(fill, /runPackageCommand/, "绝不直接执行命令");
+  // 用户要求：填进 composer 后光标要真的在 composer 里。
+  assert.match(fill, /requestAnimationFrame\(\(\) => \{[\s\S]*?editor\.contains\(document\.activeElement\)[\s\S]*?editor\.focus\(\{ preventScroll: true \}\)/, "下一帧确保光标回到 composer");
+});
+
+test("a command inserted from the card waits for the user's space before listing arguments", () => {
+  const body = functionBody(appSource, "insertCommandAtCursor");
+
+  // trailingSpace=false 这条分支：不进参数模式，也不拉候选。
+  assert.match(body, /\} else if \(!trailingSpace\) \{\n\s+setSlashCommandContext\(null\);\n\s+setSlashArgumentArmed\(false\);\n\s+setShowCapabilityPicker\(false\);/);
+  // 用户自己敲下空格后，handleComposerInput 扫到 `/name ` 才会把实例列表拉出来。
+  const input = functionBody(appSource, "handleComposerInput");
+  assert.match(input, /matchSlashCommandArgs\(triggerText\)/);
+});
+
+test("closing the command panel does not yank focus back to the trigger button", () => {
+  const menu = functionBody(appSource, "function CapabilityCommandMenu");
+
+  assert.match(menu, /const keepComposerFocus = useRef\(false\)/);
+  assert.match(menu, /function run\(name: string\) \{\n\s+keepComposerFocus\.current = true;/);
+  assert.match(menu, /onCloseAutoFocus=\{\(event\) => \{[\s\S]*?keepComposerFocus\.current[\s\S]*?event\.preventDefault\(\)/, "Radix 默认 onCloseAutoFocus 会把焦点还给按钮，必须拦掉");
+});
+
+test("insertCommandAtCursor appends at the end when asked and keeps a separating space", () => {
+  const insert = functionBody(appSource, "function insertCommandAtCursor");
+
+  // 从卡片进来时按钮持有焦点，composer 缓存的选区可能过时 —— 不能再读它。
+  assert.match(insert, /if \(!options\?\.atEnd\) \{\n\s+rememberComposerSelection\(\);/);
+  assert.match(insert, /let range = options\?\.atEnd \? null : composerSelectionRef\.current\?\.cloneRange\(\)/);
+  // 已有文本时补一个空格，避免接成 `note/mcp`。
+  assert.match(insert, /const separator = beforeText\.length > 0 && !\/\\s\$\/u\.test\(beforeText\) \? " " : ""/);
+  assert.match(insert, /`\$\{separator\}\//);
 });
 
 /* --------------------- context panel scope affordance ---------------------- */

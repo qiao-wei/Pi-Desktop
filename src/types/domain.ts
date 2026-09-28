@@ -383,6 +383,15 @@ export interface CapabilityExtension {
   readonly: boolean;
 }
 
+/**
+ * pi 内置斜杠命令中 Pi Desktop 真能执行的那几条（目前 `/reload`）。服务端只下发实现了的，
+ * 前端遇到就把 `/name` 当作命令提交，不走模型。
+ */
+export interface BuiltinCommand {
+  name: string;
+  description: string;
+}
+
 export interface CapabilityMcpServer {
   id: string;
   kind: "mcp";
@@ -413,6 +422,7 @@ export interface CapabilitiesState {
   packages: CapabilityPackage[];
   extensions: CapabilityExtension[];
   mcpServers?: CapabilityMcpServer[];
+  builtinCommands?: BuiltinCommand[];
   session: CapabilitySessionSelection;
 }
 
