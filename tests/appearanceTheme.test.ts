@@ -574,7 +574,7 @@ test("131 处调色板类靠覆盖 --color-* 变量换色，不改组件", () =>
  *
  * 我们的骨架是「全宽标题栏 + 底下三列」，所以把**三列一起抬到窗口顶端**：侧栏、
  * 右侧栏、两条抓取条用等量 padding 把内容压回带子下面，会话列不压 —— 它的
- * `conversation-header` 本来就有 45px 高，抬上去就是窗口最上面那一排。
+ * `conversation-header` 由 `min-height` 钉成和标题栏等高（46px），抬上去就是窗口最上面那一排。
  *
  * 这些规则写在 `themes/<id>/theme.css` 的**无 layer** 区（文件尾部），因为要盖过
  * `h-[calc(100dvh-…)]` / `[-webkit-app-region:drag]` 这类工具类：styles.css 在
@@ -632,6 +632,24 @@ test("codex：会话头就是窗口最上面那一排（下面那一排移上来
   const ctl = codexRule(".conversation-header button", /no-drag/);
   assert.match(ctl, /-webkit-app-region:\s*no-drag/);
   assert.match(ctl, /\[role="button"\]/);
+});
+
+/**
+ * 「Global skills & packages」页的遮罩（`App.tsx` 里 `absolute inset-0 z-20`）是相对
+ * **没抬起的会话列格子**定位的：顶边 = 格子上沿。会话头底边才是聊天内容的起点，两者只差
+ * `headerHeight - titlebarHeight`。会话头自然高度是 45px（28 内容 + 16 内边距 + 1 下边框），
+ * 比 46px 的标题栏矮 1px；那 1px 露在遮罩外，聊天内容滚到那条线上时就会在能力页标题上方
+ * 渗出一条文字（用户实测，`themes/codex/theme.css` 注释里记了复现方式）。
+ *
+ * 契约是**会话头高度 = 标题栏高度**，所以直接断言取值用的就是同一个变量，别写死 46px。
+ */
+test("codex：会话头与标题栏等高（能力页遮罩与会话内容之间不留缝）", () => {
+  const rule = codexRule(".conversation-header", /min-height:/);
+  assert.match(rule, /min-height:\s*var\(--titlebar-height\)/);
+  assert.ok(
+    rule.includes('[data-appearance="codex"]'),
+    "这条必须限定 codex：默认主题的会话头在标题栏下面，能力页遮罩本来就把它整条盖住",
+  );
 });
 
 test("codex：标题栏退成一条留白（不留可见的「栏」，中格那行重复标题隐藏）", () => {
