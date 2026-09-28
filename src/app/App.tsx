@@ -405,6 +405,12 @@ export function App() {
   const [showCapabilityPicker, setShowCapabilityPicker] = useState(false);
   const [slashQuery, setSlashQuery] = useState("");
   const [slashHighlight, setSlashHighlight] = useState(0);
+  /**
+   * 用户是否真的“选”过参数菜单里的某一项（↑↓ 移动或鼠标点击）。
+   * 参数默认不一定必选：菜单刚弹出、用户没动过时，回车应该直接提交命令；
+   * 只有动过选择后，回车才表示“选这一项”。
+   */
+  const [slashArgumentArmed, setSlashArgumentArmed] = useState(false);
   /** 已选中的包命令：`/name` 已在编辑器里，正在给它补参数（TUI 参数补全）。 */
   const [slashCommandContext, setSlashCommandContext] = useState<{ packageId: string; name: string; prefix: string } | null>(null);
   const [slashArgumentItems, setSlashArgumentItems] = useState<CapabilityCommandArgument[]>([]);
@@ -483,6 +489,8 @@ export function App() {
     return buildSlashMenuItems(capabilities, slashQuery);
   }, [capabilities, slashArgumentItems, slashCommandContext, slashQuery]);
   const activeSlashIndex = Math.min(slashHighlight, Math.max(0, slashItems.length - 1));
+  // 参数菜单未“选中”前不显示任何高亮：回车是提交，不是选第一项。
+  const visibleSlashHighlight = slashItems[0]?.kind === "argument" && !slashArgumentArmed ? -1 : activeSlashIndex;
   // 参数候选是异步拿的：context 每变一次（换了命令 / 参数前缀）就重新问服务端，
   // 旧请求的返回靠 cancelled 丢弃，避免慢响应盖掉新前缀的结果。
   useEffect(() => {
@@ -500,6 +508,7 @@ export function App() {
           }
           setSlashArgumentItems(items);
           setSlashHighlight(0);
+          setSlashArgumentArmed(false);
           setShowCapabilityPicker(items.length > 0);
         })
         .catch(() => {
@@ -1132,24 +1141,36 @@ export function App() {
         event.preventDefault();
         setShowCapabilityPicker(false);
         setSlashCommandContext(null);
+        setSlashArgumentArmed(false);
         return;
       }
 
       if (slashItems.length) {
+        const argumentMenu = slashItems[0]?.kind === "argument";
         if (event.key === "ArrowDown") {
           event.preventDefault();
-          setSlashHighlight((current) => moveHighlight(current, 1, slashItems.length));
+          // 参数菜单默认没有“选中项”（回车=提交）；第一次 ↓ 才落到第一项。
+          if (argumentMenu && !slashArgumentArmed) {
+            setSlashHighlight(0);
+          } else {
+            setSlashHighlight((current) => moveHighlight(current, 1, slashItems.length));
+          }
+          setSlashArgumentArmed(true);
           return;
         }
 
         if (event.key === "ArrowUp") {
           event.preventDefault();
-          setSlashHighlight((current) => moveHighlight(current, -1, slashItems.length));
+          if (argumentMenu && !slashArgumentArmed) {
+            setSlashHighlight(slashItems.length - 1);
+          } else {
+            setSlashHighlight((current) => moveHighlight(current, -1, slashItems.length));
+          }
+          setSlashArgumentArmed(true);
           return;
         }
 
-        // 对齐 pi TUI 编辑器：Tab / Enter 都只是「把选中的项落进编辑器」——
-        // 选中命令不执行，只把 /name 写进 composer，等参数补完后回车才提交执行。
+        // Tab 把选中的项落进编辑器；对命令就是补 `/name `，不执行。
         if (event.key === "Tab" && !event.shiftKey) {
           event.preventDefault();
           const item = slashItems[activeSlashIndex];
@@ -1160,8 +1181,17 @@ export function App() {
         }
 
         if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-          event.preventDefault();
           const item = slashItems[activeSlashIndex];
+          // 参数默认不一定必选：参数菜单刚弹出、用户没动过选择时，回车直接提交命令。
+          // 动过 ↑↓ 或用鼠标点过某一项（`slashArgumentArmed`）才把回车当成「选这一项」。
+          if (item?.kind === "argument" && !slashArgumentArmed) {
+            event.preventDefault();
+            setShowCapabilityPicker(false);
+            setSlashCommandContext(null);
+            event.currentTarget.closest("form")?.requestSubmit();
+            return;
+          }
+          event.preventDefault();
           if (item) {
             selectSlashItem(item);
           }
@@ -1266,6 +1296,7 @@ export function App() {
         setSlashQuery("");
         setSlashCommandContext({ packageId: command.packageId, name: command.name, prefix: commandArgs.prefix });
         setSlashHighlight(0);
+        setSlashArgumentArmed(false);
         // 新前缀的候选还没到，先收起，等 effect 拿到后自己打开。
         setShowCapabilityPicker(false);
       }
@@ -1273,6 +1304,7 @@ export function App() {
     }
 
     setSlashCommandContext(null);
+    setSlashArgumentArmed(false);
     if (showCapabilityPicker) {
       setShowCapabilityPicker(false);
     }
@@ -1669,6 +1701,7 @@ export function App() {
     if (item.hasArgumentCompletions) {
       setSlashQuery("");
       setSlashHighlight(0);
+      setSlashArgumentArmed(false);
       setSlashCommandContext({ packageId: item.packageId, name: item.name, prefix: "" });
     }
   }
@@ -1720,6 +1753,7 @@ export function App() {
     setSlashArgumentItems([]);
     setSlashQuery("");
     setComposerError("");
+    setSlashArgumentArmed(false);
     setSlashCommandContext({ packageId: context.packageId, name: context.name, prefix: `${item.value} ` });
     syncComposerState();
   }
@@ -1734,6 +1768,7 @@ export function App() {
   function selectSlashItem(item: SlashMenuItem) {
     setShowCapabilityPicker(false);
     setSlashQuery("");
+    setSlashArgumentArmed(false);
     if (item.kind === "skill") {
       setSlashCommandContext(null);
       insertCapabilityAtCursor({ kind: "skill", id: item.id, name: item.name, description: item.description, active: true });
@@ -2643,7 +2678,7 @@ export function App() {
           {showCapabilityPicker ? (
             <SlashMenu
               items={slashItems}
-              highlightIndex={activeSlashIndex}
+              highlightIndex={visibleSlashHighlight}
               onSelect={selectSlashItem}
               onHighlight={setSlashHighlight}
             />
@@ -3670,6 +3705,7 @@ function SlashMenu({
       {argumentEntries.length ? null : commandsFirst ? renderSkills : renderCommands}
       {!items.length ? <p className="empty-text">{t("capability.slashMenu.empty")}</p> : null}
       {commands.length ? <p className="slash-menu-hint">{t("capability.slashMenu.commandHint")}</p> : null}
+      {argumentEntries.length ? <p className="slash-menu-hint">{t("capability.slashMenu.argumentHint")}</p> : null}
     </div>
   );
 }

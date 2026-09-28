@@ -446,13 +446,26 @@ test("App: keydown intercepts arrows, Tab and enter only while the menu is open"
   assert.match(body, /ArrowUp/);
   assert.match(body, /moveHighlight\(current, 1, slashItems\.length\)/);
   assert.match(body, /moveHighlight\(current, -1, slashItems\.length\)/);
-  // Tab / Enter 都只是把选中项落进编辑器（命令不执行）。
+  // Tab / Enter 都只把选中项落进编辑器（命令不执行）。
   const tabBranch = body.indexOf('event.key === "Tab"');
   const enterBranch = body.indexOf('event.key === "Enter" && !event.shiftKey');
   assert.ok(tabBranch !== -1 && enterBranch !== -1 && tabBranch < enterBranch);
-  assert.equal((body.match(/selectSlashItem\(item\)/g) ?? []).length, 2, "Tab 和 Enter 都必须只 select 不执行");
+  assert.equal((body.match(/selectSlashItem\(item\)/g) ?? []).length, 2, "Tab 和 Enter 的默认分支都只 select");
   assert.doesNotMatch(body, /runPackageCommand/);
   assert.match(body, /!event\.nativeEvent\.isComposing/);
+});
+
+test("App: unarmed argument menu submits the command on Enter; arrows/click arm selection", () => {
+  const body = functionBody(appSource, "handleComposerKeyDown");
+  // 参数菜单弹出但用户没动过选择 → 回车直接提交（参数可空）。
+  assert.match(body, /if \(item\?\.kind === "argument" && !slashArgumentArmed\)/);
+  const submitBranch = body.indexOf("if (item?.kind === \"argument\" && !slashArgumentArmed)");
+  const submit = body.indexOf("requestSubmit()");
+  assert.ok(submitBranch !== -1 && submit !== -1 && submitBranch < submit);
+  // ↑↓ 才把选择“武装”起来；第一次 ↓/↑ 分别落到首项/末项（默认无高亮）。
+  assert.equal((body.match(/setSlashArgumentArmed\(true\)/g) ?? []).length, 2);
+  assert.match(body, /if \(argumentMenu && !slashArgumentArmed\)/);
+  assert.match(body, /setSlashHighlight\(slashItems\.length - 1\)/);
 });
 
 test("App: enter selection must come before form submit", () => {
@@ -467,7 +480,7 @@ test("App: menu renders grouped items with the live highlight and selection hand
   assert.notEqual(renderIndex, -1, "SlashMenu must be rendered");
   const renderBlock = appSource.slice(renderIndex, renderIndex + 400);
   assert.match(renderBlock, /items=\{slashItems\}/);
-  assert.match(renderBlock, /highlightIndex=\{activeSlashIndex\}/);
+  assert.match(renderBlock, /highlightIndex=\{visibleSlashHighlight\}/);
   assert.match(renderBlock, /onSelect=\{selectSlashItem\}/);
 
   const menuBody = functionBody(appSource, "SlashMenu");
@@ -579,6 +592,14 @@ test("App: argument items render in their own labeled section", () => {
   const menuBody = functionBody(appSource, "SlashMenu");
   assert.match(menuBody, /t\("capability\.slashMenu\.arguments", \{ count: argumentEntries\.length \}\)/);
   assert.match(menuBody, /item\.kind === "argument" \? item\.label : item\.name/);
+  assert.match(menuBody, /t\("capability\.slashMenu\.argumentHint"\)/);
+});
+
+test("App: unarmed argument menu renders no active row", () => {
+  assert.match(
+    appSource,
+    /const visibleSlashHighlight = slashItems\[0\]\?\.kind === "argument" && !slashArgumentArmed \? -1 : activeSlashIndex;/,
+  );
 });
 
 test("App: command menu shows the Tab/Enter hint", () => {
