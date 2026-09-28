@@ -12,7 +12,7 @@ export interface SlashMenuPackage {
   id: string;
   name: string;
   description: string;
-  commands: { name: string; description?: string }[];
+  commands: { name: string; description?: string; hasArgumentCompletions?: boolean }[];
 }
 
 export interface CapabilitiesLike {
@@ -21,16 +21,27 @@ export interface CapabilitiesLike {
 }
 
 /**
- * Composer "/" autocomplete model.
+ * Composer "/" autocomplete model, mirroring the pi TUI editor.
  *
- * Selecting a skill keeps Pi Desktop's badge mechanism (the badge enables the skill
- * for the session and shows up in the message). Selecting a package command
- * runs it immediately through the same endpoint the Packages page uses
- * (/api/capabilities/package/command) and clears the typed "/command" text.
+ * Skills keep Pi Desktop's badge mechanism (the badge enables the skill for the session
+ * and shows up in the message). Package commands are completed into plain text so the
+ * user can add arguments: Tab inserts `/command ` and, when the command registers
+ * `getArgumentCompletions`, `matchSlashCommandArgs` drives the follow-up argument menu.
+ * Enter submits (pi's autocomplete falls through to submit for a "/" prefix), and the
+ * submitted line is dispatched to `/api/capabilities/package/command` — never chatted.
  */
 export type SlashMenuItem =
   | { kind: "skill"; id: string; name: string; description: string; active: boolean }
-  | { kind: "command"; packageId: string; packageName: string; name: string; description: string };
+  | {
+      kind: "command";
+      packageId: string;
+      packageName: string;
+      name: string;
+      description: string;
+      /** pi 侧注册了 getArgumentCompletions → 选中后继续给参数补全。 */
+      hasArgumentCompletions: boolean;
+    }
+  | { kind: "argument"; value: string; label: string; description?: string };
 
 /**
  * The "/" trigger: a slash that starts the composer text or follows whitespace,
@@ -42,6 +53,73 @@ export function matchSlashTrigger(text: string): string | null {
   const cleaned = text.replaceAll("\u200b", "");
   const match = /(?:^|\s)\/([^\s/]*)$/u.exec(cleaned);
   return match ? match[1] : null;
+}
+
+export interface SlashCommandArgs {
+  name: string;
+  prefix: string;
+}
+
+/**
+ * TUI-style `/command args` detection for a whole composer line.
+ *
+ * `matchSlashTrigger` only ever sees the trailing `/query` token, so it goes quiet the
+ * moment a space is typed. This is the follow-up half: it recognizes a *command line*
+ * (`/end-review focus on tests`) so the composer can (a) keep completing arguments while
+ * typing and (b) dispatch the package action on submit instead of sending the text to
+ * the model. The name must start the text (pi itself keys command dispatch off
+ * `text.startsWith("/")`), and arguments stay on the same line so a multi-line draft
+ * never turns into a surprise command.
+ *
+ * The trailing whitespace is intentionally kept in `prefix`: a command like `/mcp` needs
+ * the space after a subcommand (`/mcp disable `) to know the next token is a server
+ * instance. Submitted text is already whitespace-normalized by the composer, so dispatch
+ * sees `/command args` without the trailing space.
+ */
+export function matchSlashCommandArgs(text: string): SlashCommandArgs | null {
+  const cleaned = text.replaceAll("\u200b", "");
+  if (!cleaned.startsWith("/")) {
+    return null;
+  }
+  // 参数必须和命令同一行：多行草稿里出现 /xxx 不该变成意外动作。
+  if (cleaned.includes("\n")) {
+    return null;
+  }
+  const firstSpace = cleaned.search(/\s/u);
+  const name = firstSpace === -1 ? cleaned.slice(1) : cleaned.slice(1, firstSpace);
+  if (!name || name.includes("/")) {
+    return null;
+  }
+  const prefix = firstSpace === -1 ? "" : cleaned.slice(firstSpace + 1);
+  return { name, prefix };
+}
+
+export interface PackageCommandRef {
+  packageId: string;
+  packageName: string;
+  name: string;
+  description: string;
+  hasArgumentCompletions: boolean;
+}
+
+/** Look up one loaded package command by its invocation name across every package. */
+export function findSlashCommand(
+  capabilities: Pick<CapabilitiesState, "packages"> | { packages: SlashMenuPackage[] },
+  name: string,
+): PackageCommandRef | null {
+  for (const pkg of capabilities.packages) {
+    const command = pkg.commands.find((candidate) => candidate.name === name);
+    if (command) {
+      return {
+        packageId: pkg.id,
+        packageName: pkg.name,
+        name: command.name,
+        description: command.description ?? pkg.description,
+        hasArgumentCompletions: Boolean(command.hasArgumentCompletions),
+      };
+    }
+  }
+  return null;
 }
 
 /** Upper bound per section (skills and commands are capped independently, so a
@@ -91,6 +169,7 @@ export function buildSlashMenuItems(
       packageName: pkg.name,
       name: command.name,
       description: command.description ?? pkg.description,
+      hasArgumentCompletions: Boolean(command.hasArgumentCompletions),
     })))
     .map((command) => ({ command, rank: rankOf(command.name, `${command.packageName} ${command.description}`) }))
     .filter(({ rank }) => rank < 3)

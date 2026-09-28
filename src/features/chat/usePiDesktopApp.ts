@@ -60,6 +60,7 @@ import type {
   ChatMessage,
   ChatSession,
   CapabilitiesState,
+  CapabilityCommandArgument,
   CapabilityKind,
   CreateProjectResult,
   PersonalizationSettings,
@@ -2635,6 +2636,24 @@ export function usePiDesktopApp() {
     [bootstrap.activeSessionPath, conversation.sessionFile],
   );
 
+  /**
+   * 包命令的参数补全候选。命令没注册 getArgumentCompletions 时服务端返回空列表，
+   * 这里原样透传（返回 [] 而不是抛错），composer 静默收菜单。
+   */
+  const loadPackageCommandArguments = useCallback(
+    async (packageId: string, command: string, prefix: string): Promise<CapabilityCommandArgument[]> => {
+      // 和 runPackageCommand 一样带上会话路径：候选必须来自会执行这条命令的那个
+      // runtime，多会话打开时不能落到别的会话的包上。
+      const sessionPath = bootstrap.activeSessionPath ?? conversation.sessionFile;
+      const response = await postJson<{ items?: CapabilityCommandArgument[] }>(
+        "/api/capabilities/package/command/arguments",
+        { packageId, command, prefix, sessionPath },
+      );
+      return Array.isArray(response?.items) ? response.items : [];
+    },
+    [bootstrap.activeSessionPath, conversation.sessionFile],
+  );
+
   const addExtension = useCallback(
     (path: string, scope: "user" | "project" = "user") =>
       updateCapability("/api/capabilities/extension/add", { path, scope }),
@@ -2710,6 +2729,7 @@ export function usePiDesktopApp() {
     removePackage,
     updatePackage,
     runPackageCommand,
+    loadPackageCommandArguments,
     addExtension,
     removeExtension,
     deleteSkill,

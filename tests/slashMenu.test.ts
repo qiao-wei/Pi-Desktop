@@ -12,6 +12,8 @@ import test from "node:test";
 
 import {
   buildSlashMenuItems,
+  findSlashCommand,
+  matchSlashCommandArgs,
   matchSlashTrigger,
   moveHighlight,
   findSlashStart,
@@ -229,6 +231,77 @@ test("buildSlashMenuItems: prefix matches rank first so '/end' lands on end-revi
   assert.equal(ranked[1]?.name, "alpha");
 });
 
+/* ------------------------------------------------- matchSlashCommandArgs */
+
+test("matchSlashCommandArgs: whole-line /command and /command args", () => {
+  assert.deepEqual(matchSlashCommandArgs("/review"), { name: "review", prefix: "" });
+  assert.deepEqual(matchSlashCommandArgs("/end-review focus on tests"), { name: "end-review", prefix: "focus on tests" });
+  // `/review ` 里的空格只是分隔符（prefix 为空）；但 `/mcp disable ` 的尾随空格要保留，
+  // 因为扩展靠它区分下一级 token（server 实例列表）。
+  assert.deepEqual(matchSlashCommandArgs("/review "), { name: "review", prefix: "" });
+  assert.deepEqual(matchSlashCommandArgs("/mcp disable "), { name: "mcp", prefix: "disable " });
+  // 多空格同样保留在参数前缀里（getArgumentCompletions 收到的就是这段）。
+  assert.deepEqual(matchSlashCommandArgs("/review  a b"), { name: "review", prefix: " a b" });
+});
+
+test("matchSlashCommandArgs: only a leading slash counts, and args stay on one line", () => {
+  assert.equal(matchSlashCommandArgs("run /review"), null);
+  assert.equal(matchSlashCommandArgs("" ), null);
+  assert.equal(matchSlashCommandArgs("/"), null);
+  assert.equal(matchSlashCommandArgs("/a/b"), null);
+  assert.equal(matchSlashCommandArgs("/review\nmore"), null);
+});
+
+test("matchSlashCommandArgs: zero-width caret markers are ignored", () => {
+  assert.deepEqual(matchSlashCommandArgs("\u200b/review x"), { name: "review", prefix: "x" });
+});
+
+/* ------------------------------------------------------- findSlashCommand */
+
+test("findSlashCommand: resolves a loaded command to its package and completion support", () => {
+  const fixture: CapabilitiesLike = {
+    skills: [],
+    packages: [
+      { id: "p1", name: "Review Pack", description: "", commands: [
+        { name: "end-review", description: "Finish review", hasArgumentCompletions: true },
+        { name: "plain", description: undefined },
+      ] },
+      { id: "p2", name: "Other", description: "Other pack", commands: [{ name: "go" }] },
+    ],
+  };
+  assert.deepEqual(findSlashCommand(fixture, "end-review"), {
+    packageId: "p1",
+    packageName: "Review Pack",
+    name: "end-review",
+    description: "Finish review",
+    hasArgumentCompletions: true,
+  });
+  // 无描述时回退包描述；未注册补全时为 false。
+  assert.deepEqual(findSlashCommand(fixture, "plain"), {
+    packageId: "p1",
+    packageName: "Review Pack",
+    name: "plain",
+    description: "",
+    hasArgumentCompletions: false,
+  });
+  assert.equal(findSlashCommand(fixture, "missing"), null);
+});
+
+test("buildSlashMenuItems: command items carry hasArgumentCompletions", () => {
+  const fixture: CapabilitiesLike = {
+    skills: [],
+    packages: [{ id: "p", name: "P", description: "", commands: [
+      { name: "with-args", hasArgumentCompletions: true },
+      { name: "without-args" },
+    ] }],
+  };
+  const items = buildSlashMenuItems(fixture, "");
+  const withArgs = items.find((item) => item.kind === "command" && item.name === "with-args");
+  const withoutArgs = items.find((item) => item.kind === "command" && item.name === "without-args");
+  assert.equal(withArgs?.kind === "command" && withArgs.hasArgumentCompletions, true);
+  assert.equal(withoutArgs?.kind === "command" && withoutArgs.hasArgumentCompletions, false);
+});
+
 /* ------------------------------------------------------------ moveHighlight */
 
 test("moveHighlight wraps around at both ends", () => {
@@ -352,16 +425,19 @@ test("htmlToSanitizedMarkup: leading and trailing breaks are trimmed", () => {
 
 /* ------------------------------------------------- App wiring (structural) */
 
-test("App: composer input opens the menu from matchSlashTrigger and closes when it returns null", () => {
+test("App: composer input does two-phase detection — /query then /command args", () => {
   const body = functionBody(appSource, "handleComposerInput");
-  assert.match(body, /matchSlashTrigger\(readTriggerText\(editor\)\)/);
+  assert.match(body, /const query = matchSlashTrigger\(triggerText\)/);
+  assert.match(body, /const commandArgs = editor \? matchSlashCommandArgs\(triggerText\) : null/);
+  assert.match(body, /findSlashCommand\(capabilities, commandArgs\.name\)/);
   assert.match(body, /setShowCapabilityPicker\(true\)/);
-  const closeBranch = body.indexOf("if (query == null)");
-  const openCall = body.indexOf("setShowCapabilityPicker(true)");
-  assert.ok(closeBranch !== -1 && openCall !== -1 && closeBranch < openCall);
+  // 命令名阶段先于参数阶段；参数阶段只在命令真的注册了补全时切换菜单。
+  const queryBranch = body.indexOf("if (query != null)");
+  const argsBranch = body.indexOf("commandArgs && command\?\.hasArgumentCompletions");
+  assert.ok(queryBranch !== -1 && argsBranch !== -1 && queryBranch < argsBranch);
 });
 
-test("App: keydown intercepts arrows and enter only while the menu is open", () => {
+test("App: keydown intercepts arrows, Tab and enter only while the menu is open", () => {
   const body = functionBody(appSource, "handleComposerKeyDown");
   const guard = body.indexOf("if (showCapabilityPicker)");
   assert.ok(guard !== -1, "slash handling must be gated on the menu being open");
@@ -370,16 +446,19 @@ test("App: keydown intercepts arrows and enter only while the menu is open", () 
   assert.match(body, /ArrowUp/);
   assert.match(body, /moveHighlight\(current, 1, slashItems\.length\)/);
   assert.match(body, /moveHighlight\(current, -1, slashItems\.length\)/);
-  const enterBranch = body.indexOf("selectSlashItem(item)");
-  assert.ok(enterBranch !== -1, "enter must select the highlighted item");
+  // Tab / Enter 都只是把选中项落进编辑器（命令不执行）。
+  const tabBranch = body.indexOf('event.key === "Tab"');
+  const enterBranch = body.indexOf('event.key === "Enter" && !event.shiftKey');
+  assert.ok(tabBranch !== -1 && enterBranch !== -1 && tabBranch < enterBranch);
+  assert.equal((body.match(/selectSlashItem\(item\)/g) ?? []).length, 2, "Tab 和 Enter 都必须只 select 不执行");
+  assert.doesNotMatch(body, /runPackageCommand/);
   assert.match(body, /!event\.nativeEvent\.isComposing/);
 });
 
 test("App: enter selection must come before form submit", () => {
   const keyDown = functionBody(appSource, "handleComposerKeyDown");
-  const submit = functionBody(appSource, "handleComposerKeyDown");
   const selectIndex = keyDown.indexOf("selectSlashItem(item)");
-  const submitIndex = submit.indexOf("requestSubmit()");
+  const submitIndex = keyDown.indexOf("requestSubmit()");
   assert.ok(selectIndex !== -1 && submitIndex !== -1 && selectIndex < submitIndex);
 });
 
@@ -457,17 +536,55 @@ test("findSlashStart: mid-word slash and empty text find nothing", () => {
   assert.equal(findSlashStart("no slash"), null);
 });
 
-test("App: command selection runs via runPackageCommand and clears the composer command", () => {
-  const body = functionBody(appSource, "runCommandFromSlash");
-  assert.match(body, /runPackageCommand\(item\.packageId, item\.name\)/);
-  assert.match(body, /removeSlashBeforeRange\(range\)/);
-  assert.match(body, /syncComposerState\(\)/);
-  assert.match(body, /setComposerError\(/);
-
+test("App: selecting a command item only inserts /name — never executes", () => {
   const select = functionBody(appSource, "selectSlashItem");
-  const commandBranch = select.indexOf("runCommandFromSlash(item)");
-  const skillBranch = select.indexOf("insertCapabilityAtCursor(");
-  assert.ok(commandBranch !== -1 && skillBranch !== -1);
+  assert.doesNotMatch(select, /runPackageCommand/, "菜单点选/回车不得直接执行命令");
+  assert.match(select, /insertCommandAtCursor\(item\)/);
+  const insert = functionBody(appSource, "insertCommandAtCursor");
+  assert.doesNotMatch(insert, /runPackageCommand/);
+});
+
+test("App: Tab/Enter completing a command drops /name text and opens arg completion", () => {
+  const body = functionBody(appSource, "insertCommandAtCursor");
+  assert.match(body, /document\.createTextNode\(`\/\$\{item\.name\} `\)/);
+  assert.match(body, /removeSlashBeforeRange\(range\)/);
+  assert.match(body, /if \(item\.hasArgumentCompletions\)/);
+  assert.match(body, /setSlashCommandContext\(\{ packageId: item\.packageId, name: item\.name, prefix: "" \}\)/);
+});
+
+test("App: applying an argument candidate appends a space and chains the next level", () => {
+  const body = functionBody(appSource, "applyArgumentCompletion");
+  assert.match(body, /lastIndexOf\(`\/\$\{context\.name\}`\)/);
+  assert.match(body, /const trailing = \/\\s\$\/u\.test\(item\.value\) \? "" : " "/);
+  assert.match(body, /const replacement = `\/\$\{context\.name\} \$\{item\.value\}\$\{trailing\}`/);
+  // 下一级候选（实例列表）用「已填入的值 + 空格」重新拉。
+  assert.match(body, /setSlashCommandContext\(\{ packageId: context\.packageId, name: context\.name, prefix: `\$\{item\.value\} ` \}\)/);
+  assert.match(body, /setShowCapabilityPicker\(false\)/);
+});
+
+test("App: form submit dispatches an exact known package command instead of chatting", () => {
+  const body = functionBody(appSource, "handleSubmit");
+  assert.match(body, /const submittedCommand = matchSlashCommandArgs\(orderedText\)/);
+  assert.match(body, /const slashCommand = submittedCommand \? findSlashCommand\(capabilities, submittedCommand\.name\) : null/);
+  assert.match(body, /runPackageCommand\(slashCommand\.packageId, slashCommand\.name, submittedCommand\?\.prefix \?\? ""\)/);
+  // 派发必须发生在聊天提交（submitTurn）之前，且不走 canSubmitPrompt 的模型门槛。
+  const dispatch = body.indexOf("matchSlashCommandArgs(orderedText)");
+  const chatSubmit = body.indexOf("submitTurn(orderedText");
+  const modelGate = body.indexOf("if (!canSubmitPrompt)");
+  assert.ok(dispatch !== -1 && chatSubmit !== -1 && modelGate !== -1);
+  assert.ok(dispatch < modelGate && dispatch < chatSubmit);
+});
+
+test("App: argument items render in their own labeled section", () => {
+  const menuBody = functionBody(appSource, "SlashMenu");
+  assert.match(menuBody, /t\("capability\.slashMenu\.arguments", \{ count: argumentEntries\.length \}\)/);
+  assert.match(menuBody, /item\.kind === "argument" \? item\.label : item\.name/);
+});
+
+test("App: command menu shows the Tab/Enter hint", () => {
+  const menuBody = functionBody(appSource, "SlashMenu");
+  assert.match(menuBody, /t\("capability\.slashMenu\.commandHint"\)/);
+  assert.match(menuBody, /commands\.length \? <p className="slash-menu-hint"/);
 });
 
 test("App: selecting a skill keeps the badge + session-enable path", () => {

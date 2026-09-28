@@ -348,6 +348,12 @@ button {
   text-overflow: ellipsis;
 }
 
+.slash-menu-hint {
+  padding: 6px 9px 2px;
+  color: var(--app-ink-faint);
+  font-size: 0.75rem;
+}
+
 .capability-picker.slash-menu .slash-menu-package {
   display: inline;
   flex: none;

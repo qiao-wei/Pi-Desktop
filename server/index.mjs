@@ -13,6 +13,7 @@ import { capabilityReloadPlan, reloadRuntimeSkills, sameCapabilityIds } from "./
 import { canonicalPath, extensionCapabilityId, isPathInside, isSkillPathUnderRoots } from "./capabilityPathIdentity.mjs";
 import { applySkillSelection, createSkillSelectionPolicy, replaceSkillSelectionPolicy, skillEnabledBySelection } from "./capabilitySkillSelection.mjs";
 import { describeLoadStatus, isUnhealthyLoadStatus, summarizePackageHealth } from "./capabilityHealth.mjs";
+import { normalizeCommandArgumentItems } from "./commandArguments.mjs";
 import { absolutizeInstalledUserPackage, installTargetPath, packageSourceForPi } from "./capabilityPackageSource.mjs";
 import { emptyPackageResources, findPackageResourceEntry, MAX_RESOURCE_PREVIEW_BYTES, packageProgressEvent, packageResourceDetails, resourcePreview, summarizePackageResources } from "./capabilityPackageResources.mjs";
 import { extensionWidgetRequest } from "./extensionUiRequests.mjs";
@@ -1261,6 +1262,11 @@ undefined
       const body = await readJson(req);
       const result = await readCapabilityPackageFile(body);
       sendJson(res, 200, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/capabilities/package/command/arguments") {
+      await readCapabilityCommandArguments(req, res);
       return;
     }
 
@@ -3299,6 +3305,9 @@ async function buildCapabilitiesSnapshot(targetRuntime = runtime, options = {}) 
         .map((command) => ({
           name: command.invocationName,
           ...(command.description ? { description: command.description } : {}),
+          // 命令自己注册了参数补全（TUI 的 getArgumentCompletions）时，composer 才去
+          // 问服务端要候选；没注册的命令不产生多一笔请求，也不显示参数菜单。
+          hasArgumentCompletions: typeof command.getArgumentCompletions === "function",
         }))
         .sort((left, right) => left.name.localeCompare(right.name)),
     })).sort(compareCapabilityCards),
@@ -3325,11 +3334,7 @@ async function buildCapabilitiesSnapshot(targetRuntime = runtime, options = {}) 
   };
 }
 
-async function resolveCapabilityPackageCommand(body) {
-  const targetRuntime = getRuntimeForRequest(body);
-  const packageId = normalizeCapabilityId(body?.packageId);
-  const commandName = String(body?.command ?? "").trim().replace(/^\/+/, "");
-  const args = String(body?.args ?? "").trim();
+async function findCapabilityPackageCommand(targetRuntime, packageId, commandName) {
   if (!packageId || !commandName) {
     throw new Error("Package command is required.");
   }
@@ -3348,10 +3353,38 @@ async function resolveCapabilityPackageCommand(body) {
     throw new Error(`Command /${commandName} is not loaded from this package.`);
   }
 
+  return { packageItem, command };
+}
+
+async function resolveCapabilityPackageCommand(body) {
+  const targetRuntime = getRuntimeForRequest(body);
+  const packageId = normalizeCapabilityId(body?.packageId);
+  const commandName = String(body?.command ?? "").trim().replace(/^\/+/, "");
+  const args = String(body?.args ?? "").trim();
+  const { command } = await findCapabilityPackageCommand(targetRuntime, packageId, commandName);
+
   return {
     targetRuntime,
     commandText: `/${command.invocationName}${args ? ` ${args}` : ""}`,
   };
+}
+
+/**
+ * 包命令的参数补全。走 pi 命令自己注册的 `getArgumentCompletions(prefix)` —— TUI 的
+ * CombinedAutocompleteProvider 就是直接调它。没注册的命令返回空列表，composer 静默
+ * 收起参数菜单，不当成错误。
+ */
+async function readCapabilityCommandArguments(req, res) {
+  const body = await readJson(req);
+  const targetRuntime = getRuntimeForRequest(body);
+  const packageId = normalizeCapabilityId(body?.packageId);
+  const commandName = String(body?.command ?? "").trim().replace(/^\/+/, "");
+  const prefix = typeof body?.prefix === "string" ? body.prefix : "";
+  const { command } = await findCapabilityPackageCommand(targetRuntime, packageId, commandName);
+  const raw = typeof command.getArgumentCompletions === "function"
+    ? await command.getArgumentCompletions(prefix)
+    : [];
+  sendJson(res, 200, { items: normalizeCommandArgumentItems(raw) });
 }
 
 async function streamCapabilityPackageCommand(req, res) {

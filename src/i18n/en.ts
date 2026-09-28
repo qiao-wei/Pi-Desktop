@@ -443,6 +443,8 @@ export const en = {
   "capability.slashMenu.aria": "Skills and commands",
   "capability.slashMenu.skills": "Skills ({count})",
   "capability.slashMenu.commands": "Commands ({count})",
+  "capability.slashMenu.arguments": "Arguments ({count})",
+  "capability.slashMenu.commandHint": "Pick to fill the composer · Enter to run",
   "capability.slashMenu.empty": "No matching skills or commands",
   "common.close": "Close",
   "capability.market.importSkill": "Import skill",
