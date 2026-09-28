@@ -12,6 +12,7 @@ import test from "node:test";
 
 import {
   buildSlashMenuItems,
+  findBuiltinCommand,
   findSlashCommand,
   matchSlashCommandArgs,
   matchSlashTrigger,
@@ -302,6 +303,40 @@ test("buildSlashMenuItems: command items carry hasArgumentCompletions", () => {
   assert.equal(withoutArgs?.kind === "command" && withoutArgs.hasArgumentCompletions, false);
 });
 
+/* ------------------------------------------------- pi 内置命令（/reload） */
+
+const withBuiltins: CapabilitiesLike = {
+  ...capabilities,
+  builtinCommands: [
+    { name: "reload", description: "Reload extensions, skills, prompts, themes, and context files" },
+  ],
+};
+
+test("buildSlashMenuItems: built-in commands come first on an empty query", () => {
+  const items = buildSlashMenuItems(withBuiltins, "");
+  assert.equal(items[0].kind, "builtin");
+  assert.equal(items[0].kind === "builtin" && items[0].name, "reload");
+  // 技能/包命令照旧都在，不能被内置项挤掉。
+  assert.equal(items.filter((item) => item.kind === "skill").length, 3);
+  assert.equal(items.filter((item) => item.kind === "command").length, 3);
+});
+
+test("buildSlashMenuItems: built-ins rank by name/description and filter like the rest", () => {
+  assert.deepEqual(
+    buildSlashMenuItems(withBuiltins, "relo").map((item) => (item.kind === "builtin" ? item.name : item.kind)),
+    ["reload"],
+  );
+  assert.equal(buildSlashMenuItems(withBuiltins, "themes")[0].kind, "builtin");
+  assert.equal(buildSlashMenuItems(withBuiltins, "zzz").length, 0);
+});
+
+test("findBuiltinCommand: only the shipped, executable subset resolves", () => {
+  assert.equal(findBuiltinCommand(withBuiltins, "reload")?.name, "reload");
+  // 未登记的内置命令（如 /model）服务端不下发，绝不当作可执行命令。
+  assert.equal(findBuiltinCommand(withBuiltins, "model"), null);
+  assert.equal(findBuiltinCommand({}, "reload"), null);
+});
+
 /* ------------------------------------------------------------ moveHighlight */
 
 test("moveHighlight wraps around at both ends", () => {
@@ -485,8 +520,9 @@ test("App: menu renders grouped items with the live highlight and selection hand
 
   const menuBody = functionBody(appSource, "SlashMenu");
   // 分组标题/占位文案走 i18n（zh 基准包的措辞在 i18n.test.ts 里锁），这里只钉接线。
-  assert.match(menuBody, /t\("capability\.slashMenu\.skills", \{ count: skills\.length \}\)/);
-  assert.match(menuBody, /t\("capability\.slashMenu\.commands", \{ count: commands\.length \}\)/);
+  assert.match(menuBody, /renderSection\("capability\.slashMenu\.skills", skills\)/);
+  assert.match(menuBody, /renderSection\("capability\.slashMenu\.commands", commands\)/);
+  assert.match(menuBody, /renderSection\("capability\.slashMenu\.builtins", builtins\)/);
   assert.match(menuBody, /aria-label=\{t\("capability\.slashMenu\.aria"\)\}/);
   assert.match(menuBody, /t\("capability\.slashMenu\.empty"\)/);
   assert.doesNotMatch(menuBody, /技能 \(/, "硬编码中文分组标题应已移入语言包");
@@ -559,9 +595,10 @@ test("App: selecting a command item only inserts /name — never executes", () =
 
 test("App: Tab/Enter completing a command drops /name text and opens arg completion", () => {
   const body = functionBody(appSource, "insertCommandAtCursor");
-  assert.match(body, /document\.createTextNode\(`\/\$\{item\.name\} `\)/);
+  assert.match(body, /const trailingSpace = options\?\.trailingSpace \?\? true/);
+  assert.match(body, /document\.createTextNode\(`\$\{separator\}\/\$\{item\.name\}\$\{trailingSpace \? " " : ""\}`\)/);
   assert.match(body, /removeSlashBeforeRange\(range\)/);
-  assert.match(body, /if \(item\.hasArgumentCompletions\)/);
+  assert.match(body, /if \(trailingSpace && item\.hasArgumentCompletions\)/);
   assert.match(body, /setSlashCommandContext\(\{ packageId: item\.packageId, name: item\.name, prefix: "" \}\)/);
 });
 
@@ -578,7 +615,8 @@ test("App: applying an argument candidate appends a space and chains the next le
 test("App: form submit dispatches an exact known package command instead of chatting", () => {
   const body = functionBody(appSource, "handleSubmit");
   assert.match(body, /const submittedCommand = matchSlashCommandArgs\(orderedText\)/);
-  assert.match(body, /const slashCommand = submittedCommand \? findSlashCommand\(capabilities, submittedCommand\.name\) : null/);
+  assert.match(body, /const slashCommand = submittedCommand && !builtinCommand/);
+  assert.match(body, /findSlashCommand\(capabilities, submittedCommand\.name\)/);
   assert.match(body, /runPackageCommand\(slashCommand\.packageId, slashCommand\.name, submittedCommand\?\.prefix \?\? ""\)/);
   // 派发必须发生在聊天提交（submitTurn）之前，且不走 canSubmitPrompt 的模型门槛。
   const dispatch = body.indexOf("matchSlashCommandArgs(orderedText)");
@@ -588,9 +626,22 @@ test("App: form submit dispatches an exact known package command instead of chat
   assert.ok(dispatch < modelGate && dispatch < chatSubmit);
 });
 
+test("App: form submit dispatches a known built-in command to /api/builtin-command", () => {
+  const body = functionBody(appSource, "handleSubmit");
+
+  assert.match(body, /const builtinCommand = submittedCommand \? findBuiltinCommand\(capabilities, submittedCommand\.name\) : null/);
+  // 内置命令优先于同名包命令（和 pi 一样，内置遮蔽扩展命令）。
+  assert.match(body, /const slashCommand = submittedCommand && !builtinCommand/);
+  assert.match(body, /runBuiltinCommand\(builtinCommand!\.name, submittedCommand\?\.prefix \?\? ""\)/);
+  assert.match(body, /if \(\s*\(slashCommand \|\| builtinCommand\)/);
+  // 同样在 submitTurn 之前、不走模型门槛。
+  const dispatch = body.indexOf("findBuiltinCommand(capabilities");
+  assert.ok(dispatch !== -1 && dispatch < body.indexOf("submitTurn(orderedText"));
+});
+
 test("App: argument items render in their own labeled section", () => {
   const menuBody = functionBody(appSource, "SlashMenu");
-  assert.match(menuBody, /t\("capability\.slashMenu\.arguments", \{ count: argumentEntries\.length \}\)/);
+  assert.match(menuBody, /renderSection\("capability\.slashMenu\.arguments", argumentEntries\)/);
   assert.match(menuBody, /item\.kind === "argument" \? item\.label : item\.name/);
   assert.match(menuBody, /t\("capability\.slashMenu\.argumentHint"\)/);
 });
@@ -605,7 +656,7 @@ test("App: unarmed argument menu renders no active row", () => {
 test("App: command menu shows the Tab/Enter hint", () => {
   const menuBody = functionBody(appSource, "SlashMenu");
   assert.match(menuBody, /t\("capability\.slashMenu\.commandHint"\)/);
-  assert.match(menuBody, /commands\.length \? <p className="slash-menu-hint"/);
+  assert.match(menuBody, /commands\.length \|\| builtins\.length \? <p className="slash-menu-hint"/);
 });
 
 test("App: selecting a skill keeps the badge + session-enable path", () => {

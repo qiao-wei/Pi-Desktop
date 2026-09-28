@@ -417,6 +417,12 @@ export const en = {
   "composer.error.attachmentTooLarge": "{name} exceeds the {limit} MB limit.",
   "composer.error.attachmentsTooLargeTotal": "Attachments cannot exceed {limit} MB in total.",
   "composer.error.attachmentUnreadable": "{name} could not be read — it may have been moved or deleted, or it is actually a folder.",
+  // Built-in commands emit nothing into the transcript: a generic pair plus
+  // optional `<name>.<phase>` overrides for commands that want their own wording.
+  "composer.builtinCommand.running": "Running /{name} …",
+  "composer.builtinCommand.done": "/{name} done",
+  "composer.builtinCommand.reload.running": "Reloading extensions, skills, prompts, themes, and context files…",
+  "composer.builtinCommand.reload.done": "Reloaded extensions, skills, prompts, themes, and context files",
   "composer.error.folderNotAttachable": "Folders cannot be attached. To open {name} as a project, use “＋” in the sidebar; you can also type the folder path into your message.",
   "composer.attachment.folder": "Folder",
   "composer.dropzone.dropToAdd": "Release to add files",
@@ -444,6 +450,8 @@ export const en = {
   "capability.slashMenu.skills": "Skills ({count})",
   "capability.slashMenu.commands": "Commands ({count})",
   "capability.slashMenu.arguments": "Arguments ({count})",
+  "capability.slashMenu.builtins": "Built-in ({count})",
+  "capability.slashMenu.builtinTag": "built-in",
   "capability.slashMenu.commandHint": "Pick to fill the composer · Enter to run",
   "capability.slashMenu.argumentHint": "↑↓ or click to pick · Enter to run",
   "capability.slashMenu.empty": "No matching skills or commands",

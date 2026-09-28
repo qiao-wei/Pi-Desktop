@@ -25,6 +25,7 @@ src-tauri/binaries/
 .env
 .env.*
 !.env.example
+.pi/
 
 # Logs
 *.log

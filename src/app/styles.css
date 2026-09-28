@@ -250,6 +250,13 @@ button {
   color: var(--app-danger-ink);
 }
 
+/* 内置命令（/reload 这类）的成功回执：绿一下就走，没有按钮。 */
+.composer > .compaction-notice[data-tone="done"] {
+  border-color: color-mix(in oklab, var(--app-success) 45%, transparent);
+  background: var(--app-success-wash);
+  color: var(--app-success);
+}
+
 .composer > .compaction-notice .compaction-notice-text {
   min-width: 0;
   overflow-wrap: anywhere;

@@ -50,7 +50,7 @@ import type {
   ReactNode,
   CSSProperties,
 } from "react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   fetchJson,
@@ -120,6 +120,11 @@ import { collectDroppedItems, pickDroppedProjectFolder, supportsDroppedFolderPat
 import { attachmentKindFromMimeType, DIRECTORY_MIME_TYPE } from "../shared/attachmentKind";
 import { pickNewFolderDrops, planComposerDrop, type ComposerDropPlan } from "../shared/composerDrop";
 import { compactActionState, compactionNotice } from "../shared/compactionNotice";
+import {
+  BUILTIN_COMMAND_DONE_DISMISS_MS,
+  builtinCommandNoticeText,
+  type BuiltinCommandPhase,
+} from "../shared/builtinCommandNotice";
 import { t, setLocale } from "../i18n/index.ts";
 import { useT, useLocale } from "../i18n/react";
 import { resolveProjectSidebarLock } from "../shared/projectSidebarLock";
@@ -191,6 +196,7 @@ import { chatScrollToBottomBus } from "../shared/chatScrollBus";
 import { sessionControlsDisabled } from "../shared/sessionBusy";
 import {
   buildSlashMenuItems,
+  findBuiltinCommand,
   findSlashCommand,
   findSlashStart,
   matchSlashCommandArgs,
@@ -360,6 +366,7 @@ export function App() {
     updatePackage,
     runPackageCommand,
     loadPackageCommandArguments,
+    runBuiltinCommand,
     deleteSkill,
     importSkill,
     respondExtensionUi,
@@ -426,6 +433,9 @@ export function App() {
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [isPreparingAttachments, setIsPreparingAttachments] = useState(false);
   const [composerError, setComposerError] = useState("");
+  // 内置命令不往对话里写东西（见 shared/builtinCommandNotice.ts），用一条状态带告知进行中/已完成。
+  const [builtinNotice, setBuiltinNotice] = useState<{ tone: BuiltinCommandPhase; text: string } | null>(null);
+  const builtinNoticeTimerRef = useRef<number | null>(null);
   const [attachmentHover, setAttachmentHover] = useState<AttachmentHoverState | null>(null);
   const usagePopoverRef = useRef<HTMLDivElement | null>(null);
   const composerEditorRef = useRef<HTMLDivElement | null>(null);
@@ -786,6 +796,37 @@ export function App() {
     editor.focus({ preventScroll: true });
   }
 
+  /**
+   * 内置命令状态带：`running` 留到出结果，`done` 停留 BUILTIN_COMMAND_DONE_DISMISS_MS 后自己走。
+   * 同一时刻只留一条，新的一条进来先收掉旧的定时器。
+   */
+  function clearBuiltinNotice() {
+    if (builtinNoticeTimerRef.current != null) {
+      window.clearTimeout(builtinNoticeTimerRef.current);
+      builtinNoticeTimerRef.current = null;
+    }
+    setBuiltinNotice(null);
+  }
+
+  function showBuiltinNotice(name: string, phase: BuiltinCommandPhase) {
+    clearBuiltinNotice();
+    setBuiltinNotice({ tone: phase, text: builtinCommandNoticeText(name, phase) });
+    if (phase === "done") {
+      builtinNoticeTimerRef.current = window.setTimeout(() => {
+        builtinNoticeTimerRef.current = null;
+        setBuiltinNotice(null);
+      }, BUILTIN_COMMAND_DONE_DISMISS_MS);
+    }
+  }
+
+  // 卸载时收掉定时器，免得「已完成」那条在组件没了之后才 setState。
+  useEffect(() => () => {
+    if (builtinNoticeTimerRef.current != null) {
+      window.clearTimeout(builtinNoticeTimerRef.current);
+      builtinNoticeTimerRef.current = null;
+    }
+  }, []);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!(await waitForPendingCapabilitySync())) {
@@ -809,22 +850,42 @@ export function App() {
       return;
     }
 
-    // TUI 语义：提交的如果是已加载的包命令（`/name [args]`），执行动作而不是当问题发给
-    // 模型。只认精确命中的包命令；未知的 `/xxx` 仍走聊天（服务端
-    // expandPromptTemplates:false），所以「问题里以 / 开头」不会再触发意外命令。
+    // TUI 语义：提交的如果是已加载的包命令（`/name [args]`）或 Pi Desktop 实现了的内置命令
+    // （目前 `/reload`），执行动作而不是当问题发给模型。只认精确命中的；未知的 `/xxx` 仍走
+    // 聊天（服务端 expandPromptTemplates:false），所以「问题里以 / 开头」不会再触发意外命令。
     const submittedCommand = matchSlashCommandArgs(orderedText);
-    const slashCommand = submittedCommand ? findSlashCommand(capabilities, submittedCommand.name) : null;
+    const builtinCommand = submittedCommand ? findBuiltinCommand(capabilities, submittedCommand.name) : null;
+    const slashCommand = submittedCommand && !builtinCommand
+      ? findSlashCommand(capabilities, submittedCommand.name)
+      : null;
     if (
-      slashCommand
+      (slashCommand || builtinCommand)
       && !state.isBootstrapping
       && orderedAttachments.length === 0
       && !orderedParts.some((part) => part.kind === "capability")
     ) {
       setComposerError("");
       clearComposer();
-      void runPackageCommand(slashCommand.packageId, slashCommand.name, submittedCommand?.prefix ?? "").catch((error) => {
-        setComposerError(error instanceof Error ? error.message : String(error));
-      });
+      const dispatchCommand = slashCommand
+        ? runPackageCommand(slashCommand.packageId, slashCommand.name, submittedCommand?.prefix ?? "")
+        : runBuiltinCommand(builtinCommand!.name, submittedCommand?.prefix ?? "");
+      if (builtinCommand) {
+        showBuiltinNotice(builtinCommand.name, "running");
+      }
+      void dispatchCommand.then(
+        () => {
+          if (builtinCommand) {
+            showBuiltinNotice(builtinCommand.name, "done");
+          }
+        },
+        (error) => {
+          // 失败让给 composer 错误带（忙/带参数/未知命令 都比状态带具体）。
+          if (builtinCommand) {
+            clearBuiltinNotice();
+          }
+          setComposerError(error instanceof Error ? error.message : String(error));
+        },
+      );
       return;
     }
 
@@ -1665,15 +1726,22 @@ export function App() {
    * TUI 的补全：把选中的 /命令 落成普通文本（`/name `），不执行，
    * 光标停在后面等用户填参数；命令注册了参数补全时顺手把参数/实例菜单切上来。
    */
-  function insertCommandAtCursor(item: Extract<SlashMenuItem, { kind: "command" }>) {
+  function insertCommandAtCursor(item: Extract<SlashMenuItem, { kind: "command" }>, options?: { atEnd?: boolean; trailingSpace?: boolean }) {
     const editor = composerEditorRef.current;
     if (!editor) {
       return;
     }
 
+    // 能力卡点进来的先只放 `/name`（trailingSpace=false）：空格让用户自己敲，
+    // 敲下去的那一刻 handleComposerInput 才把参数/实例列表拉出来。
+    const trailingSpace = options?.trailingSpace ?? true;
+
     const selection = window.getSelection();
-    rememberComposerSelection();
-    let range = composerSelectionRef.current?.cloneRange();
+    if (!options?.atEnd) {
+      rememberComposerSelection();
+    }
+    // 从能力卡点 action 时焦点在按钮上，composer 里记的选区可能已经过时：一律追加到末尾。
+    let range = options?.atEnd ? null : composerSelectionRef.current?.cloneRange();
     if (!range || !editor.contains(range.startContainer) || !editor.contains(range.endContainer)) {
       range = document.createRange();
       range.selectNodeContents(editor);
@@ -1687,7 +1755,12 @@ export function App() {
     }
     removeSlashBeforeRange(range);
 
-    const commandNode = document.createTextNode(`/${item.name} `);
+    // composer 里已有其它文本时，避免接成 `note/mcp`：前面不是空白就补一个空格。
+    const beforeText = range.startContainer.nodeType === Node.TEXT_NODE
+      ? (range.startContainer.textContent ?? "").slice(0, range.startOffset)
+      : (range.startContainer.textContent ?? "");
+    const separator = beforeText.length > 0 && !/\s$/u.test(beforeText) ? " " : "";
+    const commandNode = document.createTextNode(`${separator}/${item.name}${trailingSpace ? " " : ""}`);
     range.insertNode(commandNode);
     range.setStart(commandNode, commandNode.textContent?.length ?? 0);
     range.collapse(true);
@@ -1698,11 +1771,15 @@ export function App() {
     composerSelectionRef.current = range.cloneRange();
     syncComposerState();
 
-    if (item.hasArgumentCompletions) {
+    if (trailingSpace && item.hasArgumentCompletions) {
       setSlashQuery("");
       setSlashHighlight(0);
       setSlashArgumentArmed(false);
       setSlashCommandContext({ packageId: item.packageId, name: item.name, prefix: "" });
+    } else if (!trailingSpace) {
+      setSlashCommandContext(null);
+      setSlashArgumentArmed(false);
+      setShowCapabilityPicker(false);
     }
   }
 
@@ -1778,7 +1855,61 @@ export function App() {
       applyArgumentCompletion(item);
       return;
     }
+    if (item.kind === "builtin") {
+      insertBuiltinCommandAtCursor(item);
+      return;
+    }
     insertCommandAtCursor(item);
+  }
+
+  /**
+   * 内置命令（目前 `/reload`）复用包命令的插入落点，但没有包、也没有参数补全：
+   * 只填 `/name`，不弹参数菜单；回车提交时由 `handleSubmit` 派发给 /api/builtin-command。
+   */
+  function insertBuiltinCommandAtCursor(item: Extract<SlashMenuItem, { kind: "builtin" }>) {
+    insertCommandAtCursor(
+      {
+        kind: "command",
+        packageId: "",
+        packageName: "",
+        name: item.name,
+        description: item.description,
+        hasArgumentCompletions: false,
+      },
+      { trailingSpace: false },
+    );
+  }
+
+  /**
+   * Packages 页 / 项目能力面板里点 action（不直接执行）：
+   * 把 `/command ` 填进当前对话的 composer，有参数补全的会自动弹参数/实例列表，
+   * 和斜杠菜单选中是同一条落点；执行仍然只在回车提交时发生。
+   */
+  function insertPackageCommandIntoComposer(packageId: string, commandName: string) {
+    const pkg = capabilities.packages.find((candidate) => candidate.id === packageId);
+    const command = pkg?.commands.find((candidate) => candidate.name === commandName);
+    if (!pkg || !command) {
+      return;
+    }
+    setActiveMainView("chat");
+    insertCommandAtCursor(
+      {
+        kind: "command",
+        packageId: pkg.id,
+        packageName: pkg.name,
+        name: command.name,
+        description: command.description ?? pkg.description,
+        hasArgumentCompletions: Boolean(command.hasArgumentCompletions),
+      },
+      { atEnd: true, trailingSpace: false },
+    );
+    // 关面板 / 切视图都可能顺手改焦点（Radix 会把焦点还给按钮）：下一帧确认光标回 composer。
+    requestAnimationFrame(() => {
+      const editor = composerEditorRef.current;
+      if (editor && !editor.contains(document.activeElement)) {
+        editor.focus({ preventScroll: true });
+      }
+    });
   }
 
   function insertCapabilityAtCursor(capability: ComposerCapability) {
@@ -2520,6 +2651,11 @@ export function App() {
                 </Button>
               ) : null}
             </div>
+          ) : builtinNotice ? (
+            <div className="compaction-notice" data-tone={builtinNotice.tone} role="status">
+              {builtinNotice.tone === "running" ? <Loader2 className="compaction-notice-spin" /> : null}
+              <span className="compaction-notice-text">{builtinNotice.text}</span>
+            </div>
           ) : null}
           {extensionAboveWidgets.length ? <ExtensionWidgetStack widgets={extensionAboveWidgets} /> : null}
           <input
@@ -2696,7 +2832,7 @@ export function App() {
               onImportSkill={importSkill}
               onInstallPackage={installPackage}
               onUpdatePackage={updatePackage}
-              onRunPackageCommand={runPackageCommand}
+              onInsertPackageCommand={insertPackageCommandIntoComposer}
               customUiCancelVersion={customUiCancelVersion}
             />
           </div>
@@ -2814,7 +2950,7 @@ export function App() {
           onImportSkill={importSkill}
           onInstallPackage={installPackage}
           onUpdatePackage={updatePackage}
-          onRunPackageCommand={runPackageCommand}
+          onInsertPackageCommand={insertPackageCommandIntoComposer}
         />
         </aside>
           </>
@@ -3625,6 +3761,9 @@ function slashMenuItemKey(item: SlashMenuItem) {
   if (item.kind === "argument") {
     return `argument:${item.value}`;
   }
+  if (item.kind === "builtin") {
+    return `builtin:${item.name}`;
+  }
   return `command:${item.packageId}:${item.name}`;
 }
 
@@ -3647,6 +3786,7 @@ function SlashMenu({
   }, [highlightIndex, items]);
 
   const entries = items.map((item, index) => ({ item, index }));
+  const builtins = entries.filter((entry) => entry.item.kind === "builtin");
   const skills = entries.filter((entry) => entry.item.kind === "skill");
   const commands = entries.filter((entry) => entry.item.kind === "command");
   const argumentEntries = entries.filter((entry) => entry.item.kind === "argument");
@@ -3672,39 +3812,39 @@ function SlashMenu({
         {item.description ? <small>{item.description}</small> : null}
       </span>
       {item.kind === "command" ? <small className="slash-menu-package">{item.packageName}</small> : null}
+      {item.kind === "builtin" ? <small className="slash-menu-package">{t("capability.slashMenu.builtinTag")}</small> : null}
     </button>
   );
 
-  const renderSkills = skills.length ? (
-    <div className="slash-menu-section">
-      <p className="slash-menu-section-label">{t("capability.slashMenu.skills", { count: skills.length })}</p>
-      {skills.map(renderRow)}
-    </div>
-  ) : null;
+  const renderSection = (labelKey: string, list: Array<{ item: SlashMenuItem; index: number }>) => (
+    list.length ? (
+      <div className="slash-menu-section">
+        <p className="slash-menu-section-label">{t(labelKey, { count: list.length })}</p>
+        {list.map(renderRow)}
+      </div>
+    ) : null
+  );
 
-  const renderCommands = commands.length ? (
-    <div className="slash-menu-section">
-      <p className="slash-menu-section-label">{t("capability.slashMenu.commands", { count: commands.length })}</p>
-      {commands.map(renderRow)}
-    </div>
-  ) : null;
-
-  const renderArguments = argumentEntries.length ? (
-    <div className="slash-menu-section">
-      <p className="slash-menu-section-label">{t("capability.slashMenu.arguments", { count: argumentEntries.length })}</p>
-      {argumentEntries.map(renderRow)}
-    </div>
-  ) : null;
-
-  // 分组顺序由 items 决定（buildSlashMenuItems 已把含最佳匹配的分组排前面）。
-  const commandsFirst = items[0]?.kind === "command";
+  // 分组顺序由 items 决定（buildSlashMenuItems 已把含最佳匹配的分组排前面），
+  // 这里按各 kind 首次出现的顺序渲染，以后再加分组也不用改 JSX。
+  const groupOrder: SlashMenuItem["kind"][] = [];
+  for (const item of items) {
+    if (!groupOrder.includes(item.kind)) {
+      groupOrder.push(item.kind);
+    }
+  }
+  const sections: Record<SlashMenuItem["kind"], ReactNode> = {
+    argument: renderSection("capability.slashMenu.arguments", argumentEntries),
+    builtin: renderSection("capability.slashMenu.builtins", builtins),
+    command: renderSection("capability.slashMenu.commands", commands),
+    skill: renderSection("capability.slashMenu.skills", skills),
+  };
 
   return (
     <div className="capability-picker slash-menu" role="listbox" aria-label={t("capability.slashMenu.aria")}>
-      {argumentEntries.length ? renderArguments : commandsFirst ? renderCommands : renderSkills}
-      {argumentEntries.length ? null : commandsFirst ? renderSkills : renderCommands}
+      {groupOrder.map((kind) => <Fragment key={kind}>{sections[kind]}</Fragment>)}
       {!items.length ? <p className="empty-text">{t("capability.slashMenu.empty")}</p> : null}
-      {commands.length ? <p className="slash-menu-hint">{t("capability.slashMenu.commandHint")}</p> : null}
+      {commands.length || builtins.length ? <p className="slash-menu-hint">{t("capability.slashMenu.commandHint")}</p> : null}
       {argumentEntries.length ? <p className="slash-menu-hint">{t("capability.slashMenu.argumentHint")}</p> : null}
     </div>
   );
@@ -4244,7 +4384,7 @@ function CapabilitiesPage({
   onImportSkill,
   onInstallPackage,
   onUpdatePackage,
-  onRunPackageCommand,
+  onInsertPackageCommand,
   customUiCancelVersion,
 }: {
   capabilities: CapabilitiesState;
@@ -4254,7 +4394,8 @@ function CapabilitiesPage({
   onImportSkill: (sourcePath: string, scope?: "user" | "project") => Promise<unknown>;
   onInstallPackage: (source: string, scope?: "user" | "project", autoload?: boolean, onProgress?: (message: string) => void) => Promise<unknown>;
   onUpdatePackage: (source?: string, onProgress?: (message: string) => void) => Promise<unknown>;
-  onRunPackageCommand: (packageId: string, command: string, args?: string) => Promise<unknown>;
+  /** 点 action 只把命令填进 composer（不执行）。 */
+  onInsertPackageCommand: (packageId: string, command: string) => void;
   customUiCancelVersion: number;
 }) {
   const t = useT();
@@ -4341,10 +4482,6 @@ function CapabilitiesPage({
     // left sitting behind it.
     setDetailOpen(false);
     setInstallOpen(true);
-  }
-
-  function handlePackageCommand(packageId: string, command: string, args?: string) {
-    return run(`package-command:${packageId}:${command}`, () => onRunPackageCommand(packageId, command, args));
   }
 
   /** The chips only carry counts from the snapshot; entries are resolved when the dialog opens. */
@@ -4463,7 +4600,7 @@ function CapabilitiesPage({
                   onSetDefault={onSetDefault}
                   onSetPinned={onSetPinned}
                   onDelete={requestDelete}
-                  onRunPackageCommand={handlePackageCommand}
+                  onInsertPackageCommand={onInsertPackageCommand}
                 />
               )) : null}
             </div>
@@ -4504,7 +4641,7 @@ function CapabilitiesPage({
                   onSetDefault={onSetDefault}
                   onSetPinned={onSetPinned}
                   onDelete={requestDelete}
-                  onRunPackageCommand={handlePackageCommand}
+                  onInsertPackageCommand={onInsertPackageCommand}
                 />
               )) : <p className="text-sm text-muted-foreground">{t("capability.market.noInstalledProjects")}</p>}
             </div>
@@ -4645,6 +4782,8 @@ function CapabilityCommandMenu({
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  /** 选中命令后 Radix 默认把焦点还给触发按钮；命令已填进 composer，不能让它抢回去。 */
+  const keepComposerFocus = useRef(false);
   const searchable = commands.length > CAPABILITY_COMMAND_SEARCH_THRESHOLD;
   const matches = filterPackageCommands(commands, query);
 
@@ -4665,6 +4804,7 @@ function CapabilityCommandMenu({
   }, [open, searchable]);
 
   function run(name: string) {
+    keepComposerFocus.current = true;
     setOpen(false);
     onRun(name);
   }
@@ -4721,6 +4861,13 @@ function CapabilityCommandMenu({
           align="end"
           sideOffset={6}
           collisionPadding={{ top: CAPABILITY_COMMAND_MENU_TOP_INSET, right: 8, bottom: 8, left: 8 }}
+          // 命令是「填进 composer」而不是执行：面板关掉时不要把焦点送回触发按钮。
+          onCloseAutoFocus={(event) => {
+            if (keepComposerFocus.current) {
+              keepComposerFocus.current = false;
+              event.preventDefault();
+            }
+          }}
           className="flex max-h-[var(--radix-popover-content-available-height,calc(100dvh-6rem))] w-[320px] max-w-(--radix-popover-content-available-width) flex-col overflow-hidden p-1"
         >
           {searchable ? (
@@ -4840,7 +4987,7 @@ function CapabilityMarketCard({
   onSetDefault,
   onSetPinned,
   onDelete,
-  onRunPackageCommand,
+  onInsertPackageCommand,
 }: {
   item: CapabilityItem;
   selected: boolean;
@@ -4850,7 +4997,7 @@ function CapabilityMarketCard({
   onSetDefault: (kind: CapabilityKind, id: string, enabled: boolean) => Promise<unknown>;
   onSetPinned: (kind: CapabilityKind, id: string, pinned: boolean) => Promise<unknown>;
   onDelete: (item: CapabilityItem) => void;
-  onRunPackageCommand: (packageId: string, command: string, args?: string) => Promise<unknown>;
+  onInsertPackageCommand: (packageId: string, command: string) => void;
 }) {
   const t = useT();
   return (
@@ -4949,7 +5096,7 @@ function CapabilityMarketCard({
             <CapabilityCommandMenu
               commands={item.commands}
               disabled={Boolean(busy)}
-              onRun={(command) => void onRunPackageCommand(item.id, command)}
+              onRun={(command) => onInsertPackageCommand(item.id, command)}
             />
           ) : null}
         </div>
@@ -5035,7 +5182,7 @@ function ProjectCapabilitiesPanel({
   onImportSkill,
   onInstallPackage,
   onUpdatePackage,
-  onRunPackageCommand,
+  onInsertPackageCommand,
 }: {
   capabilities: CapabilitiesState;
   /** 面板只列项目级能力，标题里却全是 Skills / Packages —— 用项目名把归属说清楚。 */
@@ -5046,7 +5193,8 @@ function ProjectCapabilitiesPanel({
   onImportSkill: (sourcePath: string, scope?: "user" | "project") => Promise<unknown>;
   onInstallPackage: (source: string, scope?: "user" | "project", autoload?: boolean, onProgress?: (message: string) => void) => Promise<unknown>;
   onUpdatePackage: (source?: string, onProgress?: (message: string) => void) => Promise<unknown>;
-  onRunPackageCommand: (packageId: string, command: string, args?: string) => Promise<unknown>;
+  /** 点 action 只把命令填进 composer（不执行）。 */
+  onInsertPackageCommand: (packageId: string, command: string) => void;
 }) {
   const t = useT();
   const [busy, setBusy] = useState("");
@@ -5084,14 +5232,6 @@ function ProjectCapabilitiesPanel({
     } finally {
       setBusy("");
     }
-  }
-
-  function runPackageCommand(packageId: string, command: string) {
-    setBusy(`package-command:${packageId}:${command}`);
-    setError("");
-    onRunPackageCommand(packageId, command).catch((nextError) => {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
-    }).finally(() => setBusy(""));
   }
 
   /** Same two-step contract as the page: request here, delete only on confirm. */
@@ -5198,7 +5338,7 @@ function ProjectCapabilitiesPanel({
                   <CapabilityCommandMenu
                     commands={item.commands}
                     disabled={Boolean(busy)}
-                    onRun={(command) => runPackageCommand(item.id, command)}
+                    onRun={(command) => onInsertPackageCommand(item.id, command)}
                   />
                 ) : null}
                 {canDeleteCapability(item) ? (

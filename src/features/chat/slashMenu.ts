@@ -15,9 +15,16 @@ export interface SlashMenuPackage {
   commands: { name: string; description?: string; hasArgumentCompletions?: boolean }[];
 }
 
+/** pi 内置命令里 Pi Desktop 真能执行的那几条（服务端只下发实现的）。 */
+export interface SlashMenuBuiltinCommand {
+  name: string;
+  description: string;
+}
+
 export interface CapabilitiesLike {
   skills: SlashMenuSkill[];
   packages: SlashMenuPackage[];
+  builtinCommands?: SlashMenuBuiltinCommand[];
 }
 
 /**
@@ -41,7 +48,8 @@ export type SlashMenuItem =
       /** pi 侧注册了 getArgumentCompletions → 选中后继续给参数补全。 */
       hasArgumentCompletions: boolean;
     }
-  | { kind: "argument"; value: string; label: string; description?: string };
+  | { kind: "argument"; value: string; label: string; description?: string }
+  | { kind: "builtin"; name: string; description: string };
 
 /**
  * The "/" trigger: a slash that starts the composer text or follows whitespace,
@@ -122,18 +130,30 @@ export function findSlashCommand(
   return null;
 }
 
+/**
+ * Look up one built-in command (the Pi Desktop-executable subset) by name. The server
+ * only ships implemented commands, so a hit here means the BFF can really run it.
+ */
+export function findBuiltinCommand(
+  capabilities: { builtinCommands?: SlashMenuBuiltinCommand[] },
+  name: string,
+): SlashMenuBuiltinCommand | null {
+  return (capabilities.builtinCommands ?? []).find((command) => command.name === name) ?? null;
+}
+
 /** Upper bound per section (skills and commands are capped independently, so a
  *  long skill list can never crowd the commands out of the menu). */
 export const SLASH_MENU_LIMIT = 50;
 
 export function buildSlashMenuItems(
-  capabilities: Pick<CapabilitiesState, "skills" | "packages"> | CapabilitiesLike,
+  capabilities: Pick<CapabilitiesState, "skills" | "packages"> & { builtinCommands?: SlashMenuBuiltinCommand[] } | CapabilitiesLike,
   query: string,
   limit = SLASH_MENU_LIMIT,
 ): SlashMenuItem[] {
   const source: CapabilitiesLike = {
     skills: capabilities.skills,
     packages: capabilities.packages,
+    builtinCommands: capabilities.builtinCommands,
   };
   const needle = query.trim().toLowerCase();
 
@@ -176,6 +196,13 @@ export function buildSlashMenuItems(
     .sort((left, right) => left.rank - right.rank || left.command.name.localeCompare(right.command.name))
     .slice(0, limit);
 
+  // 内置命令是固定小名单（服务端只下发实现了的），同样按相关度参与分组排序。
+  const rankedBuiltins = (source.builtinCommands ?? [])
+    .map((command) => ({ command, rank: rankOf(command.name, command.description) }))
+    .filter(({ rank }) => rank < 3)
+    .sort((left, right) => left.rank - right.rank || left.command.name.localeCompare(right.command.name))
+    .slice(0, limit);
+
   const skills: SlashMenuItem[] = rankedSkills.map(({ skill }) => ({
     kind: "skill",
     id: skill.id,
@@ -186,13 +213,22 @@ export function buildSlashMenuItems(
 
   const commands: SlashMenuItem[] = rankedCommands.map(({ command }) => command);
 
+  const builtins: SlashMenuItem[] = rankedBuiltins.map(({ command }) => ({
+    kind: "builtin",
+    name: command.name,
+    description: command.description,
+  }));
+
   // 分组顺序跟随全局最佳匹配：查询非空时，含最优项的分组排前面
-  // （如 "/end" 时指令组在前、高亮直接落在 end-review），空查询维持技能在前。
-  const bestSkillRank = rankedSkills[0]?.rank ?? 3;
-  const bestCommandRank = rankedCommands[0]?.rank ?? 3;
-  return bestCommandRank < bestSkillRank
-    ? [...commands, ...skills]
-    : [...skills, ...commands];
+  // （如 "/end" 时指令组在前、高亮直接落在 end-review）；空查询时三个组并列第一，
+  // 按内置 → 技能 → 指令的稳定顺序展示。用 sort（稳定）而不是手写比较，新分组才不会再漏。
+  const groups = [
+    { rank: rankedBuiltins[0]?.rank ?? 3, items: builtins },
+    { rank: rankedSkills[0]?.rank ?? 3, items: skills },
+    { rank: rankedCommands[0]?.rank ?? 3, items: commands },
+  ];
+  groups.sort((left, right) => left.rank - right.rank);
+  return groups.flatMap((group) => group.items);
 }
 
 /** Highlight movement with wrap-around, matching the pi TUI slash menu. */
