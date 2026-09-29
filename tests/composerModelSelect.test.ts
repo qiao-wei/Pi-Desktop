@@ -225,8 +225,12 @@ const bridgeSource = readFileSync(new URL("../server/index.mjs", import.meta.url
 const panelSource = readFileSync(new URL("../src/features/models/CustomModelsSettings.tsx", import.meta.url), "utf8");
 
 test("切换器挂在提交按钮同一个动作区里", () => {
-  const actions = appSource.slice(appSource.indexOf('<div className="composer-actions">'));
-  const block = actions.slice(0, actions.indexOf("</div>"));
+  // 不能再用「第一个 </div>」收块：动作区里现在还有状态锚点 div，会提前截断。
+  // 以同一动作区内的发送按钮结尾，拿到完整的 .composer-actions。
+  const start = appSource.indexOf('<div className="composer-actions">');
+  const end = appSource.indexOf('className="send-button"', start);
+  assert.ok(start >= 0 && end > start, "找不到 .composer-actions 边界");
+  const block = appSource.slice(start, end);
   assert.match(block, /<ComposerModelSelect/, "ComposerModelSelect 必须在 .composer-actions 内");
   assert.match(block, /onChange=\{handleComposerModelChange\}/);
 });

@@ -1,4 +1,5 @@
 import {
+  Activity,
   AlertTriangle,
   Archive,
   Bell,
@@ -396,6 +397,7 @@ export function App() {
 
   const [showPanel, setShowPanel] = useState(false);
   const [showUsagePopover, setShowUsagePopover] = useState(false);
+  const [showExtensionStatus, setShowExtensionStatus] = useState(false);
   const [showLeftPanel, setShowLeftPanel] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">(() => loadUiPreferences().theme);
@@ -426,6 +428,17 @@ export function App() {
   const [rightPanelWidth, setRightPanelWidth] = useState(() => loadUiPreferences().rightPanelWidth);
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(() => loadUiPreferences().leftSidebarCollapsed);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(() => loadUiPreferences().rightPanelCollapsed);
+  // 输入框上方扩展 widget 区是否折叠（右上角 chevron）。缺省展开 = 保持原来的常驻显示。
+  const [extensionWidgetsCollapsed, setExtensionWidgetsCollapsed] = useState(
+    () => loadUiPreferences().extensionWidgetsCollapsed ?? false,
+  );
+  const toggleExtensionWidgets = useCallback(() => {
+    setExtensionWidgetsCollapsed((collapsed) => {
+      const next = !collapsed;
+      saveUiPreferences({ extensionWidgetsCollapsed: next });
+      return next;
+    });
+  }, []);
   /** 拖动中的手柄：pointer capture 后指针拖离手柄会让 :hover 失效，得显式记着。 */
   const [resizingSide, setResizingSide] = useState<"left" | "right" | null>(null);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -438,6 +451,7 @@ export function App() {
   const builtinNoticeTimerRef = useRef<number | null>(null);
   const [attachmentHover, setAttachmentHover] = useState<AttachmentHoverState | null>(null);
   const usagePopoverRef = useRef<HTMLDivElement | null>(null);
+  const extensionStatusRef = useRef<HTMLDivElement | null>(null);
   const composerEditorRef = useRef<HTMLDivElement | null>(null);
   const composerSelectionRef = useRef<Range | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -708,6 +722,31 @@ export function App() {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [showUsagePopover]);
+
+  useEffect(() => {
+    if (!showExtensionStatus) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!extensionStatusRef.current?.contains(event.target as Node)) {
+        setShowExtensionStatus(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setShowExtensionStatus(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showExtensionStatus]);
 
   useEffect(() => {
     const editor = composerEditorRef.current;
@@ -2657,7 +2696,14 @@ export function App() {
               <span className="compaction-notice-text">{builtinNotice.text}</span>
             </div>
           ) : null}
-          {extensionAboveWidgets.length ? <ExtensionWidgetStack widgets={extensionAboveWidgets} /> : null}
+          {extensionAboveWidgets.length ? (
+            <ExtensionWidgetStack
+              widgets={extensionAboveWidgets}
+              collapsible
+              collapsed={extensionWidgetsCollapsed}
+              onToggle={toggleExtensionWidgets}
+            />
+          ) : null}
           <input
             ref={fileInputRef}
             className="composer-file-input"
@@ -2780,6 +2826,21 @@ export function App() {
                 {composerError ? <span className="composer-error">{composerError}</span> : null}
               </div>
               <div className="composer-actions">
+                {Object.keys(state.extensionUiStatus).length ? (
+                  <div className="extension-status-anchor" ref={extensionStatusRef}>
+                    <button
+                      className={`composer-tool-button extension-status-trigger ${showExtensionStatus ? "is-open" : ""}`}
+                      type="button"
+                      onClick={() => setShowExtensionStatus((value) => !value)}
+                      aria-expanded={showExtensionStatus}
+                      aria-label={t("extensionStatus.open")}
+                      title={t("extensionStatus.open")}
+                    >
+                      <Activity size={15} />
+                    </button>
+                    {showExtensionStatus ? <ExtensionStatusBar status={state.extensionUiStatus} /> : null}
+                  </div>
+                ) : null}
                 <ComposerModelSelect
                   availableModels={availableModels}
                   customModels={customModels.entries}
@@ -2873,7 +2934,6 @@ export function App() {
             </AlertDialogContent>
           </AlertDialog>
         ) : null}
-        {Object.keys(state.extensionUiStatus).length ? <ExtensionStatusBar status={state.extensionUiStatus} /> : null}
         {state.extensionUiNotifications.length ? <ExtensionNotifications notifications={state.extensionUiNotifications} /> : null}
         {activeExtensionUiRequest ? (
           <ExtensionUiDialog
@@ -6924,11 +6984,35 @@ function AttachmentHoverCard({ hover }: { hover: AttachmentHoverState }) {
 
 function ExtensionWidgetStack({
   widgets,
+  collapsible = false,
+  collapsed = false,
+  onToggle,
 }: {
-  widgets: Array<[string, { lines: string[]; placement: "aboveEditor" | "belowEditor" }]>
+  widgets: Array<[string, { lines: string[]; placement: "aboveEditor" | "belowEditor" }]>;
+  collapsible?: boolean;
+  collapsed?: boolean;
+  onToggle?: () => void;
 }) {
+  const toggle = collapsible ? (
+    <button
+      className="extension-widget-toggle"
+      type="button"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      aria-label={collapsed ? t("extensionWidgets.expand") : t("extensionWidgets.collapse")}
+      title={collapsed ? t("extensionWidgets.expand") : t("extensionWidgets.collapse")}
+    >
+      {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+    </button>
+  ) : null;
+
+  if (collapsed) {
+    return <div className="extension-widget-stack extension-widget-stack--collapsed">{toggle}</div>;
+  }
+
   return (
-    <div className="grid gap-1.5 px-0.5 pb-2" aria-label="Extension widgets">
+    <div className="extension-widget-stack grid gap-1.5 px-0.5 pb-2" aria-label="Extension widgets">
+      {toggle}
       {widgets.map(([key, widget]) => (
         <section
           className="border-l-[3px] border-l-primary bg-muted px-2.5 py-2 text-xs leading-snug whitespace-pre-wrap text-muted-foreground"
@@ -7145,19 +7229,17 @@ function formatCny(value: number) {
   return `¥${value.toFixed(2)}`;
 }
 
+/** 扩展状态列表（`ctx.ui.setStatus`）：渲染在模型选择左边的浮动层里。 */
 function ExtensionStatusBar({ status }: { status: Record<string, string> }) {
   return (
-    <div
-      className="pointer-events-none fixed right-[18px] bottom-3.5 z-[25] flex max-w-[min(520px,calc(100vw-36px))] flex-wrap justify-end gap-1.5"
-      role="status"
-      aria-label="Extension status"
-    >
+    <section className="extension-status-popover" role="dialog" aria-label={t("extensionStatus.title")}>
+      <p className="extension-status-title">{t("extensionStatus.title")}</p>
       {Object.entries(status).map(([key, value]) => (
-        <Badge key={key} variant="outline" className="bg-background/95 text-[0.72rem]" title={key}>
+        <div className="extension-status-row" key={key} title={key}>
           {stripTerminalSequences(value)}
-        </Badge>
+        </div>
       ))}
-    </div>
+    </section>
   );
 }
 

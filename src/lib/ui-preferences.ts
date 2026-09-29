@@ -49,6 +49,11 @@ export interface UiPreferences {
    * 而且 macOS 首次发送会弹权限询问，必须是用户自己去设置页打开的。
    */
   notifyOnTurnComplete?: boolean;
+  /**
+   * 输入框上方扩展 widget 区是否已折叠（右上角 chevron）。
+   * 缺省（undefined）= 展开，保持扩展信息的常驻显示。
+   */
+  extensionWidgetsCollapsed?: boolean;
 }
 
 const defaultUiPreferences: UiPreferences = {
