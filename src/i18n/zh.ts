@@ -240,6 +240,10 @@ export const zh = {
   "composer.send": "发送",
   "composer.queueFollowUp": "排队追问",
   "composer.moreTools": "更多输入框工具",
+  "extensionRail.aria": "扩展状态",
+  "extensionRail.details": "扩展状态详情",
+  "extensionRail.expand": "展开扩展状态",
+  "extensionRail.collapse": "收起扩展状态",
   /* ---- 消息操作与行内编辑 ---- */
   "message.copy": "复制消息",
   "message.copyCode": "复制代码",
