@@ -50,10 +50,10 @@ export interface UiPreferences {
    */
   notifyOnTurnComplete?: boolean;
   /**
-   * 输入框上方的扩展状态轨是否展开。缺省（undefined）= 折叠：多个扩展的 widget 常驻会把
-   * 输入框顶得过高，也会和工具栏抢位置；折叠态只留一行图标 chip。
+   * 输入框上方扩展 widget 区是否已折叠（右上角 chevron）。
+   * 缺省（undefined）= 展开，保持扩展信息的常驻显示。
    */
-  extensionStatusRailExpanded?: boolean;
+  extensionWidgetsCollapsed?: boolean;
 }
 
 const defaultUiPreferences: UiPreferences = {
