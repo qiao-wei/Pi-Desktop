@@ -158,6 +158,7 @@ import {
 import { AutoHideScroll } from "../components/AutoHideScroll";
 import { ExtensionCustomUiPanel } from "../components/ExtensionCustomUiPanel";
 import { stripTerminalSequences } from "../shared/terminalText.ts";
+import { extensionWidgetHasWarning, extensionWidgetLabel, type ExtensionWidget } from "../shared/extensionWidgets";
 import { GitStatusBadge } from "../components/GitStatusBadge";
 import { SessionWorktreeBadge } from "../components/SessionWorktreeBadge";
 import {
@@ -426,6 +427,18 @@ export function App() {
   const [rightPanelWidth, setRightPanelWidth] = useState(() => loadUiPreferences().rightPanelWidth);
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(() => loadUiPreferences().leftSidebarCollapsed);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(() => loadUiPreferences().rightPanelCollapsed);
+  // 输入框上方扩展状态轨是否展开。缺省折叠：多个扩展的 widget 常驻会把输入框顶得过高，
+  // 也会和工具栏抢位置（见 ExtensionStatusRail）。
+  const [extensionRailExpanded, setExtensionRailExpanded] = useState(
+    () => loadUiPreferences().extensionStatusRailExpanded ?? false,
+  );
+  const toggleExtensionRail = useCallback(() => {
+    setExtensionRailExpanded((expanded) => {
+      const next = !expanded;
+      saveUiPreferences({ extensionStatusRailExpanded: next });
+      return next;
+    });
+  }, []);
   /** 拖动中的手柄：pointer capture 后指针拖离手柄会让 :hover 失效，得显式记着。 */
   const [resizingSide, setResizingSide] = useState<"left" | "right" | null>(null);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -624,8 +637,9 @@ export function App() {
   const activeExtensionUiRequest = state.extensionUiRequests.find(isDialogExtensionUiRequest) ?? null;
   const activeWebExtensionUiRequest = state.extensionUiRequests.find(isWebExtensionUiRequest) ?? null;
   const activeCustomExtensionUiRequest = state.extensionUiRequests.find(isCustomExtensionUiRequest) ?? null;
-  const extensionAboveWidgets = Object.entries(state.extensionUiWidgets).filter(([, widget]) => widget.placement === "aboveEditor");
-  const extensionBelowWidgets = Object.entries(state.extensionUiWidgets).filter(([, widget]) => widget.placement === "belowEditor");
+  // 扩展 widget 合并成一条状态轨：aboveEditor / belowEditor 在这里统一呈现，不再让
+  // belowEditor 落到 composer 工具栏同一条水平带上（之前正是它盖住了模型选择与发送按钮）。
+  const extensionWidgets = Object.entries(state.extensionUiWidgets);
 
   function getScrollState(sessionPath: string) {
     const existing = scrollStateRef.current.get(sessionPath);
@@ -2657,7 +2671,13 @@ export function App() {
               <span className="compaction-notice-text">{builtinNotice.text}</span>
             </div>
           ) : null}
-          {extensionAboveWidgets.length ? <ExtensionWidgetStack widgets={extensionAboveWidgets} /> : null}
+          {extensionWidgets.length ? (
+            <ExtensionStatusRail
+              widgets={extensionWidgets}
+              expanded={extensionRailExpanded}
+              onToggle={toggleExtensionRail}
+            />
+          ) : null}
           <input
             ref={fileInputRef}
             className="composer-file-input"
@@ -2819,7 +2839,6 @@ export function App() {
               onHighlight={setSlashHighlight}
             />
           ) : null}
-          {extensionBelowWidgets.length ? <ExtensionWidgetStack widgets={extensionBelowWidgets} /> : null}
         </form>
         </section>
         {activeMainView === "capabilities" ? (
@@ -6922,18 +6941,74 @@ function AttachmentHoverCard({ hover }: { hover: AttachmentHoverState }) {
 }
 
 
-function ExtensionWidgetStack({
-  widgets,
-}: {
-  widgets: Array<[string, { lines: string[]; placement: "aboveEditor" | "belowEditor" }]>
-}) {
+/** 折叠态的一行图标：每个扩展一枚 chip，附扩展名；有失败/告警行时点亮一个提示点。 */
+function ExtensionWidgetChips({ widgets }: { widgets: Array<[string, ExtensionWidget]> }) {
   return (
-    <div className="grid gap-1.5 px-0.5 pb-2" aria-label="Extension widgets">
-      {widgets.map(([key, widget]) => (
-        <section
-          className="border-l-[3px] border-l-primary bg-muted px-2.5 py-2 text-xs leading-snug whitespace-pre-wrap text-muted-foreground"
-          key={key}
+    <div className="extension-rail-chips" aria-label={t("extensionRail.aria")}>
+      {widgets.map(([key, widget]) => {
+        const warning = extensionWidgetHasWarning(widget.lines);
+        return (
+          <span
+            className="extension-rail-chip"
+            data-tone={warning ? "warning" : "default"}
+            key={key}
+            title={[extensionWidgetLabel(key), ...widget.lines].join("\n").trim()}
+          >
+            <Wrench size={12} aria-hidden="true" />
+            <span className="extension-rail-chip-label">{extensionWidgetLabel(key)}</span>
+            {warning ? <span className="extension-rail-chip-dot" aria-hidden="true" /> : null}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * 输入框上方的扩展状态轨（合并 `aboveEditor` / `belowEditor` 两种 widget）。
+ *
+ * 背景：pi-mcp-adapter、pi-memory、pi-monitor 都用 `ctx.ui.setWidget` 往输入框附近塞状态。
+ * 旧实现把 belowEditor 直接排在 composer 下方，落进工具栏同一条水平带上，盖住了模型选择与
+ * 发送/停止按钮。这里统一收成一条轨：折叠只占一行图标 chip，展开显示全部纯文本行
+ * （限高、可滚动、剥掉终端颜色码），折叠或展开都不会叠到 composer 上。
+ */
+function ExtensionStatusRail({
+  widgets,
+  expanded,
+  onToggle,
+}: {
+  widgets: Array<[string, ExtensionWidget]>;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const toggleLabel = expanded ? t("extensionRail.collapse") : t("extensionRail.expand");
+  return (
+    <div className="extension-rail" data-expanded={expanded ? "true" : "false"}>
+      <div className="extension-rail-bar">
+        <ExtensionWidgetChips widgets={widgets} />
+        <button
+          className="extension-rail-toggle"
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-label={toggleLabel}
+          title={toggleLabel}
         >
+          {expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+        </button>
+      </div>
+      {expanded ? <ExtensionWidgetStack widgets={widgets} /> : null}
+    </div>
+  );
+}
+
+/** 展开态：每个扩展一块，纯文本行。 */
+function ExtensionWidgetStack({ widgets }: { widgets: Array<[string, ExtensionWidget]> }) {
+  return (
+    <div className="extension-rail-body" aria-label={t("extensionRail.details")}>
+      {widgets.map(([key, widget]) => (
+        <section className="extension-rail-section" key={key}>
+          <p className="extension-rail-section-title">{extensionWidgetLabel(key)}</p>
           {/* 扩展可能把 `ctx.ui.theme` 的颜色写进 widget 行；这里是纯文本展示，把转义序列去掉。 */}
           {widget.lines.map((line, index) => <div key={`${key}-${index}`}>{stripTerminalSequences(line)}</div>)}
         </section>

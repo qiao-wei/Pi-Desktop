@@ -49,6 +49,11 @@ export interface UiPreferences {
    * 而且 macOS 首次发送会弹权限询问，必须是用户自己去设置页打开的。
    */
   notifyOnTurnComplete?: boolean;
+  /**
+   * 输入框上方的扩展状态轨是否展开。缺省（undefined）= 折叠：多个扩展的 widget 常驻会把
+   * 输入框顶得过高，也会和工具栏抢位置；折叠态只留一行图标 chip。
+   */
+  extensionStatusRailExpanded?: boolean;
 }
 
 const defaultUiPreferences: UiPreferences = {
