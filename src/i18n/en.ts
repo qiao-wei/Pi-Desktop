@@ -237,6 +237,10 @@ export const en = {
   "composer.send": "Send",
   "composer.queueFollowUp": "Queue follow-up",
   "composer.moreTools": "More composer tools",
+  "extensionWidgets.collapse": "Collapse extension info",
+  "extensionWidgets.expand": "Expand extension info",
+  "extensionStatus.title": "Extension status",
+  "extensionStatus.open": "Show extension status",
   /* ---- message actions & inline editing ---- */
   "message.copy": "Copy message",
   "message.copyCode": "Copy code",
