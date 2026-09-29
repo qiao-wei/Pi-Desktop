@@ -28,7 +28,9 @@ import {
   type RefObject,
 } from "react";
 import { perfCount, perfEnabled, perfMark, perfSpan } from "../../lib/perf";
+import { chatJumpBus } from "../../shared/chatJumpBus";
 import { chatScrollToBottomBus } from "../../shared/chatScrollBus";
+import { useThreadSearch, type ThreadViewportController } from "./useThreadSearch";
 import { liveTextTailIndex } from "../../shared/liveTextTail";
 import {
   anchorScrollCorrection,
@@ -64,6 +66,11 @@ type ChatThreadProps = {
   onReloadMessage?: (parentMessageId: string) => void | Promise<void>;
   onCancelEditMessage?: () => void;
   onSubmitEditMessage?: (messageId: string, payload: MessageEditPayload) => Promise<boolean>;
+  /** 任务内搜索的查询词；空串 = 未开启。高亮 / 计数 / 滚动都在线程内部完成。 */
+  searchQuery?: string;
+  searchActiveIndex?: number;
+  /** 命中数量回传，供浮动小条显示「第 N / 共 M」。 */
+  onSearchCountChange?: (count: number) => void;
 };
 
 export type ViewportState = {
@@ -161,6 +168,9 @@ export const ChatThread = memo(function ChatThread({
   onReloadMessage,
   onCancelEditMessage,
   onSubmitEditMessage,
+  searchQuery = "",
+  searchActiveIndex = 0,
+  onSearchCountChange,
 }: ChatThreadProps) {
   // Idle-window probe: `render.messages` only counts store updates whose
   // `messages` identity changed, so a window with commits but no
@@ -226,7 +236,21 @@ export const ChatThread = memo(function ChatThread({
   const viewportRef = useRef<HTMLDivElement>(null);
   const messageCountRef = useRef(messages.length);
   messageCountRef.current = messages.length;
-  useThreadViewportSync(viewportRef, sessionPath, viewportStates, messages, isStreaming);
+  // 视口 owner 写进来（`revealRange`），任务内搜索读它来把命中滚到眼前。
+  const viewportControllerRef = useRef<ThreadViewportController | null>(null);
+  const handleSearchCountChange = useCallback(
+    (count: number) => onSearchCountChange?.(count),
+    [onSearchCountChange],
+  );
+  useThreadViewportSync(viewportRef, sessionPath, viewportStates, messages, isStreaming, viewportControllerRef);
+  useThreadSearch({
+    viewportRef,
+    sessionPath,
+    query: searchQuery,
+    activeIndex: searchActiveIndex,
+    controllerRef: viewportControllerRef,
+    onCountChange: handleSearchCountChange,
+  });
 
   const editController = useMemo<EditController | null>(() => {
     if (!capabilities || !onCancelEditMessage || !onSubmitEditMessage) {
@@ -331,6 +355,7 @@ function useThreadViewportSync(
   viewportStates: Map<string, ViewportState>,
   messages: ChatMessage[],
   isStreaming: boolean,
+  controllerRef: RefObject<ThreadViewportController | null>,
 ) {
   // Snapshot of the viewport taken while the run was still streaming. It is
   // refreshed by the throttled persistence pass, so it costs nothing per token.
@@ -829,6 +854,65 @@ function useThreadViewportSync(
       }
     });
 
+    /**
+     * 把一段内容放到视口里，并退出「跟随底部」。
+     *
+     * 退出 follow 是重点：回答正在流式输出时，每帧的 pump 会把视口拉回底部，
+     * 只滚一下的话下一帧就被拽走了。命中已在视口内时只做高亮、不挪位置 ——
+     * 连续按「下一个」不该让整页每下都跳。
+     */
+    const revealTo = (band: DOMRect, rect: DOMRect) => {
+      // 先结束 entry 恢复窗口：否则 restorePosition 每帧把视口写回旧位置。
+      stopRestoring("user");
+      savedState.shouldFollow = false;
+      currentShouldFollow = false;
+      followRef.current = false;
+      if (rect.height > 0 && rect.top >= band.top + 12 && rect.bottom <= band.bottom - 12) {
+        persist(false);
+        return;
+      }
+      // 命中放在视口上方三分之一处：前后文都看得见，而不是贴顶或贴底。
+      const target =
+        rect.height > 0
+          ? viewport.scrollTop + (rect.top - band.top) - band.height * 0.35
+          : viewport.scrollTop + (rect.top - band.top);
+      setTop(Math.max(0, Math.min(maxScrollTop(), target)));
+      persist(false);
+    };
+
+    const revealElement = (element: HTMLElement) => {
+      revealTo(viewport.getBoundingClientRect(), element.getBoundingClientRect());
+    };
+
+    const revealRange = (range: Range) => {
+      revealTo(viewport.getBoundingClientRect(), range.getBoundingClientRect());
+    };
+
+    /** 全局搜索跳过来时闪一下，让用户知道落在哪条上（高亮由 CSS 动画负责）。 */
+    const flashMessageRoot = (root: HTMLElement) => {
+      root.dataset.searchFlash = "true";
+      window.setTimeout(() => {
+        delete root.dataset.searchFlash;
+      }, 1500);
+    };
+
+    const jumpToMessage = (messageId: string) => {
+      const root = scanMessageRoot(messageId);
+      if (!root) {
+        return;
+      }
+      revealElement(root);
+      flashMessageRoot(root);
+      perfCount("viewport.jumpToMessage");
+    };
+
+    controllerRef.current = { revealRange };
+    const unsubscribeChatJump = chatJumpBus.subscribe(sessionPath, (request) => {
+      if (!destroyed) {
+        jumpToMessage(request.messageId);
+      }
+    });
+
     const handleScroll = () => {
       if (restoring) {
         return;
@@ -941,6 +1025,8 @@ function useThreadViewportSync(
       cancelAnimationFrame(syncFrame);
       syncFrame = 0;
       unsubscribePinToBottom();
+      unsubscribeChatJump();
+      controllerRef.current = null;
       mutationObserver.disconnect();
       resizeObserver.disconnect();
       viewportResizeObserver.disconnect();
