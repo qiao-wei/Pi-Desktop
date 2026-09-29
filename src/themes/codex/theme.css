@@ -455,19 +455,25 @@
      * drag 区（真机症状：面板收起时语言 / 面板两个图标全点不动，`padding-right` 那版就是
      * 这样；默认主题没事是因为它的 drag 区正好是按钮的祖先，洞挖得掉）。 */
     margin-right: calc(12px + max(0px, 80px - var(--right-panel-width, 0px)));
+    /* 左边是同一类问题：**侧栏收起时**标题栏左格（红绿灯 / 侧栏开关）会溢出到主区，
+     * 压在项目名与会话标题上（用户实测：`Code` 叠在红绿灯上、`New session` 压着
+     * 侧栏开关，见 Appearance 回归里的 `margin-left` 用例）。左格宽度由内容决定，
+     * 与侧栏宽度无关；给会话头补一条等量的 `margin-left`，内容就落到图标右边，
+     * 侧栏宽到够放下左格时公式归零，行为不变。
+     *
+     * 同样必须是 `margin` 不能是 `padding`：要**缩掉这条 drag 区自己的盒子**，否则
+     * 它的拖拽矩形仍会伸到图标底下 —— 兄弟子树的 `no-drag` 挖不动别人的 drag 区
+     * （真机症状同右边那段：图标点不动）。
+     *
+     * `--codex-titlebar-left-chrome` = 10px 标题栏内边距 + 28px 侧栏开关 = 38px；
+     * macOS 桌面左格还多三个红绿灯（66px + 8px 间距）→ 112px。App.tsx 的
+     * `WindowControls` 只在 macOS 桌面渲染，所以宽度按 `data-platform` 分平台给。 */
+    --codex-titlebar-left-chrome: 38px;
+    margin-left: max(0px, var(--codex-titlebar-left-chrome) - var(--left-sidebar-width, 0px));
   }
 
-  /* 同一类问题在左边：侧栏收起时主区顶到窗口左缘，红绿灯 / 侧栏开关会落进这条 drag
-   * 区里。用同宗（会话头自己的伪元素）的 no-drag 把左边那条挖掉 —— 侧栏展开时宽度算下来
-   * 是 0，不生效。留 `pointer-events: none`：它只负责拖拽命中，不能在渲染层挡住点击。 */
-  :root[data-appearance="codex"] .conversation-header::before {
-    content: "";
-    position: absolute;
-    inset-block: 0;
-    left: 0;
-    width: max(0px, 76px - var(--left-sidebar-width, 0px));
-    pointer-events: none;
-    -webkit-app-region: no-drag;
+  :root[data-platform="darwin"][data-appearance="codex"] .conversation-header {
+    --codex-titlebar-left-chrome: 112px;
   }
 
   :root[data-appearance="codex"] .conversation-header button,
