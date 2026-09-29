@@ -779,12 +779,41 @@ test("codex：图标那一格自己摘出拖拽区（不依赖按钮挖洞）", 
   assert.ok(cell.includes('[data-appearance="codex"]'), "这条必须限定 codex");
 });
 
-test("codex：会话头左边界用同宗 no-drag 挖洞（侧栏收起时红绿灯不被吞）", () => {
-  const rule = codexRule(".conversation-header::before", /no-drag/);
-  // 只看规则体：匹配串里带着上面那条注释，注释里提到过属性名会把断言喂成假绿。
-  const body = rule.slice(rule.indexOf("{"));
+/**
+ * 左侧与右侧对称：侧栏收起时标题栏左格（红绿灯 / 侧栏开关）会溢出到主区、压住项目名
+ * 与会话标题。用户实测截图：`Code` 叠在红绿灯上、`New session` 压着侧栏开关。
+ *
+ * 这里不再用伪元素挖 `no-drag` 洞，而是和右边一样用 `margin-left` 缩掉会话头盒子：
+ * 盒子缩到图标右边之后，drag 矩形根本不会伸过去，也就不需要挖洞。左格宽度由内容决定，
+ * 所以值要按平台分：darwin 桌面有红绿灯（112px），其余平台只有侧栏开关（38px）。
+ */
+test("codex：会话头用 margin 向左留位（侧栏收起时红绿灯/侧栏开关不压标题）", () => {
+  const rule = codexRule(".conversation-header", /margin-left:/);
 
-  assert.ok(rule.slice(0, rule.indexOf("{")).includes('[data-appearance="codex"]'), "这条必须限定 codex");
-  assert.match(body, /width:\s*max\(0px, 76px - var\(--left-sidebar-width/, "左侧留位同样要按侧栏宽度算");
-  assert.match(body, /pointer-events:\s*none/, "挖洞用的伪元素不能在渲染层挡住点击");
+  assert.ok(rule.includes('[data-appearance="codex"]'), "这条必须限定 codex");
+  assert.match(
+    rule,
+    /margin-left:\s*max\(0px,\s*var\(--codex-titlebar-left-chrome[^)]*\)\s*-\s*var\(--left-sidebar-width/,
+    "要用 max() 把侧栏宽度算进去，不能写死常量",
+  );
+  assert.doesNotMatch(
+    rule,
+    /padding-left:\s*calc\(/,
+    "不能退回 padding：那不会缩掉 drag 矩形，图标又会被拖拽区吞掉",
+  );
+});
+
+test("codex：会话头左侧留位的宽度按平台给（darwin 多一组红绿灯）", () => {
+  const base = codexRule(".conversation-header", /--codex-titlebar-left-chrome:\s*38px/);
+  assert.match(base, /--codex-titlebar-left-chrome:\s*38px/, "非 darwin 只有侧栏开关，不该预留红绿灯的宽度");
+
+  const darwin = codexRule(
+    ':root[data-platform="darwin"][data-appearance="codex"] .conversation-header',
+    /--codex-titlebar-left-chrome:\s*112px/,
+  );
+  assert.match(darwin, /112px/, "darwin 左格含三个红绿灯（66px + 8px 间距）");
+  assert.ok(
+    !darwin.includes("min-width") && !darwin.includes("76px"),
+    "旧的 76px 只算了红绿灯本身、没算侧栏开关，别退回去",
+  );
 });
