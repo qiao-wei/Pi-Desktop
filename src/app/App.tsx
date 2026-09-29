@@ -182,6 +182,14 @@ import {
   type QueuedComposerEntry,
 } from "../features/chat/queuedComposerText";
 import { ChatThread, type ViewportState } from "../features/chat/ChatThread";
+import { GlobalSearchDialog } from "../features/search/GlobalSearchDialog";
+import { InTaskSearchBar } from "../features/search/InTaskSearchBar";
+import { chatJumpBus } from "../shared/chatJumpBus";
+import {
+  clampMatchIndex,
+  stepMatchIndex,
+  type SessionSearchResult,
+} from "../shared/sessionSearch";
 import { sidebarStreamingSessionPaths } from "../features/chat/sidebarStreaming";
 import type { MessageEditPayload } from "../features/chat/MessageEditBox";
 import { toAttachmentInputs } from "../features/chat/editorParts";
@@ -428,6 +436,11 @@ export function App() {
   const [rightPanelWidth, setRightPanelWidth] = useState(() => loadUiPreferences().rightPanelWidth);
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(() => loadUiPreferences().leftSidebarCollapsed);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(() => loadUiPreferences().rightPanelCollapsed);
+  /** 全局搜索面板（⌘K / 标题栏搜索图标）。 */
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  type InTaskSearchState = { open: boolean; query: string; activeIndex: number };
+  const [inTaskSearch, setInTaskSearch] = useState<InTaskSearchState>({ open: false, query: "", activeIndex: 0 });
+  const [inTaskMatchCount, setInTaskMatchCount] = useState(0);
   // 输入框上方扩展 widget 区是否折叠（右上角 chevron）。缺省展开 = 保持原来的常驻显示。
   const [extensionWidgetsCollapsed, setExtensionWidgetsCollapsed] = useState(
     () => loadUiPreferences().extensionWidgetsCollapsed ?? false,
@@ -2473,6 +2486,84 @@ export function App() {
     setLeftSidebarCollapsed((value) => !value);
   }
 
+  const closeInTaskSearch = useCallback(() => {
+    setInTaskSearch({ open: false, query: "", activeIndex: 0 });
+    setInTaskMatchCount(0);
+  }, []);
+
+  const openInTaskSearch = useCallback(() => {
+    setInTaskSearch((state) => (state.open ? state : { open: true, query: "", activeIndex: 0 }));
+    setInTaskMatchCount(0);
+  }, []);
+
+  const handleInTaskSearchQueryChange = useCallback((query: string) => {
+    setInTaskSearch((state) => ({ ...state, open: true, query, activeIndex: 0 }));
+  }, []);
+
+  const handleInTaskSearchCount = useCallback((count: number) => {
+    setInTaskMatchCount(count);
+    setInTaskSearch((state) =>
+      state.open ? { ...state, activeIndex: clampMatchIndex(state.activeIndex, count) } : state,
+    );
+  }, []);
+
+  const stepInTaskSearch = useCallback(
+    (direction: 1 | -1) => {
+      setInTaskSearch((state) =>
+        state.open ? { ...state, activeIndex: stepMatchIndex(state.activeIndex, inTaskMatchCount, direction) } : state,
+      );
+    },
+    [inTaskMatchCount],
+  );
+
+  // 切会话就收起会话内搜索：高亮属于上一条会话的 DOM，留着只会让人以为新会话也搜过了。
+  useEffect(() => {
+    closeInTaskSearch();
+  }, [visibleSessionPath, closeInTaskSearch]);
+
+  // 全局 ⌘K（Ctrl+K）/ ⌘F（Ctrl+F）。捕获阶段拦住 ⌘F，否则浏览器/Electron 会先开
+  // 原生「在页面中查找」。
+  useEffect(() => {
+    function handleSearchShortcut(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === "k") {
+        event.preventDefault();
+        setGlobalSearchOpen((open) => !open);
+        return;
+      }
+      if (key === "f") {
+        event.preventDefault();
+        setGlobalSearchOpen(false);
+        openInTaskSearch();
+      }
+    }
+
+    window.addEventListener("keydown", handleSearchShortcut, true);
+    return () => window.removeEventListener("keydown", handleSearchShortcut, true);
+  }, [openInTaskSearch]);
+
+  async function handleGlobalSearchSelect(result: SessionSearchResult) {
+    // 结果可能在「全局技能与扩展」页上被点中，先切回会话视图，否则切了会话也看不见。
+    setActiveMainView("chat");
+    // 目标会话的消息全是历史，不该重放进入动画（和侧栏切会话同一处理）。
+    markThreadSwitch();
+    try {
+      await selectSession(result.projectId, result.sessionPath);
+    } catch {
+      // `selectSession` 内部已把错误写进 state，这里不再重复报错。
+      return;
+    }
+    if (!result.messageId) {
+      return;
+    }
+    // 切会话是异步的，目标线程此刻可能还没挂载；总线会把请求暂存到它订阅为止，
+    // 挂载后视口 owner 会滚到这条消息并闪一下。
+    chatJumpBus.request(result.sessionPath, result.messageId, "global-search");
+  }
+
   // The context panel lists what *this conversation* pulls in, so the full-width
   // Global skills & packages page has no right panel next to it.
   const showContextPanel = activeMainView === "chat";
@@ -2496,6 +2587,7 @@ export function App() {
         showContextPanel={showContextPanel}
         onToggleLeft={toggleLeftPanel}
         onToggleRight={toggleRightPanel}
+        onOpenSearch={() => setGlobalSearchOpen(true)}
       />
       <main
         className="app-main grid h-[calc(100dvh-var(--titlebar-height))] max-h-[calc(100dvh-var(--titlebar-height))] min-h-0 grid-cols-[var(--left-sidebar-width)_3px_minmax(0,1fr)_3px_var(--right-panel-width)] overflow-hidden max-[920px]:grid-cols-[minmax(0,1fr)]"
@@ -2651,22 +2743,37 @@ export function App() {
           </div>
         ) : null}
 
-        <ChatThread
-          key={visibleSessionPath}
-          messages={conversation.messages}
-          isStreaming={state.isStreaming}
-          sessionPath={visibleSessionPath}
-          viewportStates={scrollStateRef.current}
-          onAttachmentHoverStart={showAttachmentHover}
-          onAttachmentHoverEnd={hideAttachmentHover}
-          editingMessageId={editingMessageId}
-          editDraftText={failedEditText?.messageId === editingMessageId ? failedEditText.text : null}
-          capabilities={capabilities}
-          onStartEditMessage={startEditMessage}
-          onReloadMessage={refreshMessage}
-          onCancelEditMessage={cancelEditMessage}
-          onSubmitEditMessage={submitEditMessage}
-        />
+        <div className="conversation-thread-area relative flex min-h-0 flex-1 flex-col">
+          <ChatThread
+            key={visibleSessionPath}
+            messages={conversation.messages}
+            isStreaming={state.isStreaming}
+            sessionPath={visibleSessionPath}
+            viewportStates={scrollStateRef.current}
+            onAttachmentHoverStart={showAttachmentHover}
+            onAttachmentHoverEnd={hideAttachmentHover}
+            editingMessageId={editingMessageId}
+            editDraftText={failedEditText?.messageId === editingMessageId ? failedEditText.text : null}
+            capabilities={capabilities}
+            onStartEditMessage={startEditMessage}
+            onReloadMessage={refreshMessage}
+            onCancelEditMessage={cancelEditMessage}
+            onSubmitEditMessage={submitEditMessage}
+            searchQuery={inTaskSearch.open ? inTaskSearch.query : ""}
+            searchActiveIndex={inTaskSearch.activeIndex}
+            onSearchCountChange={handleInTaskSearchCount}
+          />
+          {inTaskSearch.open ? (
+            <InTaskSearchBar
+              query={inTaskSearch.query}
+              count={inTaskMatchCount}
+              activeIndex={inTaskSearch.activeIndex}
+              onQueryChange={handleInTaskSearchQueryChange}
+              onStep={stepInTaskSearch}
+              onClose={closeInTaskSearch}
+            />
+          ) : null}
+        </div>
 
         <form className="composer" onSubmit={handleSubmit}>
           {compactionNoticeView ? (
@@ -3030,6 +3137,11 @@ export function App() {
           onDeleteArchivedSession={deleteArchivedSession}
           onDeleteAllArchivedSessions={deleteAllArchivedSessions}
         />
+        <GlobalSearchDialog
+          open={globalSearchOpen}
+          onOpenChange={setGlobalSearchOpen}
+          onSelect={(result) => void handleGlobalSearchSelect(result)}
+        />
       </main>
     </div>
   );
@@ -3042,6 +3154,7 @@ function TitleBar({
   showContextPanel = true,
   onToggleLeft,
   onToggleRight,
+  onOpenSearch,
 }: {
   title: string;
   leftSidebarCollapsed: boolean;
@@ -3050,6 +3163,7 @@ function TitleBar({
   showContextPanel?: boolean;
   onToggleLeft: () => void;
   onToggleRight: () => void;
+  onOpenSearch: () => void;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -3101,6 +3215,13 @@ function TitleBar({
           label={leftSidebarCollapsed ? t("titlebar.showProjects") : t("titlebar.hideProjects")}
         >
           <PanelLeft />
+        </TitleBarIconButton>
+        <TitleBarIconButton
+          onClick={onOpenSearch}
+          active={false}
+          label={t("titlebar.search")}
+        >
+          <Search />
         </TitleBarIconButton>
       </div>
       <div className="min-w-0 text-center text-sm font-bold">

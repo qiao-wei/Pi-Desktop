@@ -108,6 +108,7 @@ import {
   upsertCustomModels,
 } from "./customModels.mjs";
 import { displayTranscript } from "./sessionTranscript.mjs";
+import { normalizeSearchQuery, searchDocuments } from "../src/shared/sessionSearch.ts";
 import { corsHeaders, respondToPreflight, setCors } from "./cors.mjs";
 import { parseByteRange, resolveLocalMediaPath } from "./localMedia.mjs";
 import {
@@ -1159,6 +1160,25 @@ undefined
         compactingSessionPaths: snapshot.compactingSessionPaths,
       });
       sendBootstrapJson(res, req, snapshot);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/search") {
+      const startedAt = Date.now();
+      const query = normalizeSearchQuery(url.searchParams.get("q"));
+      const limit = searchResultLimit(url.searchParams.get("limit"));
+      // 空查询直接短路：扫全部会话文件是这个接口最贵的部分，不该被“清空输入框”触发。
+      const payload = query
+        ? await searchSessionDocuments(query, limit)
+        : { results: [], truncated: false };
+      diagnosticLog("search.query", {
+        requestId,
+        query,
+        resultCount: payload.results.length,
+        truncated: payload.truncated,
+        durationMs: Date.now() - startedAt,
+      });
+      sendJson(res, 200, { query, ...payload });
       return;
     }
 
@@ -7453,6 +7473,125 @@ function listArchivedSessions() {
     ...session,
     projectName: projects.find((project) => project.id === session.projectId)?.name,
   }));
+}
+
+/**
+ * 全局搜索：跨项目扫会话文件，返回「项目 › 会话 › 片段」。
+ *
+ * bootstrap 只带当前会话的完整正文，其它会话在 SQLite 索引里只有标题和首条消息，
+ * 所以全文命中只能自己读会话文件。读文件是这里唯一的重活，用 mtime 做键的缓存把它
+ * 摊到「第一次搜到某会话」上；正文没变就不重解析。
+ */
+const searchDocumentCache = new Map();
+const searchDocumentCacheLimit = 512;
+
+/** 结果条数上限：太小一行放不下就翻不到，太大又会把 JSON 撑肥。 */
+function searchResultLimit(raw) {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    return 30;
+  }
+  return Math.min(100, Math.floor(value));
+}
+
+function readSessionSearchDocument(project, session) {
+  const filePath = session.path;
+  let mtimeMs = 0;
+  try {
+    mtimeMs = statSync(filePath).mtimeMs;
+  } catch {
+    // 文件被外部删掉：索引还没刷新，跳过即可，不要因此让整次搜索失败。
+    return null;
+  }
+  const cached = searchDocumentCache.get(filePath);
+  if (cached && cached.mtimeMs === mtimeMs) {
+    return cached.document;
+  }
+
+  let document = null;
+  try {
+    // 离线读：`SessionManager.open` 只解析文件，借 `displayTranscript` 的 branch 分支
+    // 逻辑拿到「跟 UI 看到的同一批消息」（压缩折叠掉的历史仍在分支里），再用
+    // `buildChatBubbles` 算出与页面上一致的气泡 id（`t3#assistant`）。
+    const manager = SessionManager.open(filePath, getProjectSessionDir(project));
+    const transcript = displayTranscript({ sessionManager: manager });
+    const bubbles = buildChatBubbles(transcript, {
+      isStreaming: false,
+      toAttachment: (attachment) => attachment,
+    });
+    const messages = bubbles
+      .map((bubble) => ({
+        bubbleId: bubble.id,
+        role: bubble.role,
+        text: String(bubble.content ?? ""),
+      }))
+      .filter((message) => message.text.trim());
+    document = {
+      projectId: project.id,
+      projectName: project.name,
+      sessionPath: filePath,
+      sessionTitle: session.title,
+      updatedAt: Number(session.updatedAt ?? 0),
+      messages,
+    };
+  } catch (error) {
+    diagnosticLog("search.document.failed", {
+      sessionPath: filePath,
+      error: error instanceof Error ? error.message : String(error ?? ""),
+    });
+    return null;
+  }
+
+  searchDocumentCache.set(filePath, { mtimeMs, document });
+  if (searchDocumentCache.size > searchDocumentCacheLimit) {
+    let overflow = searchDocumentCache.size - searchDocumentCacheLimit;
+    for (const key of searchDocumentCache.keys()) {
+      if (overflow <= 0) {
+        break;
+      }
+      searchDocumentCache.delete(key);
+      overflow -= 1;
+    }
+  }
+  return document;
+}
+
+async function searchSessionDocuments(query, limit) {
+  const entries = [];
+  for (const project of projects) {
+    for (const session of sessionStore.list(project)) {
+      // 归档会话不出现在侧栏，也就不该在全局搜索里冒出来。
+      if (!session.messageCount) {
+        continue;
+      }
+      entries.push({ project, session });
+    }
+  }
+  // 最近的会话在前：结果按扫描顺序出，所以排序就是「命中优先级」。
+  entries.sort((a, b) => Number(b.session.updatedAt ?? 0) - Number(a.session.updatedAt ?? 0));
+
+  const results = [];
+  let truncated = false;
+  for (const [index, { project, session }] of entries.entries()) {
+    const document = readSessionSearchDocument(project, session);
+    if (!document) {
+      continue;
+    }
+    // 逐条累积而不是全读再筛：会话按更新时间降序，结果一般在前几个会话就凑满了，
+    // 不必为了多出来的命中把几万个会话文件都读一遍。
+    const page = searchDocuments([document], query, { limit: limit - results.length });
+    results.push(...page.results);
+    if (page.truncated) {
+      truncated = true;
+      break;
+    }
+    if (results.length >= limit) {
+      // 已经凑满上限；只有后面确实还有没扫的会话才叫「被截断」。
+      truncated = index < entries.length - 1;
+      break;
+    }
+  }
+  return { results, truncated };
 }
 
 function listProjectSessions(project) {
