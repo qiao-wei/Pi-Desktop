@@ -1,3 +1,5 @@
+import { normalizeProjectCommandTerminal, PROJECT_COMMAND_BACKGROUND } from "../shared/projectCommandTerminal.ts";
+
 const UI_PREFS_KEY = "pi-desktop.ui.v1";
 
 /**
@@ -54,6 +56,11 @@ export interface UiPreferences {
    * 缺省（undefined）= 展开，保持扩展信息的常驻显示。
    */
   extensionWidgetsCollapsed?: boolean;
+  /**
+   * 会话头部「运行」把命令跑在哪里：`background`（后台静默，默认）`default`（系统默认终端）
+   * 或某个终端 app 名（macOS `open -a <名字>`）。见 `src/shared/projectCommandTerminal.ts`。
+   */
+  projectCommandTerminal?: string;
 }
 
 const defaultUiPreferences: UiPreferences = {
@@ -65,6 +72,7 @@ const defaultUiPreferences: UiPreferences = {
   leftSidebarCollapsed: false,
   rightPanelCollapsed: false,
   projectSidebarShowPinned: true,
+  projectCommandTerminal: PROJECT_COMMAND_BACKGROUND,
 };
 
 export function loadUiPreferences(): UiPreferences {
@@ -85,6 +93,7 @@ export function loadUiPreferences(): UiPreferences {
       // 只做形态卫生：未知但合法的 id 交给 `src/themes/index.ts` 的
       // `resolveAppearance()` 落回默认主题。
       appearance: normalizeAppearance(parsed.appearance),
+      projectCommandTerminal: normalizeProjectCommandTerminal(parsed.projectCommandTerminal),
     };
   } catch {
     return defaultUiPreferences;
