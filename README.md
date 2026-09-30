@@ -153,7 +153,8 @@ down.
 | Tauri, macOS x64 | `npm run pack:tauri:mac:x64` | `npm run pack:tauri:mac:x64:slim` |
 | Tauri, Windows (x64) | `npm run pack:tauri:windows` | `npm run pack:tauri:windows:slim` |
 
-Flags for one-off runs: `--arch arm64|x64`, `--mode bundled|slim`, `--cross`, `--dry-run` (print the plan
+Flags for one-off runs: `--arch arm64|x64`, `--mode bundled|slim`, `--sign local|release`, `--cross`,
+`--dry-run` (print the plan
 and exit without building) - and anything after `--` is handed to the final packager
 (`npm run pack:electron:mac:arm64 -- --dry-run`). Windows targets are x64 today; add `arm64` to
 `PACK_ARCHES` in `scripts/lib/packPlan.mjs` when you want Windows on ARM.
@@ -285,11 +286,43 @@ files are the expensive ones (a version manager re-picking a Node on every shell
 add nothing the bundle does not already carry. `PI_DESKTOP_HOST_PATH` overrides the result in both
 modes.
 
+### macOS signing tiers
+
+Signing is a **tier**, not a flag you sprinkle on: it decides the certificate, whether a secure
+timestamp is taken, and whether the artifact is notarised. It defaults to `local`, so the common case
+needs no environment at all.
+
+| Tier | Command | What actually happens | For |
+| --- | --- | --- | --- |
+| `local` (default) | `npm run pack:electron:mac:arm64` | ad-hoc signature (`identity: "-"`), no timestamp, no notarisation, no network | your own machine and dev acceptance (system notifications included) |
+| `release` | `npm run pack:electron:mac:arm64 -- --sign release` | Developer ID signature + secure timestamp + Apple notarisation | shipping to other people |
+
+One decision point (`scripts/lib/macSigning.cjs`) feeds the electron-builder config, the pack plan and
+the `--dry-run` output; `--sign` is a command-line flag only, so a `PI_DESKTOP_SIGN` left behind in
+someone's shell cannot change what a given command produces.
+
+- `release` needs Apple credentials, either `APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` +
+  `APPLE_TEAM_ID`, or `APPLE_API_KEY` + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER` (Tauri spells the
+  password `APPLE_PASSWORD` - export the same value under both names). Missing credentials fail
+  **before** the build starts: on its own, electron-builder only logs `skipped macOS notarization` and
+  hands you a signed-but-unnotarised artifact that passes every `codesign` check and is still refused
+  by Gatekeeper.
+- The certificate itself is overridden with `PI_DESKTOP_SIGN_IDENTITY`; the default is the
+  `Developer ID Application` qualifier, which also closes the hole where any non-Apple certificate
+  found in the keychain would silently sign the whole build (that is what made mac builds take minutes:
+  300+ files signed one by one, each fetching a timestamp over the network).
+- System notifications only work from `/Applications`, in both tiers. The `local` tier does deliver
+  them - that is the whole reason it is signed at all. After touching anything signing-related, check
+  it with `npm run notification:verify` (it calls the real `notify_turn_complete` IPC in a throwaway
+  instance and reads back `{delivered, reason}`); add `--control` for the negative control, which runs
+  the same probe against Electron's linker-signed bundle and **must** fail - otherwise the probe cannot
+  tell good signatures from bad ones.
+
 ### Outputs
 
 - Electron: `dist-electron/mac-arm64/Pi Desktop.app` + `dist-electron/Pi Desktop-<version>-arm64.dmg`
   (x64 lands in `dist-electron/mac/`, Windows in `dist-electron/win-unpacked/` plus the NSIS
-  installer). macOS signing is handled by `scripts/electron-sign-adhoc.mjs` (the `afterPack` hook).
+  installer).
 - Tauri: `src-tauri/target/<target-triple>/release/bundle/{macos,dmg,nsis}/` - the pack entries always
   pass an explicit `--target`, so artifacts are separated per triple (a bare `npm run tauri:build`
   without one writes to `src-tauri/target/release/`).

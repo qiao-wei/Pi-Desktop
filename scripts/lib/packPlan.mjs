@@ -8,13 +8,20 @@
  *                              run 出来的产物必须一样）
  *   --arch   arm64|x64         目标架构；mac 省略时取本机架构，windows 省略时取 x64
  *   --mode   bundled|slim      运行时模式；省略 = bundled
+ *   --sign   local|release     mac 的签名档位；省略 = local（ad-hoc，本机自用）。release 要求
+ *                              Apple 公证凭证齐备，缺了在这里就报错（理由见 scripts/lib/macSigning.cjs）
  *   --cross                    目标平台与构建机不同时，显式确认走交叉工具链
  *   --dry-run                  只打印计划
  *   --prepare-only             Tauri 的 beforeBuildCommand 用：只跑准备步骤，不打最终包
  *
  * 这个模块只做两件事：把参数变成"要执行的命令序列"，以及在跑任何东西之前把不可能的组合说清楚。
  * 真正 spawn 在 scripts/pack.mjs —— 分开是为了让测试直接断言计划与报错，不用真的打一个包。
+ *
+ * 签名档位（`--sign`）同样只在这里定：档位表与凭证判定在 scripts/lib/macSigning.cjs（唯一的决定点），
+ * 这里负责校验、把档位下发成 env、以及在缺凭证时提前报错。
  */
+
+import { SIGN_TIERS, describeMacSigning, notarizationCredentials, resolveMacSigning } from "./macSigning.cjs";
 
 /** 目标 → Rust target triple。bridge / node/python runtime 全都认这个值（经 PI_DESKTOP_TARGET_TRIPLE）。 */
 const TRIPLES = {
@@ -97,7 +104,13 @@ export function parsePackArgs(argv) {
   const flags = { cross: false, dryRun: false, prepareOnly: false };
   const values = {};
   const passthrough = [];
-  const named = { "--host": "host", "--target": "target", "--arch": "arch", "--mode": "runtimeMode" };
+  const named = {
+    "--host": "host",
+    "--target": "target",
+    "--arch": "arch",
+    "--mode": "runtimeMode",
+    "--sign": "sign",
+  };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -209,10 +222,13 @@ function buildPreparePlan(options, { platform, hostArch, env }) {
   };
 }
 
-function buildFullPlan(options, { platform, hostArch, commandExists }) {
+function buildFullPlan(options, { platform, hostArch, commandExists, env }) {
   const host = pick(options.host, PACK_HOSTS, "--host");
   const target = pick(options.target, PACK_TARGETS, "--target");
   const runtimeMode = pick(options.runtimeMode ?? "bundled", PACK_MODES, "--mode");
+  // 档位只从命令行来：env 里的 PI_DESKTOP_SIGN 是给打包器读的（由这里下发），不是输入 ——
+  // 否则一个人的 shell 里导过什么，会让同一条命令在别人机器上变成另一个档位。
+  const signTier = pick(options.sign ?? "local", SIGN_TIERS, "--sign");
 
   if (options.arch === "universal") {
     throw new PackPlanError("universal（fat 二进制）已不支持。", [
@@ -229,6 +245,20 @@ function buildFullPlan(options, { platform, hostArch, commandExists }) {
     throw new PackPlanError(`macOS 目标只能在 macOS 上构建（当前是 ${platform}）：dmg、签名、公证都绑 mac。`, [
       "在 Mac 上跑这条命令；Windows/Linux 上请改打 --target windows。",
     ]);
+  }
+
+  // release 档的门槛：electron-builder 在拿不到公证凭证时只 warn 一句就照常出包，产物是"签了但没
+  // 公证"的（codesign 检查全过、Gatekeeper 照样拦）—— 必须在动手之前拦住。
+  if (target === "mac" && signTier === "release") {
+    const credentials = notarizationCredentials(env);
+    if (!credentials.ready) {
+      throw new PackPlanError(`release 档要公证，但缺 Apple 公证凭证（${credentials.missing.join(" / ")}）。`, [
+        "Apple ID 方式：export APPLE_ID=… APPLE_APP_SPECIFIC_PASSWORD=… APPLE_TEAM_ID=…" +
+          "（Tauri 认 APPLE_PASSWORD，同一个值再 export 一遍即可）；",
+        "API key 方式：export APPLE_API_KEY=… APPLE_API_KEY_ID=… APPLE_API_ISSUER=…（electron-builder 三个都要）；",
+        "只想本地出包就别加 --sign release —— 默认 local 档是 ad-hoc 签名，不需要任何凭证。",
+      ]);
+    }
   }
 
   const cross = PLATFORM_OF_TARGET[target] !== platform;
@@ -274,6 +304,11 @@ function buildFullPlan(options, { platform, hostArch, commandExists }) {
     host === "tauri" ? tauriPackager({ runtimeMode, triple, cross }) : electronPackager({ target, arch }),
   ];
 
+  // 签名档位只有 mac 有（Windows 是另一套工具链，不在这个档位表里）。档位与档位解析出来的证书
+  // 一起下发：electron-builder 读 PI_DESKTOP_SIGN，Tauri 读 APPLE_SIGNING_IDENTITY —— 两条外壳
+  // 必须从同一个决定点出发，不能各自去猜。
+  const signing = target === "mac" ? resolveMacSigning({ ...env, PI_DESKTOP_SIGN: signTier }) : undefined;
+
   return {
     kind: "pack",
     host,
@@ -288,7 +323,9 @@ function buildFullPlan(options, { platform, hostArch, commandExists }) {
       PI_DESKTOP_RUNTIME_MODE: runtimeModeEnv(runtimeMode),
       // Tauri 会把 beforeBuildCommand 跑一遍；准备步骤已经在上面自己跑过了，用这个开关让它空转。
       PI_DESKTOP_PACK_PREPARED: "1",
+      ...(signing ? { PI_DESKTOP_SIGN: signTier, APPLE_SIGNING_IDENTITY: signing.identity } : {}),
     },
+    signing: signing && { tier: signing.tier, identity: signing.identity, description: describeMacSigning({ ...env, PI_DESKTOP_SIGN: signTier }) },
     notes,
     dryRun: options.dryRun,
     passthrough: options.passthrough,

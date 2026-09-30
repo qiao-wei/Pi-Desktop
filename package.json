@@ -12,6 +12,7 @@
     "bridge:build": "node scripts/build-bridge-runtime.mjs",
     "bridge:sync": "node scripts/build-bridge-runtime.mjs --skip-install",
     "sidecar:verify": "node scripts/verify-sidecar-extensions.mjs",
+    "notification:verify": "node scripts/verify-mac-notification.mjs",
     "python:build": "node scripts/build-python-runtime.mjs",
     "node:build": "node scripts/build-node-runtime.mjs",
     "icon:build": "node scripts/build-app-icon.mjs",

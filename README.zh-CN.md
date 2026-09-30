@@ -141,7 +141,7 @@ node scripts/diag-scan.mjs --since=30m     # 在日志里找异常窗口
 | Tauri，macOS x64 | `npm run pack:tauri:mac:x64` | `npm run pack:tauri:mac:x64:slim` |
 | Tauri，Windows（x64） | `npm run pack:tauri:windows` | `npm run pack:tauri:windows:slim` |
 
-一次性参数：`--arch arm64|x64`、`--mode bundled|slim`、`--cross`、`--dry-run`（只打印计划不构建）；
+一次性参数：`--arch arm64|x64`、`--mode bundled|slim`、`--sign local|release`、`--cross`、`--dry-run`（只打印计划不构建）；
 `--` 之后的参数原样转交打包器（`npm run pack:electron:mac:arm64 -- --dry-run`）。Windows 目前只出
 x64；要出 Windows on ARM 时在 `scripts/lib/packPlan.mjs` 的 `PACK_ARCHES` 里加 `arm64`。
 
@@ -256,14 +256,36 @@ macOS 和 Linux 上会回读登录 shell 的 PATH，因为 GUI 启动的应用�
 贵的（版本管理器每次开 shell 都要重新挑一次 Node），而它们对自带运行时的包没有任何补充。两种模式下
 `PI_DESKTOP_HOST_PATH` 都能覆盖。
 
+### 签名档位（macOS）
+
+签名是一个**档位**，不是随手加的开关：它同时决定用哪张证书、要不要安全时间戳、要不要公证。
+默认就是 `local`，所以最常见的那条路不需要任何 env。
+
+| 档位 | 怎么出包 | 实际动作 | 用途 |
+| --- | --- | --- | --- |
+| `local`（默认） | `npm run pack:electron:mac:arm64` | ad-hoc 签名（`identity: "-"`），不取时间戳、不公证、不联网 | 本机自用、开发验收（含系统通知） |
+| `release` | `npm run pack:electron:mac:arm64 -- --sign release` | Developer ID 真签名 + 安全时间戳 + Apple 公证 | 对外分发 |
+
+档位由 `scripts/lib/macSigning.cjs` 一处决定，electron-builder 的配置、出包计划、`--dry-run` 的输出
+念的都是同一份；`--sign` 只认命令行，shell 里导过的 `PI_DESKTOP_SIGN` 不会改变一条命令的含义。
+
+- `release` 档要 Apple 凭证（二选一）：`APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID`，或
+  `APPLE_API_KEY` + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER`（Tauri 认 `APPLE_PASSWORD`，同一个值再导
+  一遍即可）。缺凭证会在出包**之前**报错：electron-builder 自己只会 `skipped macOS notarization` 一句
+  warn 然后照常出包，那种“签了但没公证”的包 `codesign` 检查全过、Gatekeeper 照样拦。
+- 证书本身用 `PI_DESKTOP_SIGN_IDENTITY` 覆盖；默认值是 `Developer ID Application` 这个限定词，它顺带
+  堵掉“钥匙串里恰好有张非 Apple 证书就被选去签整个包”的洞 —— macOS 包当初动辄几分钟（300+ 个文件
+  逐个签名，每个都联网取一次时间戳）就是这么来的。
+- 系统通知只对 `/Applications` 下的包生效，两个档位都一样。`local` 档确实能弹通知 —— 它就是为此才签名的。
+  动过任何签名相关的东西之后，用 `npm run notification:verify` 验收（它在一个一次性实例里通过真实 IPC
+  调 `notify_turn_complete` 并读回 `{delivered, reason}`）；加 `--control` 跑阴性对照 —— 同一套探针对着
+  Electron 自带的 linker 签名包跑一遍，它**必须**失败，否则说明探针分辨不出签名好坏。
+
 ### 产物路径
 
 - Electron：`dist-electron/mac-arm64/Pi Desktop.app`、
-  `dist-electron/Pi Desktop-<version>-arm64.dmg`。macOS 签名由 `scripts/electron-sign-adhoc.mjs`
-  （`afterPack` 钩子）处理。
-- Electron：`dist-electron/mac-arm64/Pi Desktop.app` + `dist-electron/Pi Desktop-<版本>-arm64.dmg`
-  （x64 在 `dist-electron/mac/`，Windows 在 `dist-electron/win-unpacked/` 加 NSIS 安装器）。macOS 签名由
-  `scripts/electron-sign-adhoc.mjs`（`afterPack` 钩子）处理。
+  `dist-electron/Pi Desktop-<version>-arm64.dmg`（x64 在 `dist-electron/mac/`，Windows 在
+  `dist-electron/win-unpacked/` 加 NSIS 安装器）。
 - Tauri：`src-tauri/target/<目标三元组>/release/bundle/{macos,dmg,nsis}/` —— 出包入口总显式传
   `--target`，产物按三元组分目录（不带三元组的裸 `npm run tauri:build` 才写在
   `src-tauri/target/release/`）。
