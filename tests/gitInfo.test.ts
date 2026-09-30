@@ -14,6 +14,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  GIT_NETWORK_TIMEOUT_MS,
   GIT_TIMEOUT_MS,
   MAX_COMMIT_MESSAGE_CHARS,
   commitGitChanges,
@@ -24,6 +25,7 @@ import {
   isReadOnlyGitArgs,
   isSafeBranchName,
   isUnknownGitSubcommand,
+  mergeGitUpstream,
   normalizeCommitMessage,
   parseBranchHeader,
   parseBranches,
@@ -31,12 +33,14 @@ import {
   parseNumstat,
   parsePorcelainV2,
   parseUpstreamTrack,
+  pushGitBranch,
   readChangedEntries,
   readGitInfo,
   renameGitBranch,
   runReadOnlyGit,
   summarizeChanges,
   switchGitBranch,
+  upstreamRemoteName,
 } from "../server/gitInfo.mjs";
 
 /** 假 `execFile`：记录调用，按 argv 返回计划好的结果（callback 风格，和真的一样）。 */
@@ -656,6 +660,168 @@ test("renameGitBranch：游离 HEAD 被 git 拒绝时把原文抛出", async () 
     /cannot rename the current branch while not on any/,
   );
   assert.deepEqual(branchWriteCalls(calls).map((call) => call.args), [["branch", "-m", "topic"]]);
+});
+
+/* ------------------------------------------------------------------ pushGitBranch / mergeGitUpstream */
+
+const SYNC_STATUS_ARGS = ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"];
+const syncHeader = (...chunks) => chunks.join("\u0000");
+const SYNC_MAIN = syncHeader("# branch.oid abc123", "# branch.head main", "# branch.upstream origin/main", "# branch.ab +1 -0", "");
+const SYNC_NO_UPSTREAM = syncHeader("# branch.oid abc123", "# branch.head feature/x", "");
+const SYNC_DETACHED = syncHeader("# branch.oid abc123", "# branch.head (detached)", "");
+const SYNC_UNBORN = syncHeader("# branch.oid (initial)", "# branch.head main", "");
+
+/** status 头 + `git remote` 列表固定，写命令按 override 决定成败。 */
+function syncPlan({ header = SYNC_MAIN, remotes = "origin\n", overrides = {} } = {}) {
+  return (args) => {
+    const key = args.join(" ");
+    if (overrides[key]) {
+      return overrides[key];
+    }
+    if (args[0] === "status") {
+      return { ok: true, stdout: header };
+    }
+    if (key === "remote") {
+      return { ok: true, stdout: remotes };
+    }
+    return { ok: false, code: 1, stdout: "", stderr: `unexpected: ${key}` };
+  };
+}
+
+function pushMergeCalls(calls) {
+  return calls.filter((call) => ["push", "fetch", "merge"].includes(call.args[0])).map((call) => call.args);
+}
+
+test("upstreamRemoteName：从上游名取远端名（没有 / 时原样返回，让远端列表去校验）", () => {
+  assert.equal(upstreamRemoteName("origin/main"), "origin");
+  assert.equal(upstreamRemoteName("upstream/feature/x"), "upstream", "只切第一个 /");
+  assert.equal(upstreamRemoteName("weird"), "weird");
+  assert.equal(upstreamRemoteName("  origin/main  "), "origin");
+  assert.equal(upstreamRemoteName(""), "");
+  assert.equal(upstreamRemoteName(undefined), "");
+});
+
+test("pushGitBranch：有上游时直接 `git push`，不读远端列表", async () => {
+  const { exec, calls } = fakeExecFile(
+    syncPlan({ overrides: { push: { ok: true, stdout: "To github.com:x/y.git\n" } } }),
+  );
+
+  const output = await pushGitBranch("/tmp/repo", { execImpl: exec });
+
+  assert.equal(output, "To github.com:x/y.git");
+  assert.deepEqual(calls.map((call) => call.args), [SYNC_STATUS_ARGS, ["push"]]);
+  assert.equal(calls.at(-1).options.cwd, "/tmp/repo");
+  assert.equal(calls.at(-1).options.timeout, GIT_NETWORK_TIMEOUT_MS, "网络操作用更长的超时");
+});
+
+test("pushGitBranch：没有上游时关联 origin，`push -u <remote> <branch>`", async () => {
+  const { exec, calls } = fakeExecFile(
+    syncPlan({
+      header: SYNC_NO_UPSTREAM,
+      overrides: { "push -u origin feature/x": { ok: true, stderr: "branch set up\n" } },
+    }),
+  );
+
+  await pushGitBranch("/tmp/repo", { execImpl: exec });
+
+  assert.deepEqual(calls.map((call) => call.args), [SYNC_STATUS_ARGS, ["remote"], ["push", "-u", "origin", "feature/x"]]);
+});
+
+test("pushGitBranch：没有 origin 时退到唯一的那个远端", async () => {
+  const { exec, calls } = fakeExecFile(
+    syncPlan({
+      header: SYNC_NO_UPSTREAM,
+      remotes: "gitlab\n",
+      overrides: { "push -u gitlab feature/x": { ok: true } },
+    }),
+  );
+
+  await pushGitBranch("/tmp/repo", { execImpl: exec });
+
+  assert.deepEqual(pushMergeCalls(calls), [["push", "-u", "gitlab", "feature/x"]]);
+});
+
+test("pushGitBranch：没有远端 / 游离 HEAD / 空仓库 → 一条 push 都不发", async () => {
+  const noRemote = fakeExecFile(syncPlan({ header: SYNC_NO_UPSTREAM, remotes: "" }));
+  await assert.rejects(() => pushGitBranch("/tmp/repo", { execImpl: noRemote.exec }), /No git remote configured/);
+  assert.deepEqual(pushMergeCalls(noRemote.calls), [], "没有远端时根本不该尝试 push");
+
+  const detached = fakeExecFile(syncPlan({ header: SYNC_DETACHED }));
+  await assert.rejects(() => pushGitBranch("/tmp/repo", { execImpl: detached.exec }), /detached HEAD/);
+  assert.deepEqual(pushMergeCalls(detached.calls), []);
+  assert.equal(detached.calls.length, 1, "游离 HEAD 连远端列表都不用读");
+
+  const unborn = fakeExecFile(syncPlan({ header: SYNC_UNBORN }));
+  await assert.rejects(() => pushGitBranch("/tmp/repo", { execImpl: unborn.exec }), /without commits/);
+  assert.deepEqual(pushMergeCalls(unborn.calls), []);
+
+  await assert.rejects(() => pushGitBranch("", { execImpl: noRemote.exec }), /without a project folder/);
+});
+
+test("pushGitBranch：git 拒绝（需要认证 / 非快进）时把原文抛出", async () => {
+  const { exec } = fakeExecFile(
+    syncPlan({ overrides: { push: { ok: false, code: 128, stderr: "fatal: could not read Username for 'https://github.com'\n" } } }),
+  );
+
+  await assert.rejects(() => pushGitBranch("/tmp/repo", { execImpl: exec }), /could not read Username/);
+});
+
+test("mergeGitUpstream：先 fetch 远端再 `merge --no-edit <upstream>`", async () => {
+  const { exec, calls } = fakeExecFile(
+    syncPlan({
+      overrides: {
+        "fetch origin": { ok: true, stdout: "From github.com:x/y\n" },
+        "merge --no-edit origin/main": { ok: true, stdout: "Already up to date.\n" },
+      },
+    }),
+  );
+
+  const output = await mergeGitUpstream("/tmp/repo", { execImpl: exec });
+
+  assert.equal(output, "Already up to date.");
+  assert.deepEqual(calls.map((call) => call.args), [SYNC_STATUS_ARGS, ["remote"], ["fetch", "origin"], ["merge", "--no-edit", "origin/main"]]);
+  assert.equal(calls[2].options.timeout, GIT_NETWORK_TIMEOUT_MS, "fetch 是网络操作");
+});
+
+test("mergeGitUpstream：没有上游 / 远端不存在 / 游离 HEAD → 一条 fetch/merge 都不发", async () => {
+  const noUpstream = fakeExecFile(syncPlan({ header: SYNC_NO_UPSTREAM }));
+  await assert.rejects(() => mergeGitUpstream("/tmp/repo", { execImpl: noUpstream.exec }), /no upstream branch to merge/);
+  assert.deepEqual(pushMergeCalls(noUpstream.calls), [], "没有上游时连远端列表都不用读");
+  assert.equal(noUpstream.calls.length, 1);
+
+  const unknownRemote = fakeExecFile(syncPlan({ remotes: "gitlab\n" }));
+  await assert.rejects(() => mergeGitUpstream("/tmp/repo", { execImpl: unknownRemote.exec }), /Unknown remote: origin/);
+  assert.deepEqual(pushMergeCalls(unknownRemote.calls), []);
+
+  const detached = fakeExecFile(syncPlan({ header: SYNC_DETACHED }));
+  await assert.rejects(() => mergeGitUpstream("/tmp/repo", { execImpl: detached.exec }), /detached HEAD/);
+  assert.deepEqual(pushMergeCalls(detached.calls), []);
+
+  const unborn = fakeExecFile(syncPlan({ header: SYNC_UNBORN }));
+  await assert.rejects(() => mergeGitUpstream("/tmp/repo", { execImpl: unborn.exec }), /before the first commit/);
+  assert.deepEqual(pushMergeCalls(unborn.calls), []);
+
+  await assert.rejects(() => mergeGitUpstream("", { execImpl: noUpstream.exec }), /without a project folder/);
+});
+
+test("mergeGitUpstream：fetch 失败就不 merge；合并冲突把 git 原文抛出", async () => {
+  const fetchFails = fakeExecFile(syncPlan({ overrides: { "fetch origin": { ok: false, code: 128, stderr: "fatal: unable to access\n" } } }));
+  await assert.rejects(() => mergeGitUpstream("/tmp/repo", { execImpl: fetchFails.exec }), /unable to access/);
+  assert.deepEqual(pushMergeCalls(fetchFails.calls), [["fetch", "origin"]], "fetch 失败后不应继续 merge");
+
+  const conflict = fakeExecFile(
+    syncPlan({
+      overrides: {
+        "fetch origin": { ok: true },
+        "merge --no-edit origin/main": {
+          ok: false,
+          code: 1,
+          stderr: "CONFLICT (content): Merge conflict in src/app.ts\nAutomatic merge failed; fix conflicts and then commit the result.\n",
+        },
+      },
+    }),
+  );
+  await assert.rejects(() => mergeGitUpstream("/tmp/repo", { execImpl: conflict.exec }), /Merge conflict in src\/app\.ts/);
 });
 
 /* ------------------------------------------------------------------ commitGitChanges */

@@ -33,6 +33,10 @@ export interface ProjectGitController {
   isCommitting: boolean;
   /** 「智能生成提交信息」在飞。 */
   isGeneratingMessage: boolean;
+  /** 推送（或首次关联远端并推送）在飞。 */
+  isPushing: boolean;
+  /** 合并上游在飞。 */
+  isMerging: boolean;
   /** 最近一次写操作（init / 切分支 / 提交）的失败原因；下一步成功会清掉。 */
   error: string;
   refresh: () => Promise<void>;
@@ -47,6 +51,10 @@ export interface ProjectGitController {
   openDiff: (path: string) => Promise<boolean>;
   /** 用当前会话的模型根据选中改动生成提交信息；失败返回 null。 */
   generateCommitMessage: (paths: string[]) => Promise<string | null>;
+  /** 推送当前分支；没有上游时关联远端（优先 origin）再推。返回是否成功。 */
+  pushBranch: () => Promise<boolean>;
+  /** 把上游分支合并进当前分支；返回是否成功。 */
+  mergeUpstream: () => Promise<boolean>;
 }
 
 function messageOf(error: unknown): string {
@@ -75,6 +83,8 @@ export function useProjectGit({ projectId, sessionPath = "", isStreaming, onErro
   const [isRenamingBranch, setIsRenamingBranch] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [isGeneratingMessage, setIsGeneratingMessage] = useState(false);
+  const [isPushing, setIsPushing] = useState(false);
+  const [isMerging, setIsMerging] = useState(false);
   const [error, setError] = useState("");
   /** 项目切换/并发刷新时只认最后一次请求，避免旧项目的响应急回来覆盖新项目。 */
   const requestSeq = useRef(0);
@@ -328,5 +338,63 @@ export function useProjectGit({ projectId, sessionPath = "", isStreaming, onErro
     [projectId, sessionPath, isGeneratingMessage, onError],
   );
 
-  return { info, isRefreshing, isInitializing, switchingTo, isCreatingBranch, isRenamingBranch, isCommitting, isGeneratingMessage, error, refresh, initRepo, switchBranch, createBranch, renameBranch, commitChanges, openDiff, generateCommitMessage };
+  /**
+   * 推送当前分支。没有上游时服务端会先关联远端（优先 origin）再推 —— 同一个入口。
+   * 失败时 git 的原话进 `error`（弹层内显示）并交给会话错误横幅（比如需要认证 / 远端拒绝）。
+   */
+  const pushBranch = useCallback(
+    async (): Promise<boolean> => {
+      if (!projectId || isPushing) {
+        return false;
+      }
+
+      setIsPushing(true);
+      setError("");
+
+      try {
+        const next = await postJson<GitInfo>("/api/projects/git/push", { projectId, sessionPath });
+        setInfo(next);
+        return true;
+      } catch (pushError) {
+        const reason = messageOf(pushError);
+        setError(reason);
+        onError?.(t("git.pushFailed", { reason }));
+        return false;
+      } finally {
+        setIsPushing(false);
+      }
+    },
+    [projectId, sessionPath, isPushing, onError],
+  );
+
+  /**
+   * 把上游分支合并进当前分支（服务端跑 fetch + merge）。失败时 git 的原话进 `error`
+   * （弹层内显示）并交给会话错误横幅（比如冲突 / 需要认证）。
+   */
+  const mergeUpstream = useCallback(
+    async (): Promise<boolean> => {
+      if (!projectId || isMerging) {
+        return false;
+      }
+
+      setIsMerging(true);
+      setError("");
+
+      try {
+        const next = await postJson<GitInfo>("/api/projects/git/merge", { projectId, sessionPath });
+        setInfo(next);
+        return true;
+      } catch (mergeError) {
+        const reason = messageOf(mergeError);
+        setError(reason);
+        onError?.(t("git.mergeFailed", { reason }));
+        return false;
+      } finally {
+        setIsMerging(false);
+      }
+    },
+    [projectId, sessionPath, isMerging, onError],
+  );
+
+  return { info, isRefreshing, isInitializing, switchingTo, isCreatingBranch, isRenamingBranch, isCommitting, isGeneratingMessage, isPushing, isMerging, error, refresh, initRepo, switchBranch, createBranch, renameBranch, commitChanges, openDiff, generateCommitMessage, pushBranch, mergeUpstream };
 }

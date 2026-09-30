@@ -18,6 +18,8 @@ import {
   gitCommitPlan,
   gitCreateBranchBlockReason,
   gitHeadLabel,
+  gitMergeActionState,
+  gitPushActionState,
   gitRenameBranchBlockReason,
   gitStatusLabelKey,
   gitStatusLetter,
@@ -344,6 +346,72 @@ test("分支名后面有铅笔：点它把当前分支名变成输入框，回�
     "改名路由从项目表取 cwd；旧分支名由服务端定（不接受参数）",
   );
   assert.ok(!/renameGitBranch\([^)]*body\?\.(from|old)/.test(serverSource), "客户端不能指定要改哪个分支");
+});
+
+/* ------------------------------------------------------------------ 同步动作（合并 / 推送） */
+
+test("合并按钮：没有上游 / 流式 / 游离 HEAD / 空仓库 / 有同步在飞 → 禁用；有上游且空闲 → 可点", () => {
+  const idle = { isStreaming: false, isMerging: false, isPushing: false };
+  const withUpstream = makeInfo({ upstream: "origin/main" });
+
+  assert.deepEqual(gitMergeActionState(withUpstream, idle), { disabled: false, reason: "ok" });
+  assert.deepEqual(gitMergeActionState(makeInfo(), idle), { disabled: true, reason: "noUpstream" }, "没有上游就没有可合并的目标");
+  assert.deepEqual(
+    gitMergeActionState(withUpstream, { ...idle, isStreaming: true }),
+    { disabled: true, reason: "streaming" },
+    "合并会动工作区，流式时禁用（同切分支）",
+  );
+  assert.deepEqual(gitMergeActionState(withUpstream, { ...idle, isMerging: true }), { disabled: true, reason: "busy" });
+  assert.deepEqual(gitMergeActionState(withUpstream, { ...idle, isPushing: true }), { disabled: true, reason: "busy" }, "推送在飞时禁合并");
+  assert.deepEqual(
+    gitMergeActionState(makeInfo({ upstream: "origin/main", detached: true }), idle),
+    { disabled: true, reason: "detached" },
+  );
+  assert.deepEqual(
+    gitMergeActionState(makeInfo({ upstream: "origin/main", unborn: true }), idle),
+    { disabled: true, reason: "unborn" },
+  );
+  assert.equal(
+    gitMergeActionState(makeInfo({ upstream: "origin/main" }), { ...idle, isStreaming: true, isMerging: true }).reason,
+    "streaming",
+    "流式优先报 streaming（文案不同）",
+  );
+});
+
+test("推送按钮：没有上游仍然可点（那是「关联远端」）；游离 HEAD / 空仓库 / 有同步在飞 → 禁用", () => {
+  const idle = { isPushing: false, isMerging: false };
+
+  assert.deepEqual(gitPushActionState(makeInfo(), idle), { disabled: false, reason: "ok" }, "没有上游 = 关联远端，不该禁用");
+  assert.deepEqual(gitPushActionState(makeInfo({ upstream: "origin/main" }), idle), { disabled: false, reason: "ok" });
+  assert.deepEqual(gitPushActionState(makeInfo({ detached: true }), idle), { disabled: true, reason: "detached" });
+  assert.deepEqual(gitPushActionState(makeInfo({ unborn: true }), idle), { disabled: true, reason: "unborn" });
+  assert.deepEqual(gitPushActionState(makeInfo(), { isPushing: true, isMerging: false }), { disabled: true, reason: "busy" });
+  assert.deepEqual(gitPushActionState(makeInfo(), { isPushing: false, isMerging: true }), { disabled: true, reason: "busy" }, "合并在飞时禁推送");
+});
+
+test("弹层顶部：合并 → 推送 → 刷新三枚图标，推送无上游时叫「关联远端」", () => {
+  assert.match(badgeSource, /gitMergeActionState\(info, \{ isStreaming, isMerging, isPushing \}\)/, "合并可用性由纯函数算");
+  assert.match(badgeSource, /gitPushActionState\(info, \{ isPushing, isMerging \}\)/, "推送可用性由纯函数算");
+  assert.match(badgeSource, /<GitMerge[\s\S]{0,2000}<Upload[\s\S]{0,1500}<RefreshCw/, "三枚图标按合并/推送/刷新排列");
+  assert.match(badgeSource, /onClick=\{\(\) => void onMerge\(\)\}/, "合并按钮要有处理函数");
+  assert.match(badgeSource, /onClick=\{\(\) => void onPush\(\)\}/, "推送按钮要有处理函数");
+  assert.match(badgeSource, /aria-label=\{mergeTitle\}/, "合并按钮要有无障碍名字（图标按钮不能只有 title）");
+  assert.match(badgeSource, /aria-label=\{pushTitle\}/, "推送按钮要有无障碍名字");
+  assert.match(badgeSource, /t\("git\.pushSetUpstream"\)/, "没有上游时推送要显示为「关联远端」");
+  assert.match(badgeSource, /disabled=\{mergeState\.disabled\}/, "合并按钮受状态控制");
+  assert.match(badgeSource, /disabled=\{pushState\.disabled\}/, "推送按钮受状态控制");
+  assert.match(hookSource, /postJson<GitInfo>\("\/api\/projects\/git\/push", \{ projectId, sessionPath \}\)/, "要打推送的路由");
+  assert.match(hookSource, /postJson<GitInfo>\("\/api\/projects\/git\/merge", \{ projectId, sessionPath \}\)/, "要打合并的路由");
+  assert.match(hookSource, /t\("git\.pushFailed", \{ reason \}\)/, "推送失败原因要进会话错误横幅");
+  assert.match(hookSource, /t\("git\.mergeFailed", \{ reason \}\)/, "合并失败原因要进会话错误横幅");
+  assert.match(appSource, /onPush=\{projectGit\.pushBranch\}/, "App.tsx 要接上 pushBranch");
+  assert.match(appSource, /onMerge=\{projectGit\.mergeUpstream\}/, "App.tsx 要接上 mergeUpstream");
+  assert.match(appSource, /isPushing=\{projectGit\.isPushing\}/, "推送中要能禁用按钮");
+  assert.match(appSource, /isMerging=\{projectGit\.isMerging\}/, "合并中要能禁用按钮");
+  assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/push"/, "缺少 POST /api/projects/git/push");
+  assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/merge"/, "缺少 POST /api/projects/git/merge");
+  assert.match(serverSource, /await pushGitBranch\(cwd\)/, "推送在会话 workspace 里执行");
+  assert.match(serverSource, /await mergeGitUpstream\(cwd\)/, "合并在会话 workspace 里执行");
 });
 
 /* ------------------------------------------------------------------ 界面接线 */
