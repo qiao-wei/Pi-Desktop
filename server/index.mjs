@@ -10,7 +10,7 @@ import { agentRuntimePathDirs, mergePath } from "./agentEnv.mjs";
 import { removeBundledShims, runtimeShimSpecs } from "./agentShimFiles.mjs";
 import { createAgentShims } from "./agentShims.mjs";
 import { capabilityReloadPlan, reloadRuntimeSkills, sameCapabilityIds } from "./capabilityReload.mjs";
-import { canonicalPath, extensionCapabilityId, isPathInside, isSkillPathUnderRoots } from "./capabilityPathIdentity.mjs";
+import { canonicalPath, extensionCapabilityId, isPathInside, isReadOnlySkillSource, isSkillPathUnderRoots, skillSourceForPath } from "./capabilityPathIdentity.mjs";
 import { applySkillSelection, createSkillSelectionPolicy, replaceSkillSelectionPolicy, skillEnabledBySelection } from "./capabilitySkillSelection.mjs";
 import { describeLoadStatus, isUnhealthyLoadStatus, summarizePackageHealth } from "./capabilityHealth.mjs";
 import { normalizeCommandArgumentItems } from "./commandArguments.mjs";
@@ -196,6 +196,9 @@ const agentShims = createAgentShims({
   agentNodeConfigFile,
 });
 const agentSkillsDir = join(agentDir, "skills");
+// 跨客户端技能约定目录（Agent Skills 的 `.agents/skills`）。pi 无条件发现它，这里把它并入
+// 受管根：能力页才能显示来源、按会话开关；删除仍然禁止（见 assertWritableSkillTarget）。
+const agentsSkillsDir = join(homedir(), ".agents", "skills");
 const agentSessionsDir = join(agentDir, "sessions");
 const projectsFile = join(agentDir, "projects.json");
 // 后台命令的进程台账：桥重启后还能认出「上次那个 dev server 是否还活着」并给出停止入口。
@@ -3532,7 +3535,7 @@ function managedSkills(skills, project = activeProject()) {
 }
 
 function isManagedSkillPath(filePath, project = activeProject()) {
-  return isSkillPathUnderRoots(filePath, [appSkillsDir, agentSkillsDir, join(project.cwd, ".pi", "skills")]);
+  return isSkillPathUnderRoots(filePath, [appSkillsDir, agentSkillsDir, agentsSkillsDir, join(project.cwd, ".pi", "skills")]);
 }
 
 function packageCapabilityId(pkg) {
@@ -3836,22 +3839,25 @@ async function buildCapabilitiesSnapshot(targetRuntime = runtime, options = {}) 
       .map((skill) => {
         const id = skillCapabilityId(skill);
         const metadata = config.skills[id] ?? {};
+        const source = skillSourceForPath(skill.filePath, {
+          builtin: appSkillsDir,
+          piAgent: agentSkillsDir,
+          agents: agentsSkillsDir,
+        });
         return {
           id,
           kind: "skill",
           name: skill.name,
           description: skill.description,
           path: skill.filePath,
-          source: isBuiltinSkillPath(skill.filePath)
-            ? "builtin"
-            : isSkillPathUnderRoots(skill.filePath, [agentSkillsDir])
-              ? "agent"
-              : "project",
+          source,
           disableModelInvocation: skill.disableModelInvocation,
           defaultEnabled: metadata.defaultEnabled === true,
           pinned: Boolean(metadata.pinned),
           active: skillEnabledBySelection(skillPolicy, id),
-          readonly: isBuiltinSkillPath(skill.filePath),
+          // 内置与跨客户端（~/.agents/skills）来源只读：前者是应用资产，后者可能被别的
+          // 客户端一起挂载。只有 piAgent / project 能在能力页删除。
+          readonly: isReadOnlySkillSource(source),
         };
       })
       .sort(compareCapabilityCards),
@@ -4555,7 +4561,7 @@ async function deleteSkillFromCapabilityPage(body) {
 }
 
 function inferInstalledSkillScope(project, skillRoot) {
-  if (isSkillPathUnderRoots(skillRoot, [agentSkillsDir])) {
+  if (isSkillPathUnderRoots(skillRoot, [agentSkillsDir, agentsSkillsDir])) {
     return "user";
   }
   return "project";
@@ -4582,7 +4588,7 @@ function readSkillContent(filePath) {
 }
 
 function discoverSkillFromKnownRoots(project, filePath) {
-  const roots = [appSkillsDir, agentSkillsDir, join(project.cwd, ".pi", "skills")];
+  const roots = [appSkillsDir, agentSkillsDir, agentsSkillsDir, join(project.cwd, ".pi", "skills")];
   if (!isSkillPathUnderRoots(filePath, roots)) {
     return null;
   }
@@ -5090,6 +5096,11 @@ function assertWritableSkillRoot(skillRoot) {
 function assertWritableSkillTarget(skillRoot) {
   if (isBuiltinSkillPath(skillRoot)) {
     throw new Error("Built-in skills are read-only. Copy the skill to the user or current project skills directory before editing it.");
+  }
+  // 只按字面路径拦 `~/.agents/skills` 那侧：`~/.pi/agent/skills/x` 指向它的软链仍然可删
+  // （删掉的只是软链本身），而直接住在这个跨客户端目录里的技能不允许从这里删除。
+  if (isPathInside(resolve(agentsSkillsDir), resolve(skillRoot))) {
+    throw new Error("Skills in ~/.agents/skills are shared across agents and read-only here.");
   }
 }
 

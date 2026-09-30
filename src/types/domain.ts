@@ -311,7 +311,7 @@ export interface SkillSummary {
 }
 
 export type CapabilityKind = "skill" | "package" | "extension" | "mcp";
-export type CapabilitySkillSource = "builtin" | "agent" | "project";
+export type CapabilitySkillSource = "builtin" | "piAgent" | "agents" | "project";
 
 export interface CapabilitySkill {
   id: string;

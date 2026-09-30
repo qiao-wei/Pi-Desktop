@@ -94,3 +94,48 @@ export function isSkillPathUnderRoots(filePath, roots) {
   }
   return list.some((root) => isPathInsideCanonical(root, canonical));
 }
+
+/**
+ * 技能来源分类（能力页的 4 个筛选 chip 与卡片徽标共用）：
+ * `builtin` 随应用内置、`piAgent` 是 `~/.pi/agent/skills`、`agents` 是跨客户端的
+ * `~/.agents/skills`、`project` 是项目 `.pi/skills`。
+ *
+ * 判定顺序 = pi 的加载顺序，所以「同一份技能两边都能到达」时归属稳定：字面路径先命中
+ * （`~/.pi/agent/skills/x` 是指向 `~/.agents/skills/x` 的软链时，pi 报的就是软链那侧，
+ * 归 `piAgent`，删它删掉的也只是那条软链）；realpath 只在字面路径都没命中时兜底
+ * （worktree 会话里 `<worktree>/.pi` 软链 → 归 `project`）。
+ */
+export function skillSourceForPath(filePath, roots = {}) {
+  const entries = [
+    ["builtin", roots.builtin],
+    ["piAgent", roots.piAgent],
+    ["agents", roots.agents],
+  ].filter((entry) => Boolean(entry[1]));
+  // 第一遍只看字面路径：pi 报哪一侧就归哪一侧，分类和删除守卫（也按字面路径）永远一致。
+  const literal = resolve(String(filePath ?? "").trim() || ".");
+  for (const [source, root] of entries) {
+    if (isPathInside(resolve(root), literal)) {
+      return source;
+    }
+  }
+  // 字面路径都不认识时才按 realpath 兜底（worktree 会话里 `<worktree>/.pi` 是软链）。
+  const canonical = canonicalPath(filePath);
+  if (canonical) {
+    for (const [source, root] of entries) {
+      if (isPathInsideCanonical(root, canonical)) {
+        return source;
+      }
+    }
+  }
+  // 受管集合里只剩项目 `.pi/skills` 一处；陈旧/未知路径保持旧行为（以前也是落到 project）。
+  return "project";
+}
+
+/**
+ * 内置与跨客户端（`~/.agents/skills`）来源的技能不允许从能力页删除：内置是应用资产；
+ * `.agents` 那侧可能被别的客户端一起挂载（例如百炼把同一份技能挂进 `.codex`/`.gemini`），
+ * 从这一个客户端删会把别人的入口一起删掉。只有 `piAgent` 与 `project` 可删。
+ */
+export function isReadOnlySkillSource(source) {
+  return source === "builtin" || source === "agents";
+}
