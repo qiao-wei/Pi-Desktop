@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchJson, postJson } from "../../lib/api";
 import { t } from "../../i18n";
 import { loadUiPreferences } from "../../lib/ui-preferences";
-import { normalizeProjectCommandTerminal, PROJECT_COMMAND_BACKGROUND } from "../../shared/projectCommandTerminal.ts";
+import { normalizeProjectCommandTerminal, normalizeProjectCommandRuns, PROJECT_COMMAND_BACKGROUND, sameProjectCommandRuns } from "../../shared/projectCommandTerminal.ts";
 import {
   isCommandSaved,
   mergeDetectedCommands,
@@ -14,7 +14,10 @@ import {
   type ProjectCommand,
   type ProjectCommandsPayload,
 } from "../../shared/projectCommands";
-import type { ProjectCommandRunResult } from "../../shared/projectCommandTerminal.ts";
+import type { ProjectCommandRun, ProjectCommandRunResult } from "../../shared/projectCommandTerminal.ts";
+
+/** 后台进程存活状态的轮询间隔：够快地发现退出，又不至于一直打桥。 */
+export const PROJECT_COMMAND_RUN_POLL_MS = 3000;
 
 interface UseProjectCommandsOptions {
   /** 当前项目 id；空串时不请求。 */
@@ -53,6 +56,16 @@ export interface ProjectCommandsController {
   removeCommand: (id: string) => Promise<boolean>;
   /** 跑当前选中的命令：后台静默或交给终端（看运行方式）。 */
   run: () => Promise<boolean>;
+  /**
+   * 后台还在跑的命令（只含存活进程，最新的在前）。
+   *
+   * 有内容时 hook 会按 `PROJECT_COMMAND_RUN_POLL_MS` 轮询，进程结束会自己从列表里消失。
+   */
+  runs: ProjectCommandRun[];
+  /** 正在停某条后台命令（「停止」按钮的 loading）。 */
+  isStoppingRun: boolean;
+  /** 停掉一条后台命令（结束进程树），列表刷新后不再出现。 */
+  stopRun: (runId: string) => Promise<boolean>;
   /** 上一次成功启动的结果（后台运行有日志路径）；给界面的「已启动」提示用。 */
   lastRun: ProjectCommandRunResult | null;
   clearLastRun: () => void;
@@ -75,11 +88,14 @@ export function useProjectCommands({ projectId, sessionPath = "", runTarget, onE
   const [candidates, setCandidates] = useState<ProjectCommand[] | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [runs, setRuns] = useState<ProjectCommandRun[]>([]);
+  const [isStoppingRun, setIsStoppingRun] = useState(false);
   const [lastRun, setLastRun] = useState<ProjectCommandRunResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
   const requestSeq = useRef(0);
+  const runsSeq = useRef(0);
 
   const applyPayload = useCallback((payload: ProjectCommandsPayload | undefined) => {
     const nextCommands = normalizeProjectCommands(payload?.commands);
@@ -117,26 +133,67 @@ export function useProjectCommands({ projectId, sessionPath = "", runTarget, onE
     }
   }, [projectId, applyPayload]);
 
+  /**
+   * 后台命令的存活状态。失败（旧桥 / 启动竞态）当作「没有运行中」——这只是附加信息，
+   * 不能让它把「运行」按钮或错误横幅弄脏。
+   */
+  const refreshRuns = useCallback(async () => {
+    if (!projectId) {
+      return;
+    }
+    const seq = runsSeq.current + 1;
+    runsSeq.current = seq;
+    try {
+      const query = new URLSearchParams({ projectId });
+      const payload = await fetchJson<{ runs?: unknown }>(`/api/projects/commands/status?${query.toString()}`);
+      if (seq === runsSeq.current) {
+        const next = normalizeProjectCommandRuns(payload?.runs);
+        // 3 秒一次轮询：内容没变就返回旧引用，避免白重渲染整个 App。
+        setRuns((current) => (sameProjectCommandRuns(current, next) ? current : next));
+      }
+    } catch {
+      if (seq === runsSeq.current) {
+        setRuns((current) => (current.length === 0 ? current : []));
+      }
+    }
+  }, [projectId]);
+
   // 切项目：先清空再拉，不能让上一个项目的命令短暂留在下拉里。
   useEffect(() => {
     requestSeq.current += 1;
+    runsSeq.current += 1;
     setCommands([]);
     setSelectedCommandId("");
     setCandidates(null);
+    setRuns([]);
     setError("");
     setLoadError("");
     if (projectId) {
       void refresh();
+      // 桥重启后内存里什么都没有，但被 detached 抛出的 dev server 还活着：靠台账找回来。
+      void refreshRuns();
     }
-  }, [projectId, refresh]);
+  }, [projectId, refresh, refreshRuns]);
+
+  // 有后台命令在跑时才轮询：进程退出 / 用户按「停止」后列表变空，轮询自然停下。
+  useEffect(() => {
+    if (!projectId || runs.length === 0) {
+      return;
+    }
+    const timer = window.setInterval(() => void refreshRuns(), PROJECT_COMMAND_RUN_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [projectId, runs.length, refreshRuns]);
 
   // 启动竞态（渲染层先发请求、桥后监听）和版本不一致都会让首次读取失败，
   // 窗口重新获得焦点时重试一次 —— 和 git 徽标同一个理由。
   useEffect(() => {
-    const handleFocus = () => void refresh();
+    const handleFocus = () => {
+      void refresh();
+      void refreshRuns();
+    };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
-  }, [refresh]);
+  }, [refresh, refreshRuns]);
 
   /** 整表替换（添加 / 删除走这条），服务端回什么就以什么为准。 */
   const persist = useCallback(
@@ -258,6 +315,10 @@ export function useProjectCommands({ projectId, sessionPath = "", runTarget, onE
         logPath: result?.logPath,
         pid: result?.pid,
       });
+      // 后台运行：立刻查一次台账，「运行中」提示不用等下一次轮询。
+      if (result?.launcher === "background") {
+        void refreshRuns();
+      }
       return true;
     } catch (runError) {
       const reason = messageOf(runError);
@@ -267,7 +328,42 @@ export function useProjectCommands({ projectId, sessionPath = "", runTarget, onE
     } finally {
       setIsRunning(false);
     }
-  }, [projectId, sessionPath, isRunning, commands, selectedCommandId, runTarget, onError]);
+  }, [projectId, sessionPath, isRunning, commands, selectedCommandId, runTarget, onError, refreshRuns]);
+
+  const stopRun = useCallback(
+    async (runId: string): Promise<boolean> => {
+      if (!runId || isStoppingRun) {
+        return false;
+      }
+      const previous = runs;
+      // 乐观移除：点「停止」要立刻有反馈，失败再放回去。
+      setRuns((current) => current.filter((run) => run.id !== runId));
+      setIsStoppingRun(true);
+      setError("");
+      try {
+        await postJson("/api/projects/commands/stop", { runId });
+        void refreshRuns();
+        return true;
+      } catch (stopError) {
+        const reason = messageOf(stopError);
+        setRuns(previous);
+        setError(reason);
+        onError?.(t("projectCommand.stopFailed", { reason }));
+        return false;
+      } finally {
+        setIsStoppingRun(false);
+      }
+    },
+    [runs, isStoppingRun, refreshRuns, onError],
+  );
+
+  // 台账确认了刚启动的那条后台 run 之后，9 秒的「已启动」小条就该退位给「运行中」常驻提示。
+  useEffect(() => {
+    if (lastRun?.launcher !== "background" || runs.length === 0) {
+      return;
+    }
+    setLastRun((current) => (current?.launcher === "background" ? null : current));
+  }, [lastRun?.launcher, runs.length]);
 
   const clearLastRun = useCallback(() => setLastRun(null), []);
 
@@ -281,6 +377,9 @@ export function useProjectCommands({ projectId, sessionPath = "", runTarget, onE
     isLoading,
     error,
     loadError,
+    runs,
+    isStoppingRun,
+    stopRun,
     lastRun,
     detect,
     addCommand,

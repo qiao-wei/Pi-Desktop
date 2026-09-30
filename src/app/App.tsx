@@ -2721,6 +2721,9 @@ export function App() {
               runTarget={projectCommandTerminal}
               onRunTargetChange={handleProjectCommandTerminalChange}
               lastRun={projectCommands.lastRun}
+              runs={projectCommands.runs}
+              isStoppingRun={projectCommands.isStoppingRun}
+              onStopRun={(runId) => void projectCommands.stopRun(runId)}
               onDismissRun={projectCommands.clearLastRun}
               onRevealLog={revealRunLog}
               onSelect={(id) => void projectCommands.selectCommand(id)}

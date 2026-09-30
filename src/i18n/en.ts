@@ -711,6 +711,12 @@ export const en = {
   "projectCommand.runTargetHint": "Background runs open no window and write to a log; or pick a terminal app",
   "projectCommand.backgroundStarted": "Running in background",
   "projectCommand.terminalOpened": "Terminal opened",
+  "projectCommand.running": "Running",
+  "projectCommand.runningCount": "{count} running",
+  "projectCommand.stop": "Stop",
+  "projectCommand.stopping": "Stopping…",
+  "projectCommand.stopHint": "Stop process: {command}",
+  "projectCommand.stopFailed": "Could not stop the command: {reason}",
   "projectCommand.viewLog": "View log",
   "projectCommand.dismissRunNotice": "Dismiss",
 

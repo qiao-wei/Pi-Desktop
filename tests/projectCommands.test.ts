@@ -176,6 +176,9 @@ test("命令控件渲染在 git 徽标左边，且整条链路都接上了", () 
     "candidates={projectCommands.candidates}",
     "error={projectCommands.error}",
     "loadError={projectCommands.loadError}",
+    "runs={projectCommands.runs}",
+    "isStoppingRun={projectCommands.isStoppingRun}",
+    "onStopRun={(runId) => void projectCommands.stopRun(runId)}",
     "onRun={() => void projectCommands.run()}",
     "onSelect={(id) => void projectCommands.selectCommand(id)}",
     "onRemove={(id) => void projectCommands.removeCommand(id)}",
@@ -286,4 +289,31 @@ test("运行方式：后台静默 / 系统默认终端 / 指定终端 app", () =
   // 桥上有「终端探测」与「查看日志」两个端点
   assert.ok(serverSource.includes('url.pathname === "/api/projects/commands/terminals"'));
   assert.ok(serverSource.includes('url.pathname === "/api/projects/commands/reveal-log"'));
+});
+
+test("后台命令：进程还活着就一直显示运行中，并且能点「停止」", () => {
+  // 桥：运行成功后登记进程，另给「存活状态」与「停止」两个端点
+  assert.match(serverSource, /projectCommandRuns\.register\(/);
+  assert.ok(serverSource.includes('url.pathname === "/api/projects/commands/status"'), "桥少了存活状态端点");
+  assert.ok(serverSource.includes('url.pathname === "/api/projects/commands/stop"'), "桥少了停止端点");
+  assert.match(serverSource, /projectCommandRuns\.stop\(String\(body\?\.runId/);
+
+  // hook：有运行中的命令时轮询状态，进程退出 / 停止后列表清空、轮询自然停
+  assert.match(hookSource, /PROJECT_COMMAND_RUN_POLL_MS/);
+  assert.match(hookSource, /setInterval\(\(\) => void refreshRuns\(\)/);
+  assert.match(hookSource, /window\.setInterval/);
+  assert.match(hookSource, /const stopRun = useCallback/);
+  assert.match(hookSource, /\/api\/projects\/commands\/status/);
+  assert.match(hookSource, /\/api\/projects\/commands\/stop/);
+  assert.match(hookSource, /normalizeProjectCommandRuns\(payload\?\.runs\)/);
+  // 轮询内容没变时必须返回旧引用，否则整个 App 每 3 秒白重渲染
+  assert.match(hookSource, /sameProjectCommandRuns\(current, next\) \? current : next/);
+
+  // 控件：选中的命令在跑时，「运行」按钮本身变成「停止」（不再是单独一条运行中小条）
+  assert.match(controlsSource, /findCommandRun\(runs, selected\.id\)/);
+  assert.match(controlsSource, /projectCommand\.stop/);
+  assert.match(controlsSource, /onClick=\{\(\) => onStopRun\(runningSelected\.id\)\}/);
+  // 切到别的命令后，还在跑的那条用常驻小条保留停止入口
+  assert.match(controlsSource, /projectCommand\.running/);
+  assert.match(controlsSource, /onClick=\{\(\) => onStopRun\(otherRun\.id\)\}/);
 });
