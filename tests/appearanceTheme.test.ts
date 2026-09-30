@@ -804,14 +804,24 @@ test("codex：会话头用 margin 向左留位（侧栏收起时红绿灯/侧栏
 });
 
 test("codex：会话头左侧留位的宽度按平台给（darwin 多一组红绿灯）", () => {
-  const base = codexRule(".conversation-header", /--codex-titlebar-left-chrome:\s*38px/);
-  assert.match(base, /--codex-titlebar-left-chrome:\s*38px/, "非 darwin 只有侧栏开关，不该预留红绿灯的宽度");
+  // 真实宽度由 App.tsx 量出来（`--titlebar-left-cluster-right`），主题里的数字只是
+  // JS 尚未量到时的兜底，所以允许加/减按钮而不改这里。
+  const base = codexRule(".conversation-header", /--codex-titlebar-left-chrome:/);
+  assert.match(
+    base,
+    /--codex-titlebar-left-chrome:\s*var\(--titlebar-left-cluster-right,\s*38px\)/,
+    "非 darwin 的兜底只含侧栏开关 + 搜索，真实值应由 App.tsx 量出来",
+  );
 
   const darwin = codexRule(
     ':root[data-platform="darwin"][data-appearance="codex"] .conversation-header',
-    /--codex-titlebar-left-chrome:\s*112px/,
+    /--codex-titlebar-left-chrome:/,
   );
-  assert.match(darwin, /112px/, "darwin 左格含三个红绿灯（66px + 8px 间距）");
+  assert.match(
+    darwin,
+    /var\(--titlebar-left-cluster-right,\s*112px\)/,
+    "darwin 兜底含三个红绿灯（66px + 8px 间距）",
+  );
   assert.ok(
     !darwin.includes("min-width") && !darwin.includes("76px"),
     "旧的 76px 只算了红绿灯本身、没算侧栏开关，别退回去",

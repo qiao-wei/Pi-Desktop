@@ -465,15 +465,18 @@
      * 它的拖拽矩形仍会伸到图标底下 —— 兄弟子树的 `no-drag` 挖不动别人的 drag 区
      * （真机症状同右边那段：图标点不动）。
      *
-     * `--codex-titlebar-left-chrome` = 10px 标题栏内边距 + 28px 侧栏开关 = 38px；
-     * macOS 桌面左格还多三个红绿灯（66px + 8px 间距）→ 112px。App.tsx 的
-     * `WindowControls` 只在 macOS 桌面渲染，所以宽度按 `data-platform` 分平台给。 */
-    --codex-titlebar-left-chrome: 38px;
+     * `--codex-titlebar-left-chrome` = 标题栏左格的真实右边界（红绿灯 + 侧栏开关 +
+     * 搜索…，含 10px 内边距）。这个值由 App.tsx 的 TitleBar 量好写进
+     * `--titlebar-left-cluster-right`；主题里不再自己算「10 + 28」——
+     * 左格加一个按钮就得来这里改公式，漏改就会在侧栏收起时压住项目名
+     * （实测：加了搜索按钮后 `Code` 直接压在放大镜上）。
+     * 括号里的兜底值只在 JS 还没量到（理论上的首帧）时用，按平台给。 */
+    --codex-titlebar-left-chrome: var(--titlebar-left-cluster-right, 38px);
     margin-left: max(0px, var(--codex-titlebar-left-chrome) - var(--left-sidebar-width, 0px));
   }
 
   :root[data-platform="darwin"][data-appearance="codex"] .conversation-header {
-    --codex-titlebar-left-chrome: 112px;
+    --codex-titlebar-left-chrome: var(--titlebar-left-cluster-right, 112px);
   }
 
   :root[data-appearance="codex"] .conversation-header button,

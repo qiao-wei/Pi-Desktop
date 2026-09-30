@@ -36,10 +36,14 @@ const imeSource = readFileSync(
 );
 const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");
+const codexThemeSource = readFileSync(
+  new URL("../src/themes/codex/theme.css", import.meta.url),
+  "utf8",
+);
 
 test("标题栏：搜索按钮挂在侧栏开关右边，点击打开全局搜索", () => {
   const leftGroup = appSource.slice(
-    appSource.indexOf('<div className="flex min-w-0 items-center gap-2 max-[920px]:gap-1" data-tauri-drag-region>'),
+    appSource.indexOf('<div ref={leftClusterRef} className="flex min-w-0 items-center gap-2'),
   );
   const panelLeft = leftGroup.indexOf("<PanelLeft />");
   const search = leftGroup.indexOf("<Search />", panelLeft);
@@ -47,6 +51,16 @@ test("标题栏：搜索按钮挂在侧栏开关右边，点击打开全局搜�
   assert.ok(search > panelLeft, "搜索 icon 必须排在侧栏开关后面（右边）");
   assert.match(appSource, /onOpenSearch=\{\(\) => setGlobalSearchOpen\(true\)\}/);
   assert.match(leftGroup, /label=\{t\("titlebar\.search"\)\}/);
+});
+
+test("标题栏左格把真实右边界公开成 CSS 变量（codex 会话头靠它让位）", () => {
+  // 主题里写死的「10px + 28px」常量加一个按钮就会失灵（实测：搜索按钮压住项目名），
+  // 所以左格宽度必须由 App 量出来。
+  assert.match(appSource, /leftClusterRef/);
+  assert.match(appSource, /--titlebar-left-cluster-right/);
+  assert.match(appSource, /new ResizeObserver\(publish\)/);
+  assert.match(appSource, /getBoundingClientRect\(\)\.right/);
+  assert.match(codexThemeSource, /var\(--titlebar-left-cluster-right,\s*\d+px\)/);
 });
 
 test("App：⌘K / ⌘F 快捷键与两个搜索状态都接上了", () => {

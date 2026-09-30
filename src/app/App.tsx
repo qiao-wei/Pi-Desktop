@@ -51,7 +51,7 @@ import type {
   ReactNode,
   CSSProperties,
 } from "react";
-import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   fetchJson,
@@ -3170,6 +3170,51 @@ function TitleBar({
   const isDesktopRuntime = isTauriRuntime();
   const isMac = isMacPlatform();
   const titlebarToggleAtRef = useRef(0);
+  const leftClusterRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * 把标题栏左格（红绿灯 / 侧栏开关 / 搜索…）的真实右边界公开成 CSS 变量。
+   *
+   * codex 主题把三列抬到窗口顶端，会话头要 `margin-left` 给左格让位（见
+   * themes/codex/theme.css）。左格宽度由内容决定：以前主题里写死了「10px 内边距 +
+   * 28px 侧栏开关」＝ 38px，结果加了搜索按钮之后常量没跟上，侧栏一收起项目名就直接
+   * 压在搜索图标上。量出来的值是唯一不会跟按钮数量脱节的来源。
+   *
+   * 量的是**子元素的右边界**而不是左格自己的盒子：侧栏收起时它所在的那一列宽为
+   * 0px（`min-w-0`），盒子被压成 0 宽、按钮只是视觉上溢出，拿盒子右边界会得到
+   * 约 10px（= 标题栏内边距），留位就形同虚设。反过来，侧栏展开时左格会被网格
+   * 拉伸到整列宽，也不能拿盒子右边界（那样会多出 10px 缩进）。子元素右边界两种
+   * 情况都对。
+   *
+   * 用 `useLayoutEffect` 是为了在首次绘制前写好，避免收起侧栏时闪一下重叠。
+   */
+  useLayoutEffect(() => {
+    const node = leftClusterRef.current;
+    const root = document.documentElement;
+    if (!node) {
+      return undefined;
+    }
+    const publish = () => {
+      const children = Array.from(node.children);
+      const right = children.length
+        ? Math.max(...children.map((child) => child.getBoundingClientRect().right))
+        : node.getBoundingClientRect().right;
+      root.style.setProperty("--titlebar-left-cluster-right", `${Math.round(right)}px`);
+    };
+    publish();
+    if (typeof ResizeObserver === "undefined") {
+      return () => root.style.removeProperty("--titlebar-left-cluster-right");
+    }
+    const observer = new ResizeObserver(publish);
+    observer.observe(node);
+    for (const child of Array.from(node.children)) {
+      observer.observe(child);
+    }
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--titlebar-left-cluster-right");
+    };
+  }, [isDesktopRuntime, isMac]);
 
   function handleTitleBarMouseDown(event: ReactMouseEvent<HTMLElement>) {
     if (!isDesktopRuntime || event.button !== 0 || (event.target as HTMLElement).closest("button")) {
@@ -3207,7 +3252,7 @@ function TitleBar({
       onMouseDown={handleTitleBarMouseDown}
       onDoubleClick={handleTitleBarDoubleClick}
     >
-      <div className="flex min-w-0 items-center gap-2 max-[920px]:gap-1" data-tauri-drag-region>
+      <div ref={leftClusterRef} className="flex min-w-0 items-center gap-2 max-[920px]:gap-1" data-tauri-drag-region>
         {isMac && isDesktopRuntime ? <WindowControls platform="mac" /> : null}
         <TitleBarIconButton
           onClick={onToggleLeft}
