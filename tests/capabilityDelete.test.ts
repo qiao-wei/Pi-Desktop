@@ -23,12 +23,13 @@ test("packages are always removable", () => {
   assert.equal(canDeleteCapability({ kind: "package", scope: "project" }), true);
 });
 
-test("skills are removable unless they are app-bundled", () => {
-  assert.equal(canDeleteCapability({ kind: "skill", source: "agent", readonly: false }), true);
+test("skills are removable unless they are app-bundled or cross-client", () => {
+  assert.equal(canDeleteCapability({ kind: "skill", source: "piAgent", readonly: false }), true);
   assert.equal(canDeleteCapability({ kind: "skill", source: "project", readonly: false }), true);
   assert.equal(canDeleteCapability({ kind: "skill", source: "builtin", readonly: true }), false);
+  assert.equal(canDeleteCapability({ kind: "skill", source: "agents", readonly: true }), false);
   // A stale snapshot without the flag must stay deletable, not silently lock up.
-  assert.equal(canDeleteCapability({ kind: "skill", source: "agent" }), true);
+  assert.equal(canDeleteCapability({ kind: "skill", source: "piAgent" }), true);
 });
 
 test("extensions follow the same read-only flag", () => {

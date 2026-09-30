@@ -28,7 +28,7 @@ function region(source, startMark, endMark) {
 test("index.mjs 从 capabilityPathIdentity 取路径身份，不再自己 resolve", () => {
   assert.match(
     serverSource,
-    /import \{ canonicalPath, extensionCapabilityId, isPathInside, isSkillPathUnderRoots \} from "\.\/capabilityPathIdentity\.mjs";/,
+    /import \{ canonicalPath, extensionCapabilityId, isPathInside, isReadOnlySkillSource, isSkillPathUnderRoots, skillSourceForPath \} from "\.\/capabilityPathIdentity\.mjs";/,
   );
   assert.doesNotMatch(serverSource, /function extensionCapabilityId\(/, "本地的 resolve 版 id 已删除");
   assert.match(
