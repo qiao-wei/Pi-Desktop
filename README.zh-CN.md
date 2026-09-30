@@ -269,6 +269,11 @@ macOS 和 Linux 上会回读登录 shell 的 PATH，因为 GUI 启动的应用�
 档位由 `scripts/lib/macSigning.cjs` 一处决定，electron-builder 的配置、出包计划、`--dry-run` 的输出
 念的都是同一份；`--sign` 只认命令行，shell 里导过的 `PI_DESKTOP_SIGN` 不会改变一条命令的含义。
 
+档位只从 pack 入口下发（出包计划带 `--config src-electron/electron-builder.config.cjs`），所以手跑
+`electron-builder` 或 `tauri build` 绕过的既是档位也是 release 档的凭证门槛。mac 的那段配置还顺手把
+Electron 自带的 220 个 locale 目录裁到 `en` / `zh_CN` / `zh_TW` —— 那是 49MB 的 `.lproj`，每个都要单独
+签一次名。
+
 - `release` 档要 Apple 凭证（二选一）：`APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID`，或
   `APPLE_API_KEY` + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER`（Tauri 认 `APPLE_PASSWORD`，同一个值再导
   一遍即可）。缺凭证会在出包**之前**报错：electron-builder 自己只会 `skipped macOS notarization` 一句
@@ -301,6 +306,7 @@ macOS 和 Linux 上会回读登录 shell 的 PATH，因为 GUI 启动的应用�
 | `PI_DESKTOP_LOCALE=zh\|en` | 钉住界面语言，不做系统探测 |
 | `VITE_PI_DESKTOP_API_BASE` | 渲染层：桥的基地址，只跑 `dev:web` 时用 |
 | `PI_DESKTOP_RUNTIME_MODE` | 强制 `bundled` 或 `system`，不走推断 |
+| `PI_DESKTOP_SIGN`、`PI_DESKTOP_SIGN_IDENTITY` | macOS 的签名档位（`local`\|`release`）与用哪张证书；平时由 `--sign` 和 `Developer ID Application` 默认值下发，只用于覆盖 |
 | `PI_DESKTOP_HOST_PATH` | `system` 模式下覆盖用来找 host `node` 的 PATH |
 | `PI_DESKTOP_DIAGNOSTICS_ENABLED=1` | 打开桥的 NDJSON 探针日志 |
 | `PI_DESKTOP_DIAGNOSTIC_LOG` | 日志位置（默认 `~/.pi/agent/pi-desktop-runtime.ndjson`） |

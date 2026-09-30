@@ -301,6 +301,12 @@ One decision point (`scripts/lib/macSigning.cjs`) feeds the electron-builder con
 the `--dry-run` output; `--sign` is a command-line flag only, so a `PI_DESKTOP_SIGN` left behind in
 someone's shell cannot change what a given command produces.
 
+The tier travels only through the pack entries (the plan passes
+`--config src-electron/electron-builder.config.cjs`), so running `electron-builder` or `tauri build` by
+hand skips the tier and the credential gate along with it. The same mac block prunes Electron's 220
+locale directories down to `en` / `zh_CN` / `zh_TW`: 49MB of `.lproj` bundles, each of which is signed
+on its own.
+
 - `release` needs Apple credentials, either `APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` +
   `APPLE_TEAM_ID`, or `APPLE_API_KEY` + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER` (Tauri spells the
   password `APPLE_PASSWORD` - export the same value under both names). Missing credentials fail
@@ -338,6 +344,7 @@ someone's shell cannot change what a given command produces.
 | `PI_DESKTOP_LOCALE=zh\|en` | pin the UI language instead of detecting it |
 | `VITE_PI_DESKTOP_API_BASE` | renderer: bridge base URL, for `dev:web` without `dev` |
 | `PI_DESKTOP_RUNTIME_MODE` | force `bundled` or `system` instead of inferring it |
+| `PI_DESKTOP_SIGN`, `PI_DESKTOP_SIGN_IDENTITY` | macOS signing tier (`local`\|`release`) and the certificate to sign with; the pack plan derives both from `--sign` and the `Developer ID Application` default, set them only to override |
 | `PI_DESKTOP_HOST_PATH` | override the PATH used to find the host's `node` in `system` mode |
 | `PI_DESKTOP_DIFF_IDE`, `PI_DESKTOP_DIFF_IDE_KIND` | which IDE opens a changed file's diff when it is double-clicked in the git popover. Detection covers VS Code, CodeBuddy, Cursor, Windsurf, VSCodium, Zed, Sublime Text and the JetBrains IDEs; set these only for something else (`KIND` is `vscode`\|`zed`\|`sublime`\|`jetbrains`, default `vscode`) |
 | `PI_DESKTOP_DIAGNOSTICS_ENABLED=1` | write the bridge's NDJSON probe log |
