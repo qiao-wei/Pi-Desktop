@@ -1691,10 +1691,12 @@ undefined
     }
 
     // 后台命令的存活状态：每次查询顺手清掉已经结束的记录。渲染层轮询它来决定「运行中」
-    // 提示是否还在、以及「停止」按钮对应哪条命令。
+    // 提示是否还在、以及「停止」按钮对应哪条命令。先扫一次系统进程表：有的子进程会 setsid
+    // 出去另立会话（不在 leader 的进程组里），只能靠 ppid 关系把它们记进台账。
     if (req.method === "GET" && url.pathname === "/api/projects/commands/status") {
       const projectId = String(url.searchParams.get("projectId") ?? "");
-      sendJson(res, 200, { runs: projectCommandRuns.list({ projectId }) });
+      const table = await projectCommandRuns.scanProcesses();
+      sendJson(res, 200, { runs: projectCommandRuns.list({ projectId, table }) });
       return;
     }
 
