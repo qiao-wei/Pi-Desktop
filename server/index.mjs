@@ -37,6 +37,7 @@ import { resolveSessionWorkspaceCwd } from "./sessionWorkspace.mjs";
 import { openGitFileDiff } from "./openDiff.mjs";
 import { createProjectProbe, detectProjectCommands } from "./projectCommandDetect.mjs";
 import { detectTerminalApps, revealRunLog, runProjectCommand } from "./runProjectCommand.mjs";
+import { createProjectCommandRuns } from "./projectCommandRuns.mjs";
 import { buildCommitMessagePrompt, normalizeGeneratedCommitMessage } from "./commitMessage.mjs";
 import { oneShotModelError, oneShotThinkingEffort } from "./oneShotModel.mjs";
 import {
@@ -168,6 +169,8 @@ const agentShims = createAgentShims({
 const agentSkillsDir = join(agentDir, "skills");
 const agentSessionsDir = join(agentDir, "sessions");
 const projectsFile = join(agentDir, "projects.json");
+// 后台命令的进程台账：桥重启后还能认出「上次那个 dev server 是否还活着」并给出停止入口。
+const commandRunsFile = join(agentDir, "command-runs.json");
 const sessionsDatabaseFile = join(agentDir, "sessions.sqlite");
 const sessionsDatabaseVersion = 1;
 const personalizationFile = join(agentDir, "personalization.json");
@@ -179,6 +182,7 @@ const projectSessionRoot = agentSessionsDir;
 // 托管 worktree 的根目录：`~/.pi/agent/worktrees`。只有落在这个目录下的 cwd 才被当成
 // 应用自己建的 worktree（见 `isManagedWorktreePath`），用户手写的 worktree 不受影响。
 const worktreesRoot = worktreeRootFor(agentDir);
+const projectCommandRuns = createProjectCommandRuns({ runsFile: commandRunsFile });
 const projectAttachmentRoot = join(agentDir, "attachments");
 const diagnosticLogFile = process.env.PI_DESKTOP_DIAGNOSTIC_LOG?.trim() || join(agentDir, "pi-desktop-runtime.ndjson");
 // Diagnostic logging is opt-in so normal runs stay quiet.
@@ -1665,7 +1669,36 @@ undefined
         background,
         terminalApp: terminalApp && terminalApp !== "default" && terminalApp !== "background" ? terminalApp : "",
       });
+      // 后台运行能跟踪：登记进程，界面据此持续显示「运行中」并提供停止入口。
+      if (result.launcher === "background" && result.pid) {
+        projectCommandRuns.register({
+          pid: result.pid,
+          startedAt: Date.now(),
+          command: command.command,
+          projectId: project.id,
+          commandId: command.id,
+          cwd,
+          logPath: result.logPath,
+          sessionPath: typeof body?.sessionPath === "string" ? body.sessionPath : "",
+        });
+      }
       sendJson(res, 200, { ok: true, launcher: result.launcher, logPath: result.logPath, pid: result.pid, command: command.command, cwd });
+      return;
+    }
+
+    // 后台命令的存活状态：每次查询顺手清掉已经结束的记录。渲染层轮询它来决定「运行中」
+    // 提示是否还在、以及「停止」按钮对应哪条命令。
+    if (req.method === "GET" && url.pathname === "/api/projects/commands/status") {
+      const projectId = String(url.searchParams.get("projectId") ?? "");
+      sendJson(res, 200, { runs: projectCommandRuns.list({ projectId }) });
+      return;
+    }
+
+    // 「停止」：杀掉一条后台命令的进程（整棵进程树），并从台账里删掉。
+    if (req.method === "POST" && url.pathname === "/api/projects/commands/stop") {
+      const body = await readJson(req);
+      const result = await projectCommandRuns.stop(String(body?.runId ?? ""));
+      sendJson(res, 200, { ok: true, ...result });
       return;
     }
 

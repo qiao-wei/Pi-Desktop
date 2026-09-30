@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Loader2, Play, Plus, Search, Sparkles, Terminal, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, Loader2, Play, Plus, Search, Sparkles, Square, Terminal, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -14,9 +14,11 @@ import {
   type ProjectCommand,
 } from "../shared/projectCommands";
 import {
+  findCommandRun,
   isProjectCommandBackground,
   PROJECT_COMMAND_BACKGROUND,
   PROJECT_COMMAND_DEFAULT_TERMINAL,
+  type ProjectCommandRun,
   type ProjectCommandRunResult,
 } from "../shared/projectCommandTerminal";
 
@@ -40,6 +42,11 @@ export interface ProjectCommandControlsProps {
   onRunTargetChange: (target: string) => void;
   /** 上一次成功启动的结果；null = 没有可显示的提示。 */
   lastRun: ProjectCommandRunResult | null;
+  /** 后台还在跑的命令（存活进程），最新的在前。 */
+  runs: ProjectCommandRun[];
+  /** 正在停某条后台命令。 */
+  isStoppingRun: boolean;
+  onStopRun: (runId: string) => void;
   onDismissRun: () => void;
   onRun: () => void;
   onRevealLog: (logPath: string) => void;
@@ -68,6 +75,9 @@ export function ProjectCommandControls({
   runTarget,
   onRunTargetChange,
   lastRun,
+  runs,
+  isStoppingRun,
+  onStopRun,
   onDismissRun,
   onRun,
   onRevealLog,
@@ -91,6 +101,12 @@ export function ProjectCommandControls({
   const visibleCandidates = candidates ? filterProjectCommands(candidates, query) : null;
   // 探测一次可能是几十条（NextClaw 的根 package.json 就有 40+ 个脚本），没搜索只能靠眼扫。
   const showSearch = commands.length + (candidates?.length ?? 0) > 8;
+  // 选中的命令正在后台跑 →「运行」按钮变成「停止」。其余还在跑的命令（用户切到别的命令了）
+  // 用一个常驻小条继续保留停止入口，否则切一下命令就没法停它了。
+  const runningSelected = selected ? findCommandRun(runs, selected.id) : null;
+  const otherRuns = runningSelected ? runs.filter((run) => run.id !== runningSelected.id) : runs;
+  const otherRun = otherRuns[0] ?? null;
+  const otherRunsTitle = otherRuns.map((run) => `${run.command}${run.cwd ? `  (${run.cwd})` : ""}`).join("\n");
 
   // 关闭时清掉搜索词，下次打开还是完整列表。
   useEffect(() => {
@@ -140,24 +156,54 @@ export function ProjectCommandControls({
 
   return (
     <div className="flex shrink-0 items-center gap-1" aria-label={t("projectCommand.menuTitle")}>
-      <button
-        type="button"
-        onClick={onRun}
-        disabled={disabledReason !== null}
-        aria-label={runTitle}
-        title={runTitle}
-        className={cn(
-          "flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[0.78rem] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60",
-          error && "text-destructive hover:text-destructive",
-        )}
-      >
-        {isRunning ? (
-          <Loader2 className="size-[14px] animate-spin" aria-hidden="true" />
-        ) : (
-          <Play className="size-[14px]" aria-hidden="true" />
-        )}
-        <span className="max-[720px]:hidden">{isRunning ? t("projectCommand.runPending") : t("projectCommand.run")}</span>
-      </button>
+      {runningSelected ? (
+        <button
+          type="button"
+          onClick={() => onStopRun(runningSelected.id)}
+          disabled={isStoppingRun}
+          aria-label={t("projectCommand.stop")}
+          title={t("projectCommand.stopHint", { command: runningSelected.command })}
+          className="flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[0.78rem] text-destructive transition-colors hover:bg-destructive/10 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60"
+        >
+          {isStoppingRun ? (
+            <Loader2 className="size-[14px] animate-spin" aria-hidden="true" />
+          ) : (
+            <Square className="size-3.5 fill-current" aria-hidden="true" />
+          )}
+          <span className="max-[720px]:hidden">
+            {isStoppingRun ? t("projectCommand.stopping") : t("projectCommand.stop")}
+          </span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onRun}
+          disabled={disabledReason !== null}
+          aria-label={runTitle}
+          title={runTitle}
+          className={cn(
+            "flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[0.78rem] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60",
+            error && "text-destructive hover:text-destructive",
+          )}
+        >
+          {isRunning ? (
+            <Loader2 className="size-[14px] animate-spin" aria-hidden="true" />
+          ) : (
+            <Play className="size-[14px]" aria-hidden="true" />
+          )}
+          <span className="max-[720px]:hidden">{isRunning ? t("projectCommand.runPending") : t("projectCommand.run")}</span>
+        </button>
+      )}
+
+      {runningSelected?.logPath ? (
+        <button
+          type="button"
+          onClick={() => onRevealLog(runningSelected.logPath)}
+          className="flex h-7 shrink-0 items-center rounded-md px-1.5 text-[0.78rem] text-muted-foreground underline underline-offset-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+        >
+          {t("projectCommand.viewLog")}
+        </button>
+      ) : null}
 
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -333,6 +379,42 @@ export function ProjectCommandControls({
           </div>
         </PopoverContent>
       </Popover>
+
+      {otherRun ? (
+        <span
+          className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-[0.72rem] text-muted-foreground"
+          title={otherRunsTitle}
+        >
+          <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-[var(--app-success)]" aria-hidden="true" />
+          <span className="max-[900px]:hidden">
+            {otherRuns.length > 1 ? t("projectCommand.runningCount", { count: otherRuns.length }) : t("projectCommand.running")}
+          </span>
+          {otherRun.logPath ? (
+            <button
+              type="button"
+              onClick={() => onRevealLog(otherRun.logPath)}
+              className="rounded-md px-1 underline underline-offset-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+            >
+              {t("projectCommand.viewLog")}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => onStopRun(otherRun.id)}
+            disabled={isStoppingRun}
+            aria-label={t("projectCommand.stop")}
+            title={t("projectCommand.stopHint", { command: otherRun.command })}
+            className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-destructive transition-colors hover:bg-destructive/10 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60"
+          >
+            {isStoppingRun ? (
+              <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+            ) : (
+              <Square className="size-2.5 fill-current" aria-hidden="true" />
+            )}
+            {t("projectCommand.stop")}
+          </button>
+        </span>
+      ) : null}
 
       {lastRun ? (
         <span

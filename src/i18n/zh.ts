@@ -716,6 +716,12 @@ export const zh = {
   "projectCommand.runTargetHint": "后台运行不打开窗口、输出写入日志；也可以选一个终端 app 打开",
   "projectCommand.backgroundStarted": "已在后台运行",
   "projectCommand.terminalOpened": "已打开终端",
+  "projectCommand.running": "运行中",
+  "projectCommand.runningCount": "{count} 个运行中",
+  "projectCommand.stop": "停止",
+  "projectCommand.stopping": "停止中…",
+  "projectCommand.stopHint": "停止进程：{command}",
+  "projectCommand.stopFailed": "停止命令失败：{reason}",
   "projectCommand.viewLog": "查看日志",
   "projectCommand.dismissRunNotice": "关闭提示",
 
