@@ -1,3 +1,5 @@
+import type { ProjectCommand } from "../shared/projectCommands.ts";
+
 export type MessageRole = "user" | "assistant" | "system";
 export type MessageKind = "text" | "audio";
 /** `directory` is a path *reference* to a dropped folder, never bytes — see `src/shared/composerDrop.ts`. */
@@ -212,6 +214,10 @@ export interface ProjectSummary {
   pinned?: boolean;
   sessionPins?: Record<string, boolean>;
   lastSessionPath?: string;
+  /** 会话头部「运行」按钮左边那串可运行命令（存在 projects.json 里）。 */
+  commands?: ProjectCommand[];
+  /** 下拉里当前选中的命令 id；不在 `commands` 里时视为第一条。 */
+  selectedCommandId?: string;
   sessions: ProjectSessionSummary[];
 }
 

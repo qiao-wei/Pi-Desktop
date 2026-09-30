@@ -117,6 +117,7 @@ import { syncShellAppearance } from "../lib/shell-appearance";
 import { loadUiPreferences, saveUiPreferences } from "../lib/ui-preferences";
 import { resolveAppearance, themes, type ThemeId } from "../themes/index.ts";
 import { findProjectByCwd } from "../shared/projectPaths";
+import { normalizeProjectCommandTerminal } from "../shared/projectCommandTerminal";
 import { collectDroppedItems, pickDroppedProjectFolder, supportsDroppedFolderPaths, type DroppedProjectFolder } from "../shared/droppedProjectFolder";
 import { attachmentKindFromMimeType, DIRECTORY_MIME_TYPE } from "../shared/attachmentKind";
 import { pickNewFolderDrops, planComposerDrop, type ComposerDropPlan } from "../shared/composerDrop";
@@ -160,6 +161,7 @@ import { AutoHideScroll } from "../components/AutoHideScroll";
 import { ExtensionCustomUiPanel } from "../components/ExtensionCustomUiPanel";
 import { stripTerminalSequences } from "../shared/terminalText.ts";
 import { GitStatusBadge } from "../components/GitStatusBadge";
+import { ProjectCommandControls } from "../components/ProjectCommandControls";
 import { SessionWorktreeBadge } from "../components/SessionWorktreeBadge";
 import {
   CAPABILITY_TABS,
@@ -175,6 +177,7 @@ import {
 } from "../shared/capabilityScope";
 import { usePiDesktopApp } from "../features/chat/usePiDesktopApp";
 import { useProjectGit } from "../features/chat/useProjectGit";
+import { useProjectCommands } from "../features/chat/useProjectCommands";
 import { useSessionWorktree } from "../features/chat/useSessionWorktree";
 import {
   selectRestorableQueuedEntries,
@@ -452,6 +455,24 @@ export function App() {
       return next;
     });
   }, []);
+  // 「运行命令」跑在哪里：后台静默（默认）/ 系统默认终端 / 某个终端 app。跟会话头部的
+  // 「运行 + 命令下拉」走，存在 UI 偏好里。
+  const [projectCommandTerminal, setProjectCommandTerminal] = useState(() =>
+    normalizeProjectCommandTerminal(loadUiPreferences().projectCommandTerminal),
+  );
+  const handleProjectCommandTerminalChange = useCallback((target: string) => {
+    const next = normalizeProjectCommandTerminal(target);
+    setProjectCommandTerminal(next);
+    saveUiPreferences({ projectCommandTerminal: next });
+  }, []);
+  // 「查看日志」：后台运行的输出文件，用系统默认程序打开。
+  const revealRunLog = useCallback(async (logPath: string) => {
+    try {
+      await postJson("/api/projects/commands/reveal-log", { logPath });
+    } catch (error) {
+      reportError(error instanceof Error ? error.message : String(error));
+    }
+  }, [reportError]);
   /** 拖动中的手柄：pointer capture 后指针拖离手柄会让 :hover 失效，得显式记着。 */
   const [resizingSide, setResizingSide] = useState<"left" | "right" | null>(null);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -626,6 +647,15 @@ export function App() {
     projectId: bootstrap.activeProjectId,
     sessionPath: visibleSessionPath,
     isStreaming: state.isStreaming,
+    onError: reportError,
+  });
+
+  // 会话头部「运行」按钮左边的命令列表：同样按项目取（存在 projects.json），探测和运行都
+  // 落在会话自己的工作区上。
+  const projectCommands = useProjectCommands({
+    projectId: bootstrap.activeProjectId,
+    sessionPath: visibleSessionPath,
+    runTarget: projectCommandTerminal,
     onError: reportError,
   });
 
@@ -2677,6 +2707,26 @@ export function App() {
               onReveal={() => void sessionWorktree.revealWorktree()}
               onCreateBranch={sessionWorktree.createBranch}
               onRemove={sessionWorktree.removeWorktree}
+            />
+            <ProjectCommandControls
+              commands={projectCommands.commands}
+              selectedCommandId={projectCommands.selectedCommandId}
+              candidates={projectCommands.candidates}
+              isDetecting={projectCommands.isDetecting}
+              isRunning={projectCommands.isRunning}
+              isLoading={projectCommands.isLoading}
+              error={projectCommands.error}
+              loadError={projectCommands.loadError}
+              onRun={() => void projectCommands.run()}
+              runTarget={projectCommandTerminal}
+              onRunTargetChange={handleProjectCommandTerminalChange}
+              lastRun={projectCommands.lastRun}
+              onDismissRun={projectCommands.clearLastRun}
+              onRevealLog={revealRunLog}
+              onSelect={(id) => void projectCommands.selectCommand(id)}
+              onRemove={(id) => void projectCommands.removeCommand(id)}
+              onDetect={() => void projectCommands.detect()}
+              onAdd={(candidate) => void projectCommands.addCommand(candidate)}
             />
             <GitStatusBadge
               info={projectGit.info}

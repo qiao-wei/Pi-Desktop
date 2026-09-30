@@ -35,6 +35,8 @@ import {
 } from "./gitWorktree.mjs";
 import { resolveSessionWorkspaceCwd } from "./sessionWorkspace.mjs";
 import { openGitFileDiff } from "./openDiff.mjs";
+import { createProjectProbe, detectProjectCommands } from "./projectCommandDetect.mjs";
+import { detectTerminalApps, revealRunLog, runProjectCommand } from "./runProjectCommand.mjs";
 import { buildCommitMessagePrompt, normalizeGeneratedCommitMessage } from "./commitMessage.mjs";
 import { oneShotModelError, oneShotThinkingEffort } from "./oneShotModel.mjs";
 import {
@@ -80,6 +82,7 @@ import {
   parseChatBubbleId,
 } from "../src/shared/chatBubbles.ts";
 import { userMessageEntryIdForTurn } from "../src/shared/sessionBranch.ts";
+import { normalizeProjectCommands, normalizeSelectedCommandId, selectedProjectCommand } from "../src/shared/projectCommands.ts";
 import { deriveSessionTitle, sessionTitleMaxWords } from "../src/shared/sessionTitle.ts";
 import { findProjectByFolder } from "./projectFolders.mjs";
 import {
@@ -1598,6 +1601,80 @@ undefined
       const body = await readJson(req);
       const project = findProject(String(body?.projectId ?? ""));
       sendJson(res, 200, await openGitFileDiff(project.cwd, String(body?.path ?? "")));
+      return;
+    }
+
+    // 会话头部「运行」按钮左边的命令列表。读：项目 + 选中的命令；写：整表替换（探测添加 /
+    // 删除都是「前端有完整列表，把新列表整份交上来」），与 composerDefaults 一样存在
+    // projects.json 里。
+    if (req.method === "GET" && url.pathname === "/api/projects/commands") {
+      const project = findProject(String(url.searchParams.get("projectId") ?? ""));
+      sendJson(res, 200, projectCommandsPayload(project));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/projects/commands") {
+      const body = await readJson(req);
+      const project = findProject(String(body?.projectId ?? ""));
+      const commands = normalizeProjectCommands(body?.commands);
+      const selectedCommandId = normalizeSelectedCommandId(body?.selectedCommandId, commands);
+      touchProject(project.id, { commands, selectedCommandId });
+      sendJson(res, 200, projectCommandsPayload(findProject(project.id)));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/projects/commands/select") {
+      const body = await readJson(req);
+      const project = findProject(String(body?.projectId ?? ""));
+      const selectedCommandId = normalizeSelectedCommandId(body?.commandId, project.commands ?? []);
+      touchProject(project.id, { selectedCommandId });
+      sendJson(res, 200, projectCommandsPayload(findProject(project.id)));
+      return;
+    }
+
+    // 「自动探测」：只读项目文件，不执行任何东西，也不落盘 —— 候选拿回前端让用户自己挑。
+    // 探测目录取会话自己的工作区（worktree 会话看到的就是 worktree 的文件）。
+    if (req.method === "POST" && url.pathname === "/api/projects/commands/detect") {
+      const body = await readJson(req);
+      const project = findProject(String(body?.projectId ?? ""));
+      const cwd = requestWorkspaceCwd(project, body);
+      sendJson(res, 200, { candidates: detectProjectCommands(createProjectProbe(cwd)) });
+      return;
+    }
+
+    // 「运行方式」候选终端：只读扫描系统里装了哪些终端 app，给前端下拉用。返回形态
+    // `{ platform, terminals }`；非 macOS 时 `terminals` 为空（只有「后台运行 / 系统默认终端」）。
+    if (req.method === "GET" && url.pathname === "/api/projects/commands/terminals") {
+      sendJson(res, 200, { platform: process.platform, terminals: detectTerminalApps() });
+      return;
+    }
+
+    // 「运行」：在宿主机的终端里跑选中的那条命令。命令必须在项目自己的列表里，工作目录
+    // 由服务端解析（项目根 + 命令自带的相对子目录），渲染层传不了任意路径。
+    if (req.method === "POST" && url.pathname === "/api/projects/commands/run") {
+      const body = await readJson(req);
+      const project = findProject(String(body?.projectId ?? ""));
+      const command = selectedProjectCommand(project.commands ?? [], String(body?.commandId ?? ""));
+      if (!command) {
+        throw new Error("这条命令已经不在列表里了，请重新选择。");
+      }
+      const cwd = resolveCommandCwd(requestWorkspaceCwd(project, body), command.cwd);
+      const terminalApp = typeof body?.terminal === "string" ? body.terminal : "";
+      const background = body?.background === true || terminalApp === "background";
+      const result = await runProjectCommand(command.command, cwd, {
+        background,
+        terminalApp: terminalApp && terminalApp !== "default" && terminalApp !== "background" ? terminalApp : "",
+      });
+      sendJson(res, 200, { ok: true, launcher: result.launcher, logPath: result.logPath, pid: result.pid, command: command.command, cwd });
+      return;
+    }
+
+    // 「查看日志」：后台运行把输出写进日志文件；这里用系统默认程序打开它。路径必须是服务端
+    // 自己写日志的那个目录，渲染层传不了任意路径。
+    if (req.method === "POST" && url.pathname === "/api/projects/commands/reveal-log") {
+      const body = await readJson(req);
+      await revealRunLog(String(body?.logPath ?? ""));
+      sendJson(res, 200, { ok: true });
       return;
     }
 
@@ -5445,6 +5522,8 @@ async function createProject(body) {
     updatedAt: now,
     pinned: false,
     sessionPins: {},
+    commands: [],
+    selectedCommandId: "",
   };
 
   projects = [...projects, project];
@@ -7161,6 +7240,7 @@ function loadProjects() {
   const normalized = parsed
     .map((project) => {
       const id = String(project?.id ?? "").trim() || createProjectId(project?.name);
+      const commands = normalizeProjectCommands(project?.commands);
       return {
         id,
         name: String(project?.name ?? "").trim() || "Project",
@@ -7171,6 +7251,8 @@ function loadProjects() {
         lastSessionPath: typeof project?.lastSessionPath === "string" ? project.lastSessionPath : undefined,
         sessionPins: project?.sessionPins && typeof project.sessionPins === "object" ? project.sessionPins : {},
         composerDefaults: normalizeComposerDefaults(project?.composerDefaults),
+        commands,
+        selectedCommandId: normalizeSelectedCommandId(project?.selectedCommandId, commands),
       };
     })
     .filter((project) => project.cwd);
@@ -7188,6 +7270,8 @@ function loadProjects() {
       updatedAt: now,
       pinned: false,
       sessionPins: {},
+      commands: [],
+      selectedCommandId: "",
     },
   ];
 }
@@ -7236,6 +7320,32 @@ function touchProject(projectId, patch = {}) {
   const now = Date.now();
   projects = projects.map((project) => (project.id === projectId ? { ...project, ...patch, updatedAt: now } : project));
   saveProjects();
+}
+
+/** 命令列表接口的响应形状（前端 hook 只认这两个字段）。 */
+function projectCommandsPayload(project) {
+  return {
+    commands: project.commands ?? [],
+    selectedCommandId: project.selectedCommandId ?? "",
+  };
+}
+
+/**
+ * 命令的工作目录 = 会话工作区 + 命令自带的相对子目录（monorepo 的 workspace 命令）。
+ *
+ * `normalizeCommandCwd` 已经挡过 `..` 和绝对路径，这里再确认解析结果真的落在工作区里 ——
+ * `projects.json` 是可以被手改的文件，一层保险。
+ */
+function resolveCommandCwd(baseCwd, relativeCwd) {
+  const relative = String(relativeCwd ?? "").trim();
+  if (!relative) {
+    return baseCwd;
+  }
+  const resolved = resolve(baseCwd, relative);
+  if (!isPathInside(baseCwd, resolved)) {
+    throw new Error(`命令目录超出项目范围：${relative}`);
+  }
+  return resolved;
 }
 
 /**
