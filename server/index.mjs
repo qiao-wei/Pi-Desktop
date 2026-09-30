@@ -21,7 +21,7 @@ import { extensionWidgetRequest } from "./extensionUiRequests.mjs";
 import { openSqliteDatabase } from "./sqlite.mjs";
 import { ensureSessionArchiveColumn, listArchivedSessionRows, listProjectSessionRows } from "./sessionArchive.mjs";
 import { revealFolder } from "./revealFolder.mjs";
-import { commitGitChanges, createGitBranch, initGitRepo, readCommitDiff, readGitInfo, renameGitBranch, switchGitBranch } from "./gitInfo.mjs";
+import { commitGitChanges, createGitBranch, initGitRepo, mergeGitUpstream, pushGitBranch, readCommitDiff, readGitInfo, renameGitBranch, switchGitBranch } from "./gitInfo.mjs";
 import {
   createManagedWorktree,
   isManagedWorktreePath,
@@ -1595,6 +1595,28 @@ undefined
       const project = findProject(String(body?.projectId ?? ""));
       const cwd = requestWorkspaceCwd(project, body);
       await commitGitChanges(cwd, { message: body?.message, paths: body?.paths });
+      sendJson(res, 200, await readGitInfo(cwd));
+      return;
+    }
+
+    // 「合并上游」：`fetch` 上游远端后把它合并进当前分支（等价于固定成 merge 的 pull）。
+    // 目标上游由 `mergeGitUpstream` 从 `status`/`for-each-ref` 自己读，不接收参数。
+    if (req.method === "POST" && url.pathname === "/api/projects/git/merge") {
+      const body = await readJson(req);
+      const project = findProject(String(body?.projectId ?? ""));
+      const cwd = requestWorkspaceCwd(project, body);
+      await mergeGitUpstream(cwd);
+      sendJson(res, 200, await readGitInfo(cwd));
+      return;
+    }
+
+    // 「推送」：有上游直接推；没有上游则关联远端（优先 origin）再 `push -u`。远端与分支都由
+    // `pushGitBranch` 从 git 自己报出来的东西里选，请求体里没有可伪造的目标。
+    if (req.method === "POST" && url.pathname === "/api/projects/git/push") {
+      const body = await readJson(req);
+      const project = findProject(String(body?.projectId ?? ""));
+      const cwd = requestWorkspaceCwd(project, body);
+      await pushGitBranch(cwd);
       sendJson(res, 200, await readGitInfo(cwd));
       return;
     }

@@ -303,6 +303,68 @@ export function gitCommitBlockReason({
 }
 
 /**
+ * 「合并上游 / 推送」两枚按钮的状态。
+ *
+ * `reason` 同时是禁用原因和提示文案的 key：`streaming` 回答生成中（agent 正在改文件）、
+ * `busy` 另一个同步操作在飞、`detached` 游离 HEAD、`unborn` 还没有提交、
+ * `noUpstream` 没有上游分支（合并没有目标）。
+ */
+export type GitSyncBlockReason = "ok" | "streaming" | "busy" | "detached" | "unborn" | "noUpstream";
+
+export interface GitSyncActionState {
+  disabled: boolean;
+  reason: GitSyncBlockReason;
+}
+
+/**
+ * 合并（把上游分支合并进当前分支）：会动工作区，所以和切分支一样在流式输出时禁用。
+ * 没有上游 = 没有可合并的目标，禁用；推送在飞时也禁（两个都是同步类写操作，不排队）。
+ */
+export function gitMergeActionState(
+  info: Pick<GitInfo, "detached" | "unborn" | "upstream">,
+  { isStreaming, isMerging, isPushing }: { isStreaming: boolean; isMerging: boolean; isPushing: boolean },
+): GitSyncActionState {
+  if (isStreaming) {
+    return { disabled: true, reason: "streaming" };
+  }
+  if (isMerging || isPushing) {
+    return { disabled: true, reason: "busy" };
+  }
+  if (info.detached) {
+    return { disabled: true, reason: "detached" };
+  }
+  if (info.unborn) {
+    return { disabled: true, reason: "unborn" };
+  }
+  if (!info.upstream) {
+    return { disabled: true, reason: "noUpstream" };
+  }
+
+  return { disabled: false, reason: "ok" };
+}
+
+/**
+ * 推送：只碰远端 refs，不动工作区，所以回答生成中也可以推（不禁 `streaming`）。
+ * 没有上游时**不是**禁用 —— 那正是「关联远端」（`push -u`）要做的事。
+ */
+export function gitPushActionState(
+  info: Pick<GitInfo, "detached" | "unborn">,
+  { isPushing, isMerging }: { isPushing: boolean; isMerging: boolean },
+): GitSyncActionState {
+  if (isPushing || isMerging) {
+    return { disabled: true, reason: "busy" };
+  }
+  if (info.detached) {
+    return { disabled: true, reason: "detached" };
+  }
+  if (info.unborn) {
+    return { disabled: true, reason: "unborn" };
+  }
+
+  return { disabled: false, reason: "ok" };
+}
+
+/**
  * 弹层里按"已暂存 / 未暂存 / 未跟踪"分组。冲突单独归到未暂存组（git 语义上它也不在
  * index 的正常状态里），未跟踪永远单独一组。
  */

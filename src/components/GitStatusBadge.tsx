@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Check, GitBranch, GitBranchPlus, Loader2, Pencil, RefreshCw, Sparkles } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, GitBranch, GitBranchPlus, GitMerge, Loader2, Pencil, RefreshCw, Sparkles, Upload } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -27,6 +27,8 @@ import {
   gitCommitPlan,
   gitCreateBranchBlockReason,
   gitHeadLabel,
+  gitMergeActionState,
+  gitPushActionState,
   gitRenameBranchBlockReason,
   gitStatusLabelKey,
   gitStatusLetter,
@@ -50,6 +52,10 @@ export interface GitStatusBadgeProps {
   isCommitting: boolean;
   /** 「智能生成提交信息」在飞。 */
   isGeneratingMessage: boolean;
+  /** 推送（或首次关联远端并推送）在飞。 */
+  isPushing: boolean;
+  /** 合并上游在飞。 */
+  isMerging: boolean;
   /** 回答生成中：禁止切分支/提交（agent 正在改文件）。 */
   isStreaming: boolean;
   /** 最近一次写操作（init / 切分支 / 提交 / 生成信息）的失败原因；只有用户主动触发的操作会留下它。 */
@@ -62,6 +68,10 @@ export interface GitStatusBadgeProps {
   /** 给当前分支改名。 */
   onRenameBranch: (name: string) => Promise<boolean>;
   onCommit: (input: { message: string; paths: string[] }) => Promise<boolean>;
+  /** 推送当前分支；没有上游时服务端会先关联远端（优先 origin）再推。 */
+  onPush: () => Promise<boolean>;
+  /** 把上游分支合并进当前分支。 */
+  onMerge: () => Promise<boolean>;
   /** 双击改动文件：用宿主机的 IDE 打开它的 diff（HEAD ↔ 工作区）。 */
   onOpenDiff: (path: string) => void;
   onGenerateMessage: (paths: string[]) => Promise<string | null>;
@@ -98,6 +108,8 @@ export function GitStatusBadge({
   isRenamingBranch,
   isCommitting,
   isGeneratingMessage,
+  isPushing,
+  isMerging,
   isStreaming,
   error,
   onInit,
@@ -106,6 +118,8 @@ export function GitStatusBadge({
   onCreateBranch,
   onRenameBranch,
   onCommit,
+  onPush,
+  onMerge,
   onOpenDiff,
   onGenerateMessage,
 }: GitStatusBadgeProps) {
@@ -160,6 +174,30 @@ export function GitStatusBadge({
   const badgeTitle = info.unborn
     ? `${headTitle} · ${t("git.unborn")}`
     : `${headTitle} · ${changedFiles > 0 ? t("git.changedFiles", { count: changedFiles }) : t("git.clean")}`;
+
+  // 同步类动作（合并 / 推送）的可用性与提示：可用性由纯函数算（见 gitStatusBadge），这里
+  // 只把 reason 映射成文案。推送在回答生成中仍然可点（只碰远端 refs，不动工作区）；
+  // 没有上游时它变成「关联远端」而不是被禁用。
+  const mergeState = gitMergeActionState(info, { isStreaming, isMerging, isPushing });
+  const pushState = gitPushActionState(info, { isPushing, isMerging });
+  const mergeTitle =
+    mergeState.reason === "streaming"
+      ? t("git.mergeDisabledStreaming")
+      : mergeState.reason === "detached"
+        ? t("git.mergeDisabledDetached")
+        : mergeState.reason === "unborn"
+          ? t("git.mergeDisabledUnborn")
+          : mergeState.reason === "noUpstream"
+            ? t("git.mergeDisabledNoUpstream")
+            : t("git.merge");
+  const pushTitle =
+    pushState.reason === "detached"
+      ? t("git.pushDisabledDetached")
+      : pushState.reason === "unborn"
+        ? t("git.pushDisabledUnborn")
+        : info.upstream
+          ? t("git.push")
+          : t("git.pushSetUpstream");
 
   const runSwitch = async (branch: string) => {
     const switched = await onSwitchBranch(branch);
@@ -401,6 +439,28 @@ export function GitStatusBadge({
           )}
           {isRenaming ? null : (
             <div className="flex shrink-0 items-center gap-0.5">
+              {/* 合并（fetch + merge 上游）/ 推送（无上游时先关联）排在刷新左边；三个都是
+                  同一行的小图标按钮，顺序是「合并 → 推送 → 刷新」。 */}
+              <button
+                type="button"
+                onClick={() => void onMerge()}
+                disabled={mergeState.disabled}
+                aria-label={mergeTitle}
+                title={mergeTitle}
+                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60"
+              >
+                {isMerging ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <GitMerge className="size-3.5" aria-hidden="true" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => void onPush()}
+                disabled={pushState.disabled}
+                aria-label={pushTitle}
+                title={pushTitle}
+                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60"
+              >
+                {isPushing ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Upload className="size-3.5" aria-hidden="true" />}
+              </button>
               <button
                 type="button"
                 onClick={onRefresh}

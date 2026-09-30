@@ -11,9 +11,11 @@
  *   以后有人想在读路径里夹带 `commit`/`checkout`/`push` 会被直接拒绝。
  * - `git init`（`initGitRepo`）、`git switch`（`switchGitBranch`）、`git switch -c`
  *   （`createGitBranch`）、`git branch -m`（`renameGitBranch`）和 `git commit`
- *   （`commitGitChanges`）是本功能仅有的五个写操作：都不走
+ *   （`commitGitChanges`）、`git push`（`pushGitBranch`）和 `git fetch` + `git merge`
+ *   （`mergeGitUpstream`）是本功能仅有的七个写操作：都不走
  *   只读 helper，只在用户点按钮/点分支/改名/写提交信息后触发。切分支前先拿 `for-each-ref` 对一遍
- *   本地分支名，提交前先拿 `status` 对一遍改动文件路径 —— 目标必须是 git 刚刚报出来的东西。
+ *   本地分支名，提交前先拿 `status` 对一遍改动文件路径，推送/合并前先拿 `status` 对一遍当前
+ *   分支与上游，远端名只可能是 `git remote` 报出来的 —— 目标必须是 git 刚刚报出来的东西。
  *   新建分支是唯一一处用户输入要进 argv 正题的地方（分支名本来就是要新建的东西，没有现成
  *   清单可对），所以它过 `isSafeBranchName`，再用 `for-each-ref` 确认不重名。
  *
@@ -29,6 +31,14 @@ import { dropProjectPiLinkEntries } from "./worktreePiLink.mjs";
 
 /** 单条 git 命令的超时（毫秒）。大仓库 `git status` 可能到秒级，给足余量但不无限等。 */
 export const GIT_TIMEOUT_MS = 5000;
+
+/**
+ * 网络操作（push / fetch）的超时（毫秒）。
+ *
+ * 和本地读分开：推一个大仓库 / 走慢网络远超 5 秒，用 `GIT_TIMEOUT_MS` 会在正常操作中途被杀掉。
+ * 仍然封顶，配合 `GIT_TERMINAL_PROMPT=0`，需要人工输入认证的远端是失败而不是永远挂着。
+ */
+export const GIT_NETWORK_TIMEOUT_MS = 120000;
 
 /**
  * 只读子命令白名单。故意不含 `init`：写操作走 `initGitRepo` 的独立通道。
@@ -657,6 +667,147 @@ export async function createGitBranch(cwd, name, { execImpl = execFile, timeoutM
   }
 
   return checkedOut.stdout.trim() || checkedOut.stderr.trim();
+}
+
+/**
+ * 上游名 → 远端名（`origin/main` → `origin`）。上游名来自 `for-each-ref`，不是用户输入。
+ * 没有 `/`（罕见但可能）时原样返回，让随后的 `git remote` 校验去回答它是否真是远端。
+ */
+export function upstreamRemoteName(upstream) {
+  const value = String(upstream ?? "").trim();
+  const slash = value.indexOf("/");
+  return slash === -1 ? value : value.slice(0, slash);
+}
+
+/**
+ * `git remote` 报出来的远端名列表。
+ *
+ * 故意不进只读白名单：白名单只看子命令名、不校验它后面的参数，`remote add` 也会被放行，
+ * 那等于在读路径上开了个写口子。所以这里用固定 argv 在写路径内部调用。
+ */
+async function listGitRemotes(cwd, options) {
+  const result = await createGitRunner(options)(["remote"], { cwd });
+  if (!result.ok) {
+    throw new Error(gitFailureReason(result));
+  }
+
+  return String(result.stdout ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+/** 只读 `status` 的头信息：当前分支 / 上游 / 是否游离 HEAD / 是否空仓库（`-uno` 让输出更小）。 */
+async function readBranchHeader(cwd, options) {
+  const status = await runReadOnlyGit(cwd, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"], options);
+  if (!status.ok) {
+    throw new Error(gitFailureReason(status));
+  }
+
+  return parseBranchHeader(String(status.stdout ?? "").split("\u0000"));
+}
+
+/**
+ * 推送当前分支。
+ *
+ * - **有上游** → `git push`（远端与引用由 git 已配置的上游决定）；
+ * - **没有上游** → 关联远端：优先 `origin`，没有就退到唯一的那个远端，然后
+ *   `git push -u <remote> <branch>`。这就是 UI 上「关联远端」那枚按钮要做的事。
+ *
+ * 远端名只可能来自 `git remote`，分支名只可能来自当前 HEAD，且都再过一遍安全校验。
+ * 游离 HEAD / 空仓库直接拒绝 —— 没有可推的东西（worktree 会话要先在那边建一条分支）。
+ */
+export async function pushGitBranch(cwd, { execImpl = execFile, timeoutMs = GIT_NETWORK_TIMEOUT_MS } = {}) {
+  const project = String(cwd ?? "").trim();
+  if (!project) {
+    throw new Error("Cannot push without a project folder");
+  }
+
+  const options = { execImpl, timeoutMs };
+  const git = createGitRunner(options);
+  const header = await readBranchHeader(project, options);
+
+  if (header.detached) {
+    throw new Error("Cannot push from a detached HEAD");
+  }
+  if (header.unborn) {
+    throw new Error("Cannot push a branch without commits");
+  }
+
+  if (header.upstream) {
+    const pushed = await git(["push"], { cwd: project });
+    if (!pushed.ok) {
+      throw new Error(gitFailureReason(pushed));
+    }
+    return pushed.stdout.trim() || pushed.stderr.trim();
+  }
+
+  const branch = header.branch;
+  if (!isSafeBranchName(branch)) {
+    throw new Error(`Invalid branch name: ${branch || "(empty)"}`);
+  }
+
+  const remotes = await listGitRemotes(project, options);
+  if (remotes.length === 0) {
+    throw new Error("No git remote configured");
+  }
+  const remote = remotes.includes("origin") ? "origin" : remotes[0];
+
+  const pushed = await git(["push", "-u", remote, branch], { cwd: project });
+  if (!pushed.ok) {
+    throw new Error(gitFailureReason(pushed));
+  }
+  return pushed.stdout.trim() || pushed.stderr.trim();
+}
+
+/**
+ * 把上游分支合并进当前分支（`git fetch <remote>` + `git merge --no-edit <upstream>`）。
+ *
+ * 不用 `git pull` 是有意的：`pull.rebase` / `pull.ff` 是用户自己的配置，会把「合并」悄悄变成
+ * 变基、或者在不能快进时直接失败。这里两步显式跑，语义固定是「合并」，用户终端里的 pull 配置
+ * 也不受影响。上游名来自 `for-each-ref` 的 `%(upstream:short)`，不是用户输入；远端名还要在
+ * `git remote` 列表里存在。
+ *
+ * 冲突交给 git 自己判定：它会拒绝 / 留下冲突标记，原文照抛。游离 HEAD / 没有上游直接拒绝 ——
+ * 没有可合并的目标。
+ */
+export async function mergeGitUpstream(cwd, { execImpl = execFile, timeoutMs = GIT_NETWORK_TIMEOUT_MS } = {}) {
+  const project = String(cwd ?? "").trim();
+  if (!project) {
+    throw new Error("Cannot merge without a project folder");
+  }
+
+  const options = { execImpl, timeoutMs };
+  const git = createGitRunner(options);
+  const header = await readBranchHeader(project, options);
+
+  if (header.detached) {
+    throw new Error("Cannot merge into a detached HEAD");
+  }
+  if (header.unborn) {
+    throw new Error("Cannot merge before the first commit");
+  }
+  if (!header.upstream) {
+    throw new Error("This branch has no upstream branch to merge");
+  }
+
+  const remote = upstreamRemoteName(header.upstream);
+  const remotes = await listGitRemotes(project, options);
+  if (!remotes.includes(remote)) {
+    throw new Error(`Unknown remote: ${remote}`);
+  }
+
+  const fetched = await git(["fetch", remote], { cwd: project });
+  if (!fetched.ok) {
+    throw new Error(gitFailureReason(fetched));
+  }
+
+  const merged = await git(["merge", "--no-edit", header.upstream], { cwd: project });
+  if (!merged.ok) {
+    throw new Error(gitFailureReason(merged));
+  }
+
+  return merged.stdout.trim() || merged.stderr.trim() || fetched.stdout.trim();
 }
 
 /**

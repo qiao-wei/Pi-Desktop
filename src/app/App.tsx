@@ -2742,6 +2742,8 @@ export function App() {
               isRenamingBranch={projectGit.isRenamingBranch}
               isCommitting={projectGit.isCommitting}
               isGeneratingMessage={projectGit.isGeneratingMessage}
+              isPushing={projectGit.isPushing}
+              isMerging={projectGit.isMerging}
               isStreaming={state.isStreaming}
               error={projectGit.error}
               onInit={() => void projectGit.initRepo()}
@@ -2750,6 +2752,8 @@ export function App() {
               onCreateBranch={projectGit.createBranch}
               onRenameBranch={projectGit.renameBranch}
               onCommit={projectGit.commitChanges}
+              onPush={projectGit.pushBranch}
+              onMerge={projectGit.mergeUpstream}
               onOpenDiff={projectGit.openDiff}
               onGenerateMessage={projectGit.generateCommitMessage}
             />
