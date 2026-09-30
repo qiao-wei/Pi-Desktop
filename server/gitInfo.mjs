@@ -11,10 +11,10 @@
  *   以后有人想在读路径里夹带 `commit`/`checkout`/`push` 会被直接拒绝。
  * - `git init`（`initGitRepo`）、`git switch`（`switchGitBranch`）、`git switch -c`
  *   （`createGitBranch`）、`git branch -m`（`renameGitBranch`）和 `git commit`
- *   （`commitGitChanges`）、`git push`（`pushGitBranch`）和 `git fetch` + `git merge`
- *   （`mergeGitUpstream`）是本功能仅有的七个写操作：都不走
+ *   （`commitGitChanges`）、`git push`（`pushGitBranch`）、`git fetch` + `git merge`（`pullGitBranch`）
+ *   与「合并其它分支」（`mergeGitBranchInto`）是本功能仅有的八个写操作：都不走
  *   只读 helper，只在用户点按钮/点分支/改名/写提交信息后触发。切分支前先拿 `for-each-ref` 对一遍
- *   本地分支名，提交前先拿 `status` 对一遍改动文件路径，推送/合并前先拿 `status` 对一遍当前
+ *   本地分支名，提交前先拿 `status` 对一遍改动文件路径，推送/拉取/合并前先拿 `status` 对一遍当前
  *   分支与上游，远端名只可能是 `git remote` 报出来的 —— 目标必须是 git 刚刚报出来的东西。
  *   新建分支是唯一一处用户输入要进 argv 正题的地方（分支名本来就是要新建的东西，没有现成
  *   清单可对），所以它过 `isSafeBranchName`，再用 `for-each-ref` 确认不重名。
@@ -761,17 +761,17 @@ export async function pushGitBranch(cwd, { execImpl = execFile, timeoutMs = GIT_
 }
 
 /**
- * 把上游分支合并进当前分支（`git fetch <remote>` + `git merge --no-edit <upstream>`）。
+ * 拉取上游分支并合并进当前分支（`git fetch <remote>` + `git merge --no-edit <upstream>`）。
  *
  * 不用 `git pull` 是有意的：`pull.rebase` / `pull.ff` 是用户自己的配置，会把「合并」悄悄变成
- * 变基、或者在不能快进时直接失败。这里两步显式跑，语义固定是「合并」，用户终端里的 pull 配置
- * 也不受影响。上游名来自 `for-each-ref` 的 `%(upstream:short)`，不是用户输入；远端名还要在
- * `git remote` 列表里存在。
+ * 变基、或者在不能快进时直接失败。这里两步显式跑，语义固定是「fetch + merge」，用户终端里的
+ * pull 配置也不受影响。上游名来自 `for-each-ref` 的 `%(upstream:short)`，不是用户输入；远端名
+ * 还要在 `git remote` 列表里存在。
  *
  * 冲突交给 git 自己判定：它会拒绝 / 留下冲突标记，原文照抛。游离 HEAD / 没有上游直接拒绝 ——
- * 没有可合并的目标。
+ * 没有可拉取的目标。
  */
-export async function mergeGitUpstream(cwd, { execImpl = execFile, timeoutMs = GIT_NETWORK_TIMEOUT_MS } = {}) {
+export async function pullGitBranch(cwd, { execImpl = execFile, timeoutMs = GIT_NETWORK_TIMEOUT_MS } = {}) {
   const project = String(cwd ?? "").trim();
   if (!project) {
     throw new Error("Cannot merge without a project folder");
@@ -808,6 +808,121 @@ export async function mergeGitUpstream(cwd, { execImpl = execFile, timeoutMs = G
   }
 
   return merged.stdout.trim() || merged.stderr.trim() || fetched.stdout.trim();
+}
+
+/** `git merge` 的输出是否表示「产生了冲突」（而不是别的失败）。 */
+export function isMergeConflict(output) {
+  return /CONFLICT \(|Automatic merge failed|fix conflicts/i.test(String(output ?? ""));
+}
+
+/**
+ * 把**另一个本地分支**合并进当前分支（`git merge --no-edit <branch>`）。
+ *
+ * 和 `pullGitBranch`（拉上游）分开：这里的目标是用户选中的本地分支，必须出现在 `for-each-ref`
+ * 的本地分支列表里、且不能是当前分支。合并不改变 HEAD，但会动工作区 —— 冲突时返回
+ * `{ conflict: true }`，让 UI 把已产生的冲突文件摆出来（不抛错：冲突是合并的正常结局，
+ * 不是操作失败；git 已经把它该做的都做了）。
+ */
+export async function mergeGitBranchInto(cwd, branch, { execImpl = execFile, timeoutMs = GIT_TIMEOUT_MS } = {}) {
+  const project = String(cwd ?? "").trim();
+  if (!project) {
+    throw new Error("Cannot merge without a project folder");
+  }
+
+  const target = String(branch ?? "").trim();
+  if (!isSafeBranchName(target)) {
+    throw new Error(`Invalid branch name: ${target || "(empty)"}`);
+  }
+
+  const options = { execImpl, timeoutMs };
+  const git = createGitRunner(options);
+  const header = await readBranchHeader(project, options);
+  if (header.detached) {
+    throw new Error("Cannot merge into a detached HEAD");
+  }
+  if (header.unborn) {
+    throw new Error("Cannot merge before the first commit");
+  }
+
+  const listed = await runReadOnlyGit(project, ["for-each-ref", `--format=${BRANCH_FORMAT}`, "refs/heads"], options);
+  const branches = parseBranches(listed.ok ? listed.stdout : "");
+  const current = branches.find((candidate) => candidate.current);
+  if (current && current.name === target) {
+    throw new Error(`Cannot merge ${target} into itself`);
+  }
+  if (!branches.some((candidate) => candidate.name === target)) {
+    throw new Error(`Unknown branch: ${target}`);
+  }
+
+  const merged = await git(["merge", "--no-edit", target], { cwd: project });
+  if (!merged.ok) {
+    const output = gitFailureReason(merged);
+    if (!isMergeConflict(output)) {
+      throw new Error(output);
+    }
+    return { branch: target, conflict: true, output };
+  }
+
+  return { branch: target, conflict: false, output: merged.stdout.trim() || merged.stderr.trim() };
+}
+
+/** 冲突文件摘录的上限：交给模型的不是整个仓库。 */
+export const MAX_CONFLICT_FILES = 20;
+export const MAX_CONFLICT_FILE_CHARS = 6000;
+export const MAX_CONFLICT_FILE_BYTES = 256000;
+
+/**
+ * 「自动解决冲突」要用的上下文：冲突文件清单 + 带冲突标记的内容摘录。
+ *
+ * 直接读工作区里的文件（它们现在就是 git 留下的带 `<<<<<<<` 标记的样子），因为要交给模型的
+ * 就是这份「当前现实」。二进制 / 过大的文件只列路径不带内容。
+ */
+export async function readConflictContext(cwd, { execImpl = execFile, timeoutMs = GIT_TIMEOUT_MS } = {}) {
+  const project = String(cwd ?? "").trim();
+  if (!project) {
+    throw new Error("Cannot read conflicts without a project folder");
+  }
+
+  const { header, entries } = await readChangedEntries(project, { execImpl, timeoutMs });
+  const conflicted = entries.filter((entry) => entry.conflicted);
+  if (conflicted.length === 0) {
+    throw new Error("No merge conflicts to resolve");
+  }
+
+  const files = conflicted.slice(0, MAX_CONFLICT_FILES).map((entry) => {
+    const absolute = join(project, entry.path);
+    try {
+      if (!statSync(absolute).isFile() || statSync(absolute).size > MAX_CONFLICT_FILE_BYTES) {
+        return { path: entry.path, text: "", truncated: true };
+      }
+      const buffer = Buffer.alloc(MAX_CONFLICT_FILE_BYTES);
+      const handle = openSync(absolute, "r");
+      let bytes = 0;
+      try {
+        bytes = readSync(handle, buffer, 0, buffer.length, 0);
+      } finally {
+        closeSync(handle);
+      }
+      const sample = buffer.subarray(0, bytes);
+      if (sample.includes(0)) {
+        return { path: entry.path, text: "", truncated: true };
+      }
+      const text = sample.toString("utf8");
+      const truncated = text.length > MAX_CONFLICT_FILE_CHARS;
+      return { path: entry.path, text: truncated ? text.slice(0, MAX_CONFLICT_FILE_CHARS) : text, truncated };
+    } catch {
+      return { path: entry.path, text: "", truncated: true };
+    }
+  });
+
+  return {
+    branch: header.branch,
+    detached: header.detached,
+    cwd: project,
+    files,
+    skipped: conflicted.length - files.length,
+    truncated: files.some((file) => file.truncated),
+  };
 }
 
 /**

@@ -350,3 +350,53 @@ export async function openGitFileDiff(
 
   return { ide: launcher.id, label: launcher.label, left, right };
 }
+
+/**
+ * 用宿主机 IDE 打开某个改动文件**本身**（不是 diff）。
+ *
+ * 冲突文件需要继续编辑冲突标记，diff 帮不上忙；入口是弹层文件列表里对冲突行的双击。
+ * 校验与 `openGitFileDiff` 共用同一条事实（路径必须是 git 刚报出来的改动之一），启动器也用
+ * 同一张表（`code <file>` / `zed <file>` / `idea <file>` 都是打开文件本身）。
+ */
+export async function openGitFileInIde(
+  cwd,
+  filePath,
+  {
+    execImpl,
+    timeoutMs,
+    platform = process.platform,
+    homeDir = homedir(),
+    env = process.env,
+    exists = existsSync,
+    spawnImpl = spawn,
+  } = {},
+) {
+  const project = String(cwd ?? "").trim();
+  const relativePath = String(filePath ?? "").trim();
+  if (!project || !relativePath) {
+    throw new Error("Cannot open a file without a project folder and a file path");
+  }
+  if (relativePath.endsWith("/")) {
+    throw new Error(`Not a file: ${relativePath}`);
+  }
+
+  const { entries } = await readChangedEntries(project, { execImpl, timeoutMs });
+  if (!entries.some((candidate) => candidate.path === relativePath)) {
+    throw new Error(`Not a changed file: ${relativePath}`);
+  }
+
+  const launcher = resolveDiffIde({ platform, homeDir, env, exists });
+  if (!launcher) {
+    throw new Error(
+      "No IDE found to open the file in. Install VS Code, CodeBuddy, Cursor, Windsurf, VSCodium, Zed, Sublime Text or a JetBrains IDE, or point PI_DESKTOP_DIFF_IDE at one.",
+    );
+  }
+
+  const absolute = join(project, relativePath);
+  await launchDetached(launcher.command, [absolute], { spawnImpl });
+  if (platform === "darwin" && launcher.appName) {
+    activateApp(launcher.appName, spawnImpl);
+  }
+
+  return { ide: launcher.id, label: launcher.label, path: absolute };
+}
