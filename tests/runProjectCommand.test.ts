@@ -14,6 +14,7 @@ import test from "node:test";
 import {
   BACKGROUND_LAUNCHER,
   backgroundCommandPlan,
+  commandProcessEnv,
   detectTerminalApps,
   isRunLogPath,
   normalizeTerminalApp,
@@ -26,6 +27,7 @@ import {
   shellQuote,
   sweepRunScripts,
   terminalLauncherPlans,
+  windowsCommandEnvPrefix,
 } from "../server/runProjectCommand.mjs";
 
 function tempDir(prefix: string) {
@@ -35,8 +37,10 @@ function tempDir(prefix: string) {
 /** 记录启动参数的假 spawn：默认立刻 `spawn`，`failOn` 里的命令改为 `error`（模拟没装）。 */
 function fakeSpawn({ failOn = [] as string[] } = {}) {
   const calls: { command: string; args: string[] }[] = [];
-  const spawnImpl = ((command: string, args: string[]) => {
+  const options: Record<string, unknown>[] = [];
+  const spawnImpl = ((command: string, args: string[], opts: Record<string, unknown>) => {
     calls.push({ command, args });
+    options.push(opts ?? {});
     const child = new EventEmitter() as EventEmitter & { unref?: () => void; pid?: number };
     child.unref = () => {};
     child.pid = 4321;
@@ -49,7 +53,7 @@ function fakeSpawn({ failOn = [] as string[] } = {}) {
     });
     return child;
   }) as unknown as typeof import("node:child_process").spawn;
-  return { calls, spawnImpl };
+  return { calls, options, spawnImpl };
 }
 
 test("shellQuote 把单引号转义成 POSIX 安全形式", () => {
@@ -64,6 +68,36 @@ test("脚本正文进目录、跑命令、留一个交互 shell", () => {
   assert.ok(text.includes("cd '/tmp/my project' || exit 1"));
   assert.ok(text.includes("\nnpm run dev\n"));
   assert.ok(text.includes('exec "${SHELL:-/bin/sh}" -l'));
+});
+
+test("脚本正文在命令前注入环境变量（值用单引号包裹）", () => {
+  const text = runScriptText("npm run dev", "/tmp/p", {
+    env: [
+      { key: "PORT", value: "3000" },
+      { key: "GREETING", value: "he said 'hi'" },
+      { key: "1bad", value: "1" },
+    ],
+  });
+  assert.ok(text.includes("export PORT='3000'"), text);
+  assert.ok(text.includes("export GREETING='he said '\\''hi'\\'''"), text);
+  assert.ok(!text.includes("1bad"), "非法键名不该进脚本");
+  // export 必须在命令之前
+  assert.ok(text.indexOf("export PORT") < text.indexOf("npm run dev"));
+});
+
+test("commandProcessEnv：没环境变量时原样返回 baseEnv，有则叠加", () => {
+  const base = { PATH: "/usr/bin" };
+  assert.equal(commandProcessEnv([], base), base);
+  assert.deepEqual(commandProcessEnv([{ key: "PORT", value: "3000" }], base), { PATH: "/usr/bin", PORT: "3000" });
+  // 非法键 / 覆盖已有值
+  assert.deepEqual(commandProcessEnv([{ key: "1bad", value: "x" }, { key: "PATH", value: "/x" }], base), { PATH: "/x" });
+});
+
+test("windowsCommandEnvPrefix 拼 set 前缀", () => {
+  assert.equal(windowsCommandEnvPrefix([]), "");
+  assert.equal(windowsCommandEnvPrefix([{ key: "PORT", value: "3000" }]), 'set "PORT=3000" && ');
+  // 值里的双引号会撑破引号，直接去掉
+  assert.equal(windowsCommandEnvPrefix([{ key: "A", value: 'x"y' }]), 'set "A=xy" && ');
 });
 
 test("macOS 用 open 把脚本交给 Terminal，并补一次 activate", () => {
@@ -82,6 +116,18 @@ test("Windows 用 cmd start 新开一个窗口", () => {
   assert.equal(plans.length, 1);
   assert.equal(plans[0][0]?.command, "cmd");
   assert.ok(plans[0][0]?.args.join(" ").includes('cd /d "C:\\proj" && npm run dev'));
+});
+
+test("Windows 终端方案把环境变量拼成 set 前缀（在 cd 之前）", () => {
+  const plans = terminalLauncherPlans({
+    platform: "win32",
+    scriptPath: "C:\\tmp\\run.command",
+    command: "npm run dev",
+    cwd: "C:\\proj",
+    env: {},
+    commandEnv: [{ key: "PORT", value: "3000" }],
+  });
+  assert.equal(plans[0][0]?.args.at(-1), 'set "PORT=3000" && cd /d "C:\\proj" && npm run dev');
 });
 
 test("Linux 按候选顺序列终端，第一个是 x-terminal-emulator", () => {
@@ -186,6 +232,45 @@ test("后台静默运行：不拉起终端，stdout/stderr 写进日志文件", 
   const text = readFileSync(result.logPath, "utf8");
   assert.ok(text.includes("npm run dev"));
   assert.ok(text.includes(project));
+});
+
+test("后台运行支持参数与环境变量：参数拼进命令行、env 交给 spawn、日志只记键名", async () => {
+  const baseDir = tempDir("pi-run-bg-env-");
+  const project = tempDir("pi-run-project-");
+  const { calls, options, spawnImpl } = fakeSpawn();
+
+  const result = await runProjectCommandInBackground("npm run dev", project, {
+    spawnImpl,
+    platform: "darwin",
+    baseDir,
+    now: 1_700_000_000_000,
+    args: "-- --port 3000",
+    env: [{ key: "NODE_ENV", value: "development" }],
+  });
+
+  assert.deepEqual(calls, [{ command: "/bin/sh", args: ["-lc", "npm run dev -- --port 3000"] }]);
+  assert.equal((options[0]?.env as Record<string, string>).NODE_ENV, "development");
+  const text = readFileSync(result.logPath, "utf8");
+  assert.ok(text.includes("# command: npm run dev -- --port 3000"));
+  assert.ok(text.includes("# env: NODE_ENV=***"), text);
+  assert.ok(!text.includes("development"), "日志头部不该写出环境变量的值");
+});
+
+test("runProjectCommand 把 args / commandEnv 透传到后台路径", async () => {
+  const baseDir = tempDir("pi-run-bg3-");
+  const project = tempDir("pi-run-project-");
+  const { calls, options, spawnImpl } = fakeSpawn();
+
+  await runProjectCommand("npm run dev", project, {
+    spawnImpl,
+    platform: "darwin",
+    baseDir,
+    background: true,
+    args: "--host 0.0.0.0",
+    commandEnv: [{ key: "PORT", value: "8080" }],
+  });
+  assert.deepEqual(calls[0]?.args, ["-lc", "npm run dev --host 0.0.0.0"]);
+  assert.equal((options[0]?.env as Record<string, string>).PORT, "8080");
 });
 
 test("runProjectCommand background: true 走静默路径", async () => {

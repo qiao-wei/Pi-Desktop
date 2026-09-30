@@ -179,6 +179,8 @@ export function detectProjectCommands(probe) {
     id: projectCommandId(source, command, cwd),
     label,
     command,
+    args: "",
+    env: [],
     cwd,
     source,
   }));

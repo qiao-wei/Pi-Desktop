@@ -2728,6 +2728,8 @@ export function App() {
               onRevealLog={revealRunLog}
               onSelect={(id) => void projectCommands.selectCommand(id)}
               onRemove={(id) => void projectCommands.removeCommand(id)}
+              onUpdate={(id, patch) => void projectCommands.updateCommand(id, patch)}
+              onAddManual={(draft) => void projectCommands.addManualCommand(draft)}
               onDetect={() => void projectCommands.detect()}
               onAdd={(candidate) => void projectCommands.addCommand(candidate)}
             />

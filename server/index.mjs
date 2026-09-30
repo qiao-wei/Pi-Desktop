@@ -83,7 +83,7 @@ import {
   parseChatBubbleId,
 } from "../src/shared/chatBubbles.ts";
 import { userMessageEntryIdForTurn } from "../src/shared/sessionBranch.ts";
-import { normalizeProjectCommands, normalizeSelectedCommandId, selectedProjectCommand } from "../src/shared/projectCommands.ts";
+import { commandLine, normalizeProjectCommands, normalizeSelectedCommandId, selectedProjectCommand } from "../src/shared/projectCommands.ts";
 import { deriveSessionTitle, sessionTitleMaxWords } from "../src/shared/sessionTitle.ts";
 import { findProjectByFolder } from "./projectFolders.mjs";
 import {
@@ -1668,13 +1668,17 @@ undefined
       const result = await runProjectCommand(command.command, cwd, {
         background,
         terminalApp: terminalApp && terminalApp !== "default" && terminalApp !== "background" ? terminalApp : "",
+        // 参数 / 环境变量存在命令自己身上（服务端从 projects.json 读，不信请求体）。
+        args: command.args,
+        commandEnv: command.env,
       });
+      const line = commandLine(command.command, command.args);
       // 后台运行能跟踪：登记进程，界面据此持续显示「运行中」并提供停止入口。
       if (result.launcher === "background" && result.pid) {
         projectCommandRuns.register({
           pid: result.pid,
           startedAt: Date.now(),
-          command: command.command,
+          command: line,
           projectId: project.id,
           commandId: command.id,
           cwd,
@@ -1682,7 +1686,7 @@ undefined
           sessionPath: typeof body?.sessionPath === "string" ? body.sessionPath : "",
         });
       }
-      sendJson(res, 200, { ok: true, launcher: result.launcher, logPath: result.logPath, pid: result.pid, command: command.command, cwd });
+      sendJson(res, 200, { ok: true, launcher: result.launcher, logPath: result.logPath, pid: result.pid, command: line, cwd });
       return;
     }
 

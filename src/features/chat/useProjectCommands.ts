@@ -5,13 +5,17 @@ import { t } from "../../i18n";
 import { loadUiPreferences } from "../../lib/ui-preferences";
 import { normalizeProjectCommandTerminal, normalizeProjectCommandRuns, PROJECT_COMMAND_BACKGROUND, sameProjectCommandRuns } from "../../shared/projectCommandTerminal.ts";
 import {
+  appendProjectCommand,
+  commandLine,
   isCommandSaved,
   mergeDetectedCommands,
   normalizeProjectCommands,
   normalizeSelectedCommandId,
   removeProjectCommand,
   selectedProjectCommand,
+  updateProjectCommand,
   type ProjectCommand,
+  type ProjectCommandEditInput,
   type ProjectCommandsPayload,
 } from "../../shared/projectCommands";
 import type { ProjectCommandRun, ProjectCommandRunResult } from "../../shared/projectCommandTerminal.ts";
@@ -52,6 +56,10 @@ export interface ProjectCommandsController {
   detect: () => Promise<ProjectCommand[]>;
   /** 把一条候选并进列表并选中它（面板不关，可以接着加下一条）。 */
   addCommand: (candidate: ProjectCommand) => Promise<boolean>;
+  /** 改一条已保存的命令（命令 / 参数 / 环境变量 / 子目录）。 */
+  updateCommand: (id: string, patch: ProjectCommandEditInput) => Promise<boolean>;
+  /** 手动新增一条命令（探测不到、或需要自己写参数 / 环境变量）。 */
+  addManualCommand: (input: ProjectCommandEditInput & { command: string }) => Promise<boolean>;
   selectCommand: (id: string) => Promise<boolean>;
   removeCommand: (id: string) => Promise<boolean>;
   /** 跑当前选中的命令：后台静默或交给终端（看运行方式）。 */
@@ -257,6 +265,26 @@ export function useProjectCommands({ projectId, sessionPath = "", runTarget, onE
     [commands, selectedCommandId, persist],
   );
 
+  const updateCommand = useCallback(
+    async (id: string, patch: ProjectCommandEditInput): Promise<boolean> => {
+      if (!projectId || !id) {
+        return false;
+      }
+      return persist(updateProjectCommand(commands, selectedCommandId, id, patch));
+    },
+    [projectId, commands, selectedCommandId, persist],
+  );
+
+  const addManualCommand = useCallback(
+    async (input: ProjectCommandEditInput & { command: string }): Promise<boolean> => {
+      if (!projectId) {
+        return false;
+      }
+      return persist(appendProjectCommand(commands, selectedCommandId, input));
+    },
+    [projectId, commands, selectedCommandId, persist],
+  );
+
   const selectCommand = useCallback(
     async (id: string): Promise<boolean> => {
       if (!projectId || !id) {
@@ -311,7 +339,7 @@ export function useProjectCommands({ projectId, sessionPath = "", runTarget, onE
       });
       setLastRun({
         launcher: result?.launcher ?? "",
-        command: command.command,
+        command: commandLine(command.command, command.args),
         logPath: result?.logPath,
         pid: result?.pid,
       });
@@ -383,6 +411,8 @@ export function useProjectCommands({ projectId, sessionPath = "", runTarget, onE
     lastRun,
     detect,
     addCommand,
+    updateCommand,
+    addManualCommand,
     selectCommand,
     removeCommand,
     run,

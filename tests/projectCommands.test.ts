@@ -9,16 +9,26 @@ import test from "node:test";
 
 import {
   PROJECT_COMMAND_LIMIT,
+  PROJECT_COMMAND_MAX_ARGS_LENGTH,
+  appendProjectCommand,
+  commandEnvRecord,
+  commandLine,
   filterProjectCommands,
+  formatEnvText,
   isCommandSaved,
   mergeDetectedCommands,
+  normalizeCommandArgs,
   normalizeCommandCwd,
+  normalizeCommandEnv,
   normalizeProjectCommands,
   normalizeSelectedCommandId,
+  parseEnvText,
   projectCommandId,
+  projectCommandSignature,
   removeProjectCommand,
   runCommandDisabledReason,
   selectedProjectCommand,
+  updateProjectCommand,
   type ProjectCommand,
 } from "../src/shared/projectCommands.ts";
 import { functionBody } from "./lib/sourceText.ts";
@@ -27,6 +37,7 @@ const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "
 const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
 const hookSource = readFileSync(new URL("../src/features/chat/useProjectCommands.ts", import.meta.url), "utf8");
 const controlsSource = readFileSync(new URL("../src/components/ProjectCommandControls.tsx", import.meta.url), "utf8");
+const dialogSource = readFileSync(new URL("../src/components/ProjectCommandDialog.tsx", import.meta.url), "utf8");
 
 function conversationHeaderSource(): string {
   const start = appSource.indexOf('<header className="conversation-header');
@@ -40,7 +51,17 @@ function command(patch: Partial<ProjectCommand> = {}): ProjectCommand {
   const source = patch.source ?? "manual";
   const text = patch.command ?? "npm run dev";
   const cwd = patch.cwd ?? "";
-  return { id: patch.id ?? projectCommandId(source, text, cwd), label: patch.label ?? text, command: text, cwd, source };
+  const args = patch.args ?? "";
+  const env = patch.env ?? [];
+  return {
+    id: patch.id ?? projectCommandId(source, text, cwd),
+    label: patch.label ?? text,
+    command: text,
+    args,
+    env,
+    cwd,
+    source,
+  };
 }
 
 /* ------------------------------------------------------------------ 纯逻辑 */
@@ -125,6 +146,151 @@ test("runCommandDisabledReason：没选中 or 正在运行就不能点", () => {
   assert.equal(runCommandDisabledReason(null, true), "none");
 });
 
+/* ------------------------------------------------------------------ 参数 / 环境变量 */
+
+test("commandLine：参数非空才拼在后面", () => {
+  assert.equal(commandLine("npm run dev", ""), "npm run dev");
+  assert.equal(commandLine("npm run dev", "   "), "npm run dev");
+  assert.equal(commandLine("npm run dev", "  -- --port 3000 "), "npm run dev -- --port 3000");
+  assert.equal(commandLine("", "--x"), "--x");
+});
+
+test("normalizeCommandArgs / normalizeCommandEnv 的形态卫生", () => {
+  assert.equal(normalizeCommandArgs("  --a "), "--a");
+  assert.equal(normalizeCommandArgs(undefined), "");
+  assert.equal(normalizeCommandArgs("x".repeat(600)).length, PROJECT_COMMAND_MAX_ARGS_LENGTH);
+
+  assert.deepEqual(
+    normalizeCommandEnv([
+      { key: "PORT", value: "3000" },
+      { key: "PORT", value: "4000" }, // 重复键：保留先出现的
+      { key: "1bad", value: "x" },
+      { key: "HAS DASH", value: "x" },
+      { key: "OK_2", value: "v" },
+      null,
+      "nope",
+    ]),
+    [
+      { key: "PORT", value: "3000" },
+      { key: "OK_2", value: "v" },
+    ],
+  );
+  assert.deepEqual(normalizeCommandEnv("not an array"), []);
+});
+
+test("commandEnvRecord 不会让 __proto__ 污染原型", () => {
+  const record = commandEnvRecord([
+    { key: "A", value: "1" },
+    { key: "__proto__", value: "evil" },
+  ]);
+  assert.equal(record.A, "1");
+  assert.equal(Object.getPrototypeOf(record), Object.prototype);
+  assert.equal(Object.prototype.hasOwnProperty.call(record, "__proto__"), true);
+});
+
+test("parseEnvText 解析多行；formatEnvText 是它的逆", () => {
+  assert.deepEqual(
+    parseEnvText("# 注释\nPORT=3000\n\nNODE_ENV=development\nBAD_LINE\n=empty_key\n  "),
+    [
+      { key: "PORT", value: "3000" },
+      { key: "NODE_ENV", value: "development" },
+    ],
+  );
+  // 值里可以有 =（从第一个 = 切开）；重复键后者覆盖前者
+  assert.deepEqual(parseEnvText("URL=https://x?a=1"), [{ key: "URL", value: "https://x?a=1" }]);
+  assert.deepEqual(parseEnvText("A=1\nA=2"), [{ key: "A", value: "2" }]);
+  assert.deepEqual(parseEnvText(undefined as unknown as string), []);
+
+  const env = [{ key: "A", value: "1" }, { key: "B", value: "2" }];
+  assert.equal(formatEnvText(env), "A=1\nB=2");
+  assert.deepEqual(parseEnvText(formatEnvText(env)), env);
+  assert.equal(formatEnvText([]), "");
+});
+
+test("projectCommandSignature：没参数时为空（老 id 不变），有参数才非空", () => {
+  assert.equal(projectCommandSignature("", []), "");
+  assert.notEqual(projectCommandSignature("--x", []), "");
+  assert.notEqual(projectCommandSignature("", [{ key: "A", value: "1" }]), "");
+
+  // 向后兼容：没有参数的命令 id 与旧版完全一致（projects.json 里的选中项不会失效）
+  assert.equal(projectCommandId("package.json", "npm run dev", ""), "pc-oauwhklvqbmu");
+  assert.equal(projectCommandId("manual", "make serve", "apps/api"), "pc-5lx9s31aq8gx9");
+  assert.notEqual(
+    projectCommandId("package.json", "npm run dev", "", projectCommandSignature("--x", [])),
+    "pc-oauwhklvqbmu",
+  );
+});
+
+test("normalizeProjectCommands 保留参数 / 环境变量，并按参数区分去重", () => {
+  const normalized = normalizeProjectCommands([
+    { command: "npm run dev", args: "-- --port 3000", env: [{ key: "A", value: "1" }], source: "package.json" },
+    { command: "npm run dev", args: "-- --port 3000", env: [{ key: "A", value: "1" }] }, // 完全一样：去掉
+    { command: "npm run dev", args: "-- --port 4000" }, // 参数不同：保留
+    { command: "npm run dev" }, // 没参数：也保留
+  ]);
+  assert.equal(normalized.length, 3);
+  assert.equal(normalized[0]?.args, "-- --port 3000");
+  assert.deepEqual(normalized[0]?.env, [{ key: "A", value: "1" }]);
+  assert.equal(normalized[1]?.args, "-- --port 4000");
+  assert.equal(normalized[2]?.args, "");
+  assert.deepEqual(normalized[2]?.env, []);
+  // 三条同命令但参数不同，id 必须互不相同
+  assert.equal(new Set(normalized.map((entry) => entry.id)).size, 3);
+  // 老数据（无 args / env）读进来补默认值
+  const legacy = normalizeProjectCommands([{ command: "npm run dev", cwd: "", source: "package.json" }]);
+  assert.deepEqual(legacy[0]?.env, []);
+  assert.equal(legacy[0]?.args, "");
+});
+
+test("updateProjectCommand：改参数会换 id 并把选中指过去；空命令拒绝", () => {
+  const first = command({ command: "npm run dev" });
+  const second = command({ command: "npm run build" });
+  const state = { commands: [first, second], selectedCommandId: first.id };
+
+  const updated = updateProjectCommand(state.commands, state.selectedCommandId, first.id, {
+    args: "-- --port 3000",
+    env: [{ key: "NODE_ENV", value: "development" }],
+  });
+  assert.equal(updated.commands.length, 2);
+  const next = updated.commands[0]!;
+  assert.notEqual(next.id, first.id, "参数变了 id 应该变");
+  assert.equal(next.args, "-- --port 3000");
+  assert.deepEqual(next.env, [{ key: "NODE_ENV", value: "development" }]);
+  assert.equal(updated.selectedCommandId, next.id, "选中项要跟到新 id");
+  assert.equal(updated.commands[1]?.id, second.id, "别的条目不受影响");
+
+  // 改成空命令：整个操作被忽略
+  const rejected = updateProjectCommand(state.commands, state.selectedCommandId, first.id, { command: "   " });
+  assert.deepEqual(rejected.commands.map((entry) => entry.id), [first.id, second.id]);
+  assert.equal(rejected.selectedCommandId, first.id);
+
+  // 改不存在的 id：原样返回
+  const missing = updateProjectCommand(state.commands, state.selectedCommandId, "nope", { args: "x" });
+  assert.equal(missing.selectedCommandId, first.id);
+});
+
+test("appendProjectCommand：新增并选中；重复的命令直接选中已有项；非法命令拒绝", () => {
+  const existing = command({ command: "npm run dev" });
+  const added = appendProjectCommand([existing], existing.id, { command: "npm run worker", args: "--queue mail" });
+  assert.equal(added.commands.length, 2);
+  assert.equal(added.commands[1]?.source, "manual");
+  assert.equal(added.selectedCommandId, added.commands[1]?.id);
+
+  // 与已有项完全一样：不重复添加，直接把选中指过去
+  const duplicate = appendProjectCommand([existing], "", { command: "npm run dev" });
+  assert.equal(duplicate.commands.length, 1);
+  assert.equal(duplicate.selectedCommandId, existing.id);
+
+  // 同命令、不同参数：算两条
+  const variant = appendProjectCommand([existing], existing.id, { command: "npm run dev", args: "-- --port 4000" });
+  assert.equal(variant.commands.length, 2);
+  assert.equal(variant.commands[1]?.args, "-- --port 4000");
+
+  const rejected = appendProjectCommand([existing], existing.id, { command: "  " });
+  assert.equal(rejected.commands.length, 1);
+  assert.equal(rejected.selectedCommandId, existing.id);
+});
+
 /* ------------------------------------------------------------------ server 接线 */
 
 test("projects.json 里的命令列表在 loadProjects 里归一化", () => {
@@ -182,6 +348,8 @@ test("命令控件渲染在 git 徽标左边，且整条链路都接上了", () 
     "onRun={() => void projectCommands.run()}",
     "onSelect={(id) => void projectCommands.selectCommand(id)}",
     "onRemove={(id) => void projectCommands.removeCommand(id)}",
+    "onUpdate={(id, patch) => void projectCommands.updateCommand(id, patch)}",
+    "onAddManual={(draft) => void projectCommands.addManualCommand(draft)}",
     "onDetect={() => void projectCommands.detect()}",
     "onAdd={(candidate) => void projectCommands.addCommand(candidate)}",
   ]) {
@@ -316,4 +484,34 @@ test("后台命令：进程还活着就一直显示运行中，并且能点「�
   // 切到别的命令后，还在跑的那条用常驻小条保留停止入口
   assert.match(controlsSource, /projectCommand\.running/);
   assert.match(controlsSource, /onClick=\{\(\) => onStopRun\(otherRun\.id\)\}/);
+});
+
+test("命令的参数 / 环境变量：弹窗编辑 + 全链路透传", () => {
+  // 弹窗读写环境变量走共享的 parse / format
+  assert.match(dialogSource, /parseEnvText\(envText\)/);
+  assert.match(dialogSource, /formatEnvText\(initial\?\.env/);
+  assert.match(dialogSource, /commandLine\(trimmedCommand, args\)/);
+  assert.match(dialogSource, /fieldArgs/);
+  assert.match(dialogSource, /fieldEnv/);
+
+  // 控件：每行有「编辑」入口，面板头部有「手动添加」
+  assert.match(controlsSource, /ProjectCommandDialog/);
+  assert.match(controlsSource, /onClick=\{\(\) => startEdit\(command\.id\)\}/);
+  assert.match(controlsSource, /onClick=\{startAdd\}/);
+  assert.match(controlsSource, /commandLine\(command\.command, command\.args\)/);
+  assert.match(controlsSource, /command\.env\.length/);
+
+  // hook：两条保存路径都走整表替换
+  assert.match(hookSource, /updateProjectCommand\(commands, selectedCommandId, id, patch\)/);
+  assert.match(hookSource, /appendProjectCommand\(commands, selectedCommandId, input\)/);
+  assert.match(hookSource, /commandLine\(command\.command, command\.args\)/);
+
+  // server：运行端点从 projects.json 命令上读 args / env，登记与返回用带参数的命令行
+  const runBody = serverSource.slice(
+    serverSource.indexOf('url.pathname === "/api/projects/commands/run"'),
+    serverSource.indexOf('url.pathname === "/api/projects/git/commit-message"'),
+  );
+  assert.match(runBody, /args: command\.args/);
+  assert.match(runBody, /commandEnv: command\.env/);
+  assert.match(runBody, /commandLine\(command\.command, command\.args\)/);
 });
