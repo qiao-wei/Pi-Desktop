@@ -13,7 +13,7 @@
 import { t } from "../i18n/index.ts";
 
 export type CapabilityView = "global" | "project";
-export type CapabilityScopeTab = "skill" | "package";
+export type CapabilityScopeTab = "skill" | "package" | "mcp";
 export type SkillSourceCategory = "all" | "builtin" | "agent";
 
 /** Minimal shape the partition needs from `CapabilitySkill` / `CapabilityPackage`. */
@@ -27,8 +27,8 @@ export interface ScopedCapability {
   readonly?: boolean;
 }
 
-/** The Extensions tab is gone from the panel; only these two kinds are shown. */
-export const CAPABILITY_TABS: CapabilityScopeTab[] = ["skill", "package"];
+/** The Extensions tab is gone from the panel; MCP joined in pi 0.99 (built-in mcp.json). */
+export const CAPABILITY_TABS: CapabilityScopeTab[] = ["skill", "package", "mcp"];
 
 /** "项目级" is deliberately absent: project skills belong to the context panel. */
 export const SKILL_SOURCE_CATEGORIES: SkillSourceCategory[] = ["all", "builtin", "agent"];
@@ -40,7 +40,7 @@ export const SKILL_SOURCE_CATEGORY_LABEL_KEYS: Record<SkillSourceCategory, strin
 };
 
 export function isProjectScopedCapability(item: ScopedCapability): boolean {
-  if (item.kind === "package") {
+  if (item.kind === "package" || item.kind === "mcp") {
     return item.scope === "project";
   }
 
@@ -90,7 +90,8 @@ export function matchesCapabilityQuery(
  * skills and extensions are only removable when they are not app-bundled.
  */
 export function canDeleteCapability(item: ScopedCapability): boolean {
-  if (item.kind === "package") {
+  // Packages live in the user/project pi directories, MCP servers in an mcp.json we own.
+  if (item.kind === "package" || item.kind === "mcp") {
     return true;
   }
 
@@ -106,6 +107,10 @@ export function capabilitySourceLabel(item: ScopedCapability): string {
     if (item.source === "builtin") return t("capability.source.builtin");
     if (item.source === "agent") return t("capability.source.agent");
     if (item.source === "project") return t("capability.source.project");
+  }
+
+  if (item.kind === "mcp") {
+    return item.scope === "project" ? t("capability.source.project") : t("capability.source.agent");
   }
 
   return t("capability.source.discovered");

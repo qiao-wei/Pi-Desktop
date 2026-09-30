@@ -49,11 +49,19 @@ const userPackage = (name: string, extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 const projectPackage = (name: string) => ({ ...userPackage(name), scope: "project" });
+const mcpServer = (name: string, scope: "user" | "project") => ({
+  id: `${scope}:${name}`,
+  kind: "mcp" as const,
+  name,
+  scope,
+  transport: "http" as const,
+});
 
 /* ------------------------------- tab list -------------------------------- */
 
-test("the page has a Skills tab and a Packages tab, nothing else", () => {
-  assert.deepEqual(CAPABILITY_TABS, ["skill", "package"]);
+test("the page has Skills, Packages and MCP tabs, nothing else", () => {
+  // MCP joined in pi 0.99: the servers live in mcp.json and are managed from this page.
+  assert.deepEqual(CAPABILITY_TABS, ["skill", "package", "mcp"]);
 });
 
 test("the skill source filter has no 项目级 entry", () => {
@@ -72,6 +80,15 @@ test("skills are split by source, packages by scope", () => {
   assert.deepEqual(scopedCapabilityItems(packages, "project").map((i) => i.name), ["e"]);
 });
 
+test("MCP servers split by scope, exactly like packages", () => {
+  const servers = [mcpServer("global-one", "user"), mcpServer("project-one", "project")];
+
+  assert.deepEqual(scopedCapabilityItems(servers, "global").map((i) => i.name), ["global-one"]);
+  assert.deepEqual(scopedCapabilityItems(servers, "project").map((i) => i.name), ["project-one"]);
+  assert.equal(isProjectScopedCapability(mcpServer("project-one", "project")), true);
+  assert.equal(isProjectScopedCapability(mcpServer("global-one", "user")), false);
+});
+
 test("the two views are disjoint and together cover the snapshot", () => {
   const items = [
     builtinSkill("a"),
@@ -79,15 +96,17 @@ test("the two views are disjoint and together cover the snapshot", () => {
     projectSkill("c"),
     userPackage("d"),
     projectPackage("e"),
+    mcpServer("f", "user"),
+    mcpServer("g", "project"),
     // A stale payload without source/scope must not vanish from both lists.
-    { id: "f", kind: "skill", name: "f" },
+    { id: "h", kind: "skill", name: "h" },
   ];
 
   const globalView = scopedCapabilityItems(items, "global");
   const projectView = scopedCapabilityItems(items, "project");
 
-  assert.deepEqual(globalView.map((i) => i.name), ["a", "b", "d", "f"]);
-  assert.deepEqual(projectView.map((i) => i.name), ["c", "e"]);
+  assert.deepEqual(globalView.map((i) => i.name), ["a", "b", "d", "f", "h"]);
+  assert.deepEqual(projectView.map((i) => i.name), ["c", "e", "g"]);
   assert.equal(globalView.filter((g) => projectView.includes(g)).length, 0);
   assert.equal(globalView.length + projectView.length, items.length);
 });

@@ -62,10 +62,13 @@ import type {
   CapabilitiesState,
   CapabilityCommandArgument,
   CapabilityKind,
+  CapabilityMcpDetail,
+  CapabilityMcpInspection,
   CreateProjectResult,
   PersonalizationSettings,
   ProjectSummary,
   ThinkingLevel,
+  ToolToggleState,
 } from "../../types";
 
 interface AppState {
@@ -2686,9 +2689,69 @@ export function usePiDesktopApp() {
     [updateCapability],
   );
 
+  /**
+   * MCP 服务器的新增/编辑走 `/api/capabilities/mcp/save`（写 pi 的 mcp.json），
+   * 删除走 `mcp/remove`。两者都回整份 capabilities，和别的能力开关走同一条对账路径。
+   */
+  const saveMcpServer = useCallback(
+    (server: Record<string, unknown>) => updateCapability("/api/capabilities/mcp/save", server),
+    [updateCapability],
+  );
+
+  const removeMcpServer = useCallback(
+    (id: string) => updateCapability("/api/capabilities/mcp/remove", { id }),
+    [updateCapability],
+  );
+
+  /**
+   * 「测试连接」：服务端会真的连一次服务器并列出工具，把错误原文带回来。
+   * 返回形状不是 capabilities，所以不走 updateCapability（那会把整份 bootstrap 拉回来）。
+   */
+  const inspectMcpServer = useCallback(
+    async (id: string): Promise<CapabilityMcpInspection> => {
+      const sessionPath = bootstrap.activeSessionPath ?? conversation.sessionFile;
+      const result = await postJson<{ inspection?: CapabilityMcpInspection }>(
+        "/api/capabilities/mcp/inspect",
+        { id, sessionPath },
+      );
+      if (!result?.inspection) {
+        throw new Error("MCP inspection failed");
+      }
+      return result.inspection;
+    },
+    [bootstrap.activeSessionPath, conversation.sessionFile],
+  );
+
+  /** 编辑弹窗打开时才拉原始字段（env / headers 可能带密钥，不放进能力清单）。 */
+  const readMcpServerDetail = useCallback(
+    async (id: string): Promise<CapabilityMcpDetail> => {
+      const sessionPath = bootstrap.activeSessionPath ?? conversation.sessionFile;
+      const result = await postJson<{ detail?: CapabilityMcpDetail }>(
+        "/api/capabilities/mcp/read",
+        { id, sessionPath },
+      );
+      if (!result?.detail) {
+        throw new Error("MCP server not found");
+      }
+      return result.detail;
+    },
+    [bootstrap.activeSessionPath, conversation.sessionFile],
+  );
+
   const importSkill = useCallback(
     (sourcePath: string, scope: "user" | "project" = "project") =>
       updateCapability("/api/capabilities/skills/import", { sourcePath, scope }),
+    [updateCapability],
+  );
+
+  /**
+   * 「工具开关」（codemode）：写的是 pi 自己的 `defaultTools` —— 全局 `settings.json`
+   * 或项目 `.pi/settings.json`，和终端 TUI 同一个键，所以两边不会不一致。
+   * 服务端写完回整份 bootstrap：开关变了，项目清单里每个项目的三态也变了。
+   */
+  const saveToolSettings = useCallback(
+    (input: { scope: "user" | "project"; state: ToolToggleState; projectId?: string }) =>
+      updateCapability("/api/tools/settings", input),
     [updateCapability],
   );
 
@@ -2750,7 +2813,12 @@ export function usePiDesktopApp() {
     addExtension,
     removeExtension,
     deleteSkill,
+    saveMcpServer,
+    removeMcpServer,
+    inspectMcpServer,
+    readMcpServerDetail,
     importSkill,
+    saveToolSettings,
     respondExtensionUi,
     dismissError,
     reportError,

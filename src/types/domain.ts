@@ -218,7 +218,32 @@ export interface ProjectSummary {
   commands?: ProjectCommand[];
   /** 下拉里当前选中的命令 id；不在 `commands` 里时视为第一条。 */
   selectedCommandId?: string;
+  /** 这个项目自己的 codemode 开关（读 `.pi/settings.json`，不落 projects.json）。 */
+  codemode?: ToolToggleState;
   sessions: ProjectSessionSummary[];
+}
+
+/** 项目层的三态：没在这一层设过 = 继承全局。 */
+export type ToolToggleState = "inherit" | "on" | "off";
+
+/**
+ * 「工具开关」现状。写的就是 pi 自己的 `defaultTools`（全局 + 项目 `.pi/settings.json`），
+ * 和终端 TUI 同一个键——见 server/toolSettings.mjs。
+ */
+export interface ToolSettings {
+  globalPath: string;
+  projectPath: string;
+  /** 项目未被信任时 pi 不读它的 `.pi`，项目层等于没设。 */
+  projectTrusted: boolean;
+  /** 全局那一层开没开。 */
+  global: boolean;
+  /** 当前项目那一层：inherit / on / off。 */
+  project: ToolToggleState;
+  /** 合并两层之后，pi 会不会把 codemode 交给模型。 */
+  effective: boolean;
+  tools: string[];
+  /** 当前会话**实际**激活的工具；MCP 会自动加回 codemode，所以不一定等于 effective。 */
+  activeTools: string[];
 }
 
 /**
@@ -285,7 +310,7 @@ export interface SkillSummary {
   disableModelInvocation: boolean;
 }
 
-export type CapabilityKind = "skill" | "package" | "extension";
+export type CapabilityKind = "skill" | "package" | "extension" | "mcp";
 export type CapabilitySkillSource = "builtin" | "agent" | "project";
 
 export interface CapabilitySkill {
@@ -398,15 +423,69 @@ export interface BuiltinCommand {
   description: string;
 }
 
+/** pi 内置 MCP 的 exposure。`codemode` 是 pi 的默认：工具只对脚本可见。 */
+export const CAPABILITY_MCP_EXPOSURES = ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const;
+export type CapabilityMcpExposure = (typeof CAPABILITY_MCP_EXPOSURES)[number];
+
+/** 会话里 pi 真正注册的 MCP 工具（来自 `getAllTools` 的命名空间分组）。 */
+export interface CapabilityMcpTool {
+  name: string;
+  description: string;
+  /** 把服务器级/单工具覆盖算完后的最终 exposure。 */
+  exposure: CapabilityMcpExposure;
+  /** pi 注册时实际用的 exposure；与 `exposure` 不同说明有单工具覆盖。 */
+  declaredExposure: CapabilityMcpExposure;
+}
+
 export interface CapabilityMcpServer {
   id: string;
   kind: "mcp";
   name: string;
   description: string;
-  transport: "stdio" | "sse" | "http";
+  transport: "stdio" | "http";
+  /** 与 packages 对齐：agent 目录的 mcp.json 是 "user"，项目 .pi/mcp.json 是 "project"。 */
+  scope: "user" | "project";
+  /** 定义它的 mcp.json 路径。 */
+  source: string;
+  exposure: CapabilityMcpExposure;
+  enabled: boolean;
   defaultEnabled: boolean;
+  /** 同名时项目条目覆盖了全局条目。 */
+  overridesGlobal: boolean;
   active: boolean;
+  toolCount: number;
+  tools: CapabilityMcpTool[];
   pinned: boolean;
+}
+
+/** `POST /api/capabilities/mcp/read` 的返回：编辑器要回填的原始字段（含 env/headers）。 */
+export interface CapabilityMcpDetail {
+  id: string;
+  name: string;
+  scope: "user" | "project";
+  transport: "stdio" | "http";
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd: string;
+  url: string;
+  headers: Record<string, string>;
+  hasOAuth: boolean;
+  exposure: CapabilityMcpExposure;
+  toolExposure: Record<string, string>;
+  enabled: boolean;
+  timeout?: number;
+  description: string;
+  pinned: boolean;
+}
+
+/** `POST /api/capabilities/mcp/inspect` 的返回：显式连一次服务器拿到的工具与错误。 */
+export interface CapabilityMcpInspection {
+  id: string;
+  name: string;
+  status: "ready" | "error";
+  tools: { name: string; title: string; description: string; exposure: CapabilityMcpExposure }[];
+  error: string;
 }
 
 export interface CapabilitySessionSelection {
