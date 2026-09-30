@@ -5,6 +5,7 @@
  *   npm run pack:tauri:mac:arm64              # bundled，Apple Silicon
  *   npm run pack:electron:mac:x64:slim        # 精简，Intel
  *   npm run pack:tauri:windows -- --cross     # 从 mac 交叉出 Windows（仅 slim）
+ *   npm run pack:electron:mac:arm64 -- --sign release   # 签名 + 公证（需要 Apple 凭证）
  *
  * 为什么要一个脚本而不是 package.json 里的 && 链：
  *   - 模式（bundled/slim）现在只是一处翻译，Windows 上不再依赖 `VAR=x cmd` 这种 cmd 不认的写法；
@@ -39,6 +40,10 @@ function printPlan(plan) {
   console.log(`pack: ${plan.summary}`);
   if (plan.triple) {
     console.log(`pack: 目标三元组 ${plan.triple}，运行时模式 PI_DESKTOP_RUNTIME_MODE=${plan.env.PI_DESKTOP_RUNTIME_MODE}`);
+  }
+  // 档位是这一单最容易被误判的事（"以为签了/以为公证了"），所以 --dry-run 也要把它说出来。
+  if (plan.signing) {
+    console.log(`pack: 签名档位 ${plan.signing.description}`);
   }
   if (plan.passthrough?.length) {
     console.log(`pack: 其余参数原样转交打包器：${plan.passthrough.join(" ")}`);

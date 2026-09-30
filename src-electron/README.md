@@ -42,7 +42,7 @@ npm run electron:dev             # 自动起 bridge(6474) + vite(5176)，再挂�
 npm run pack:electron:mac:arm64          # 自带运行时（bundled），Apple Silicon
 npm run pack:electron:mac:x64:slim       # 精简版：不带 node/python，用机器上已有的（需 Node 22+）
 npm run pack:electron:windows:slim -- --cross   # 从 mac 交叉出 Windows 包（仅 slim；需要 wine）
-CSC_IDENTITY_AUTO_DISCOVERY=false npm run pack:electron:mac:arm64   # 本地不出签名包
+npm run pack:electron:mac:arm64 -- --sign release   # 签名 + 公证（需要 Apple 凭证）
 ```
 
 目标平台/架构/模式都由 `scripts/pack.mjs` 翻译成参数与 env（`npm run pack:electron:mac:arm64 -- --dry-run`
@@ -52,11 +52,22 @@ CSC_IDENTITY_AUTO_DISCOVERY=false npm run pack:electron:mac:arm64   # 本地不�
 directory”推出模式，不需要把模式烘进包里。bundled 不能交叉构建（内置 runtime 必须由目标原生
 解释器组装并验收），详见根 `README.md`。
 
-> **macOS 签名不是可选项**：本机没有证书时 electron-builder 会跳过签名，产物 `.app` 保留 Electron 自带的
-> linker 签名（`Identifier=Electron`），macOS 会拒绝它的一切**系统通知**（`UNErrorDomain error 1`，还不弹权限框），
-> 也就是「任务完成后系统提醒」在打包版里静默失效。`afterPack` 钩子 `scripts/electron-sign-adhoc.mjs`
-> 会在检测不到证书时补一个 ad-hoc 签名（identifier 与 `CFBundleIdentifier` 对齐）——实测这样就够，
-> 有真实证书时不插手。另外通知只对 `/Applications` 下的包生效，装在临时目录会被静默拒绝。
+> **macOS 签名是一个档位，不是一个开关**：默认 `local` 档用 ad-hoc 签名（`identity: "-"`，不取时间戳、
+> 不公证、不联网），`--sign release` 才是 Developer ID 真签名 + 时间戳 + 公证。档位由
+> `scripts/lib/macSigning.cjs` 一处决定 —— 这个文件头写着为什么（以前钥匙串里恰好有张自签证书，
+> 就会让 300+ 个文件逐个真签名并各联网取一次时间戳，mac 包因此动辄几分钟）。两条档位的命令与
+> 凭证要求见根 `README.md` 的「签名档位」。
+>
+> 为什么本地包也必须签名：macOS 从 Electron 42 起通知走 `UNNotification`，只剩 Electron 自带
+> linker 签名的包（`Identifier=Electron`、`Sealed Resources=none`）会被拒绝一切**系统通知**
+> （`UNErrorDomain error 1`，还不弹权限框），也就是「任务完成后系统提醒」在打包版里静默失效。
+> ad-hoc 签名就够：`codesign` 对 bundle 默认用 `Info.plist` 的 `CFBundleIdentifier` 当 identifier，
+> 所以 `identity: "-"` 出来的包是自洽的，不需要证书。另外通知只对 `/Applications` 下的包生效，
+> 装在临时目录会被静默拒绝。
+>
+> 换完签名相关的东西，用 `npm run notification:verify` 验收（它会在一个独立 userData 的实例里，
+> 通过真实 IPC 调一次 `notify_turn_complete` 并读回 `{delivered, reason}`）；加 `--control` 跑阴性对照
+> —— 对着 Electron 自带的 linker 签名包跑一遍，它**必须**失败，否则说明这个探针分辨不出签名好坏。
 
 ## 关键设计
 

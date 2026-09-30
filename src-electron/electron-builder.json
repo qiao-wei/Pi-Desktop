@@ -14,7 +14,6 @@
   ],
   "npmRebuild": false,
   "nodeGypRebuild": false,
-  "afterPack": "scripts/electron-sign-adhoc.mjs",
   "asar": true,
   "extraResources": [
     {
