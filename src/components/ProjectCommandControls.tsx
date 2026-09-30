@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Loader2, Play, Plus, Search, Sparkles, Square, Terminal, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, Loader2, Pencil, Play, Plus, Search, Sparkles, Square, Terminal, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -7,12 +7,15 @@ import { fetchJson } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useT } from "../i18n/react";
 import {
+  commandLine,
   filterProjectCommands,
   isCommandSaved,
   runCommandDisabledReason,
   selectedProjectCommand,
   type ProjectCommand,
+  type ProjectCommandEditInput,
 } from "../shared/projectCommands";
+import { ProjectCommandDialog, type ProjectCommandDraft } from "./ProjectCommandDialog";
 import {
   findCommandRun,
   isProjectCommandBackground,
@@ -52,6 +55,10 @@ export interface ProjectCommandControlsProps {
   onRevealLog: (logPath: string) => void;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
+  /** 改一条已保存的命令（命令 / 参数 / 环境变量 / 子目录）。 */
+  onUpdate: (id: string, patch: ProjectCommandEditInput) => void;
+  /** 手动新增一条命令（探测不到、或需要自己写参数 / 环境变量）。 */
+  onAddManual: (draft: ProjectCommandDraft) => void;
   onDetect: () => void;
   onAdd: (candidate: ProjectCommand) => void;
 }
@@ -83,18 +90,22 @@ export function ProjectCommandControls({
   onRevealLog,
   onSelect,
   onRemove,
+  onUpdate,
+  onAddManual,
   onDetect,
   onAdd,
 }: ProjectCommandControlsProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  // 编辑 / 新增弹窗；`id` 为空 = 新增。
+  const [dialog, setDialog] = useState<{ mode: "edit" | "add"; id: string } | null>(null);
   const [query, setQuery] = useState("");
   const [terminals, setTerminals] = useState<string[]>([]);
   const selected = selectedProjectCommand(commands, selectedCommandId);
   const disabledReason = runCommandDisabledReason(selected, isRunning);
   const runDisabledHint = disabledReason === "running" ? t("projectCommand.runPending") : t("projectCommand.runDisabled");
   const runTitle = selected
-    ? t(isProjectCommandBackground(runTarget) ? "projectCommand.runHintBackground" : "projectCommand.runHint", { command: selected.command })
+    ? t(isProjectCommandBackground(runTarget) ? "projectCommand.runHintBackground" : "projectCommand.runHint", { command: commandLine(selected.command, selected.args) })
     : runDisabledHint;
 
   const visibleCommands = filterProjectCommands(commands, query);
@@ -147,6 +158,30 @@ export function ProjectCommandControls({
   const pick = (id: string) => {
     onSelect(id);
     setOpen(false);
+  };
+
+  // 打开编辑弹窗时先把下拉关掉：Dialog 会抢走焦点，Popover 留着也是关着的。
+  const startEdit = (id: string) => {
+    setOpen(false);
+    setDialog({ mode: "edit", id });
+  };
+  const startAdd = () => {
+    setOpen(false);
+    setDialog({ mode: "add", id: "" });
+  };
+  const editingCommand = dialog?.mode === "edit" ? commands.find((command) => command.id === dialog.id) ?? null : null;
+  const dialogInitial: Partial<ProjectCommandDraft> | undefined = editingCommand
+    ? { label: editingCommand.label, command: editingCommand.command, args: editingCommand.args, env: editingCommand.env, cwd: editingCommand.cwd }
+    : undefined;
+  const submitDialog = (draft: ProjectCommandDraft) => {
+    if (dialog?.mode === "edit") {
+      // 打开弹窗后这条命令被删了：什么都别做，别当成新增。
+      if (editingCommand) {
+        onUpdate(editingCommand.id, draft);
+      }
+      return;
+    }
+    onAddManual(draft);
   };
 
   // 加完**不关面板**：探测一次可能几十条，用户往往想连着加好几条（加过的会变成勾）。
@@ -210,7 +245,7 @@ export function ProjectCommandControls({
           <button
             type="button"
             aria-label={t("projectCommand.menuTitle")}
-            title={selected ? `${selected.command}${selected.cwd ? `  (${selected.cwd})` : ""}` : t("projectCommand.selectPlaceholder")}
+            title={selected ? `${commandLine(selected.command, selected.args)}${selected.cwd ? `  (${selected.cwd})` : ""}` : t("projectCommand.selectPlaceholder")}
             className={cn(
               "flex h-7 max-w-[14rem] shrink-0 items-center gap-1.5 rounded-md px-1.5 text-[0.78rem] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none max-[560px]:max-w-[8rem]",
               open && "bg-accent text-accent-foreground",
@@ -244,6 +279,16 @@ export function ProjectCommandControls({
                 <Sparkles className="size-3" aria-hidden="true" />
               )}
               {isDetecting ? t("projectCommand.detecting") : t("projectCommand.detect")}
+            </button>
+            <button
+              type="button"
+              onClick={startAdd}
+              aria-label={t("projectCommand.addManual")}
+              title={t("projectCommand.addManualHint")}
+              className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.72rem] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+            >
+              <Plus className="size-3" aria-hidden="true" />
+              <span className="max-[560px]:hidden">{t("projectCommand.addManual")}</span>
             </button>
           </div>
 
@@ -289,10 +334,20 @@ export function ProjectCommandControls({
                   <span className="min-w-0 flex-1">
                     <span className={cn("block truncate", command.id === selectedCommandId && "font-medium")}>{command.label}</span>
                     <span className="block truncate font-mono text-[0.68rem] text-muted-foreground">
-                      {command.command}
+                      {commandLine(command.command, command.args)}
                       {command.cwd ? ` · ${command.cwd}` : ""}
+                      {command.env.length ? `  ·  ${t("projectCommand.envCount", { count: command.env.length })}` : ""}
                     </span>
                   </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startEdit(command.id)}
+                  aria-label={t("projectCommand.edit")}
+                  title={t("projectCommand.edit")}
+                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors group-hover:opacity-100 hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                >
+                  <Pencil className="size-3" aria-hidden="true" />
                 </button>
                 <button
                   type="button"
@@ -416,8 +471,7 @@ export function ProjectCommandControls({
         </span>
       ) : null}
 
-      {lastRun ? (
-        <span
+      {lastRun ? (        <span
           className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-[0.72rem] text-muted-foreground"
           title={lastRun.logPath ?? lastRun.command}
         >
@@ -446,6 +500,18 @@ export function ProjectCommandControls({
           </button>
         </span>
       ) : null}
+
+      <ProjectCommandDialog
+        open={dialog !== null}
+        mode={dialog?.mode ?? "add"}
+        initial={dialogInitial}
+        onOpenChange={(next) => {
+          if (!next) {
+            setDialog(null);
+          }
+        }}
+        onSubmit={submitDialog}
+      />
     </div>
   );
 }
