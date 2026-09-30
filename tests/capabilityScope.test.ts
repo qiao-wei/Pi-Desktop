@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import {
   CAPABILITY_TABS,
   SKILL_SOURCE_CATEGORIES,
+  SKILL_SOURCE_CATEGORY_LABEL_KEYS,
   capabilitySourceLabel,
   isProjectScopedCapability,
   matchesCapabilityQuery,
@@ -30,7 +31,14 @@ const agentSkill = (name: string, extra: Record<string, unknown> = {}) => ({
   id: name,
   kind: "skill" as const,
   name,
-  source: "agent",
+  source: "piAgent",
+  ...extra,
+});
+const agentsSkill = (name: string, extra: Record<string, unknown> = {}) => ({
+  id: name,
+  kind: "skill" as const,
+  name,
+  source: "agents",
   ...extra,
 });
 const projectSkill = (name: string, extra: Record<string, unknown> = {}) => ({
@@ -65,7 +73,7 @@ test("the page has Skills, Packages and MCP tabs, nothing else", () => {
 });
 
 test("the skill source filter has no 项目级 entry", () => {
-  assert.deepEqual(SKILL_SOURCE_CATEGORIES, ["all", "builtin", "agent"]);
+  assert.deepEqual(SKILL_SOURCE_CATEGORIES, ["all", "builtin", "piAgent", "agents"]);
 });
 
 /* ------------------------------ partitioning ----------------------------- */
@@ -124,21 +132,25 @@ test("empty or unknown payloads fall back to the global view", () => {
 /* -------------------------------- categories ----------------------------- */
 
 test("category filter keeps 全部 and drops the other sources", () => {
-  const items = [builtinSkill("a"), agentSkill("b"), projectSkill("c")];
+  const items = [builtinSkill("a"), agentSkill("b"), agentsSkill("c"), projectSkill("d")];
 
   assert.deepEqual(
     scopedCapabilityItems(items, "global")
       .filter((i) => matchesSkillCategory(i, "all"))
       .map((i) => i.name),
-    ["a", "b"],
+    ["a", "b", "c"],
   );
   assert.deepEqual(
     items.filter((i) => matchesSkillCategory(i, "builtin")).map((i) => i.name),
     ["a"],
   );
   assert.deepEqual(
-    items.filter((i) => matchesSkillCategory(i, "agent")).map((i) => i.name),
+    items.filter((i) => matchesSkillCategory(i, "piAgent")).map((i) => i.name),
     ["b"],
+  );
+  assert.deepEqual(
+    items.filter((i) => matchesSkillCategory(i, "agents")).map((i) => i.name),
+    ["c"],
   );
 });
 
@@ -154,8 +166,9 @@ test("a source category never hides the other kinds", () => {
 
 test("cards label a skill by where it came from", () => {
   assert.equal(capabilitySourceLabel(builtinSkill("a")), "内置");
-  assert.equal(capabilitySourceLabel(agentSkill("b")), "agent级");
-  assert.equal(capabilitySourceLabel(projectSkill("c")), "项目级");
+  assert.equal(capabilitySourceLabel(agentSkill("b")), "Pi agent");
+  assert.equal(capabilitySourceLabel(agentsSkill("c")), "agent");
+  assert.equal(capabilitySourceLabel(projectSkill("d")), "项目级");
   assert.equal(capabilitySourceLabel({ kind: "skill" }), "已发现");
 });
 
@@ -164,6 +177,14 @@ test("cards label a skill by where it came from", () => {
 const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
 const zhSource = readFileSync(new URL("../src/i18n/zh.ts", import.meta.url), "utf8");
 const enSource = readFileSync(new URL("../src/i18n/en.ts", import.meta.url), "utf8");
+
+// chip 文案走 SKILL_SOURCE_CATEGORY_LABEL_KEYS（t("字面量") 扫描不到动态 key），单独对一次账。
+test("every source category has a label in both packs", () => {
+  for (const key of Object.values(SKILL_SOURCE_CATEGORY_LABEL_KEYS)) {
+    assert.match(zhSource, new RegExp(`"${key}"`), `zh 缺 ${key}`);
+    assert.match(enSource, new RegExp(`"${key}"`), `en 缺 ${key}`);
+  }
+});
 
 test("the page renders the global view and the context panel the project view", () => {
   assert.match(appSource, /scopedCapabilityItems\(rawItems,\s*"global"\)/);

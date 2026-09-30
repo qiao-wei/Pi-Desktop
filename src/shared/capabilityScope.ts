@@ -14,12 +14,12 @@ import { t } from "../i18n/index.ts";
 
 export type CapabilityView = "global" | "project";
 export type CapabilityScopeTab = "skill" | "package" | "mcp";
-export type SkillSourceCategory = "all" | "builtin" | "agent";
+export type SkillSourceCategory = "all" | "builtin" | "piAgent" | "agents";
 
 /** Minimal shape the partition needs from `CapabilitySkill` / `CapabilityPackage`. */
 export interface ScopedCapability {
   kind: string;
-  /** Skills: "builtin" | "agent" | "project". */
+  /** Skills: "builtin" | "piAgent" | "agents" | "project". */
   source?: string;
   /** Packages: "user" | "project". */
   scope?: string;
@@ -31,12 +31,13 @@ export interface ScopedCapability {
 export const CAPABILITY_TABS: CapabilityScopeTab[] = ["skill", "package", "mcp"];
 
 /** "项目级" is deliberately absent: project skills belong to the context panel. */
-export const SKILL_SOURCE_CATEGORIES: SkillSourceCategory[] = ["all", "builtin", "agent"];
+export const SKILL_SOURCE_CATEGORIES: SkillSourceCategory[] = ["all", "builtin", "piAgent", "agents"];
 
 export const SKILL_SOURCE_CATEGORY_LABEL_KEYS: Record<SkillSourceCategory, string> = {
   all: "capability.category.all",
   builtin: "capability.category.builtin",
-  agent: "capability.category.agent",
+  piAgent: "capability.category.piAgent",
+  agents: "capability.category.agents",
 };
 
 export function isProjectScopedCapability(item: ScopedCapability): boolean {
@@ -105,7 +106,8 @@ export function canDeleteCapability(item: ScopedCapability): boolean {
 export function capabilitySourceLabel(item: ScopedCapability): string {
   if (item.kind === "skill") {
     if (item.source === "builtin") return t("capability.source.builtin");
-    if (item.source === "agent") return t("capability.source.agent");
+    if (item.source === "piAgent") return t("capability.source.piAgent");
+    if (item.source === "agents") return t("capability.source.agents");
     if (item.source === "project") return t("capability.source.project");
   }
 

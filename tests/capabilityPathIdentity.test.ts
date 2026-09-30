@@ -20,7 +20,9 @@ import {
   extensionCapabilityId,
   isPathInside,
   isPathInsideCanonical,
+  isReadOnlySkillSource,
   isSkillPathUnderRoots,
+  skillSourceForPath,
 } from "../server/capabilityPathIdentity.mjs";
 
 function tempDir(prefix) {
@@ -134,4 +136,43 @@ test("isSkillPathUnderRoots：worktree 软链里的项目技能算受管，用�
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("skillSourceForPath：字面路径优先（软链归入口那侧），realpath 只在字面都不命中时兜底", () => {
+  const root = tempDir("pi-skillsource-");
+  try {
+    const builtin = join(root, "app", "skills");
+    const piAgent = join(root, "pi", "skills");
+    const agents = join(root, "agents", "skills");
+    for (const dir of [join(builtin, "docx"), join(agents, "dws")]) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "SKILL.md"), "---\nname: x\n---\n");
+    }
+    // ~/.pi/agent/skills/lark-im 是指向 ~/.agents/skills/lark-im 的软链。
+    mkdirSync(join(agents, "lark-im"), { recursive: true });
+    writeFileSync(join(agents, "lark-im", "SKILL.md"), "---\nname: lark-im\n---\n");
+    mkdirSync(piAgent, { recursive: true });
+    symlinkSync(join(agents, "lark-im"), join(piAgent, "lark-im"), "dir");
+
+    const roots = { builtin, piAgent, agents };
+    assert.equal(skillSourceForPath(join(builtin, "docx", "SKILL.md"), roots), "builtin");
+    assert.equal(skillSourceForPath(join(agents, "dws", "SKILL.md"), roots), "agents");
+    assert.equal(
+      skillSourceForPath(join(piAgent, "lark-im", "SKILL.md"), roots),
+      "piAgent",
+      "报的是软链那侧就归 piAgent；删它删掉的也只是那条软链",
+    );
+    // 项目根不在入参里：能力清单只含受管技能，落不到上面的路径一律回到旧的 project 行为。
+    assert.equal(skillSourceForPath(join(root, "proj", ".pi", "skills", "jev", "SKILL.md"), roots), "project");
+    assert.equal(skillSourceForPath("", roots), "project");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("isReadOnlySkillSource：内置与跨客户端只读，piAgent / project 可删", () => {
+  assert.equal(isReadOnlySkillSource("builtin"), true);
+  assert.equal(isReadOnlySkillSource("agents"), true);
+  assert.equal(isReadOnlySkillSource("piAgent"), false);
+  assert.equal(isReadOnlySkillSource("project"), false);
 });
