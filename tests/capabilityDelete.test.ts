@@ -36,8 +36,12 @@ test("extensions follow the same read-only flag", () => {
   assert.equal(canDeleteCapability({ kind: "extension", readonly: true }), false);
 });
 
+test("MCP servers are removable in both scopes (their entry lives in an mcp.json we own)", () => {
+  assert.equal(canDeleteCapability({ kind: "mcp", scope: "user" }), true);
+  assert.equal(canDeleteCapability({ kind: "mcp", scope: "project" }), true);
+});
+
 test("kinds without a removal path are never deletable", () => {
-  assert.equal(canDeleteCapability({ kind: "mcp" }), false);
   assert.equal(canDeleteCapability({ kind: "" }), false);
 });
 
@@ -97,6 +101,7 @@ test("App hands the panel and the page one shared removal handler", () => {
   const handler = appSource.slice(handlerStart, appSource.indexOf("[deleteSkill, removePackage]", handlerStart));
   assert.match(handler, /deleteSkill\(item\.id\)/);
   assert.match(handler, /removePackage\(item\.source, item\.scope\)/);
+  assert.match(handler, /removeMcpServer\(item\.id\)/);
 });
 
 test("one shared prompt confirms every destructive removal", () => {

@@ -21,7 +21,9 @@ import {
   MoreHorizontal,
   PanelLeft,
   PanelRight,
+  Pencil,
   Pin,
+  Plug,
   Plus,
   RefreshCw,
   Save,
@@ -63,6 +65,7 @@ import {
   type ExtensionUiResponse,
   type PromptAttachmentInput,
   type PromptMessagePartInput,
+  type ToolSettingsPayload,
 } from "../lib/api";
 import { MarkdownContent } from "../lib/markdown";
 import {
@@ -241,6 +244,10 @@ import type {
   CapabilityPackageResourceType,
   CapabilityPackageFilePreview,
   CapabilityExtension,
+  CapabilityMcpDetail,
+  CapabilityMcpExposure,
+  CapabilityMcpInspection,
+  CapabilityMcpServer,
   CapabilitySkill,
   ChatAttachment,
   ConversationStats,
@@ -249,8 +256,14 @@ import type {
   ProjectSummary,
   SkillSummary,
   ThinkingLevel,
+  ToolToggleState,
 } from "../types";
-import { CAPABILITY_PACKAGE_RESOURCE_TYPES } from "../types";
+import { CAPABILITY_MCP_EXPOSURES, CAPABILITY_PACKAGE_RESOURCE_TYPES } from "../types";
+import {
+  buildMcpServerPayload,
+  recordToRows,
+  type McpKeyValueRow,
+} from "../shared/mcpForm";
 
 const thinkingLevels: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const skillDescriptionPreviewLength = 120;
@@ -280,6 +293,15 @@ const personalizationExtensionUiOptions = [
   { value: "tui", labelKey: "settings.extensionUi.tui.label", descKey: "settings.extensionUi.tui.desc" },
   { value: "webui", labelKey: "settings.extensionUi.webui.label", descKey: "settings.extensionUi.webui.desc" },
 ] as const;
+/**
+ * 项目层的 codemode 三态。写进 `defaultTools` 时：继承 = 不写这一层，
+ * 开启 = `+codemode`，关闭 = `-codemode`（必须是显式减号，否则会继承全局的「开」）。
+ */
+const toolToggleOptions: ReadonlyArray<{ value: ToolToggleState; labelKey: string }> = [
+  { value: "inherit", labelKey: "dialog.codemode.inherit" },
+  { value: "on", labelKey: "dialog.codemode.on" },
+  { value: "off", labelKey: "dialog.codemode.off" },
+];
 /**
  * 界面配色主题。与浅色/深色正交：每个主题都有两套完整 token（`src/themes/<id>/theme.css`），
  * 标题栏的太阳/月亮按钮仍然管明暗。
@@ -347,6 +369,7 @@ export function App() {
     submitTurn,
     submitEdit,
     savePersonalization,
+    saveToolSettings,
     compactContext,
     createProject,
     updateProject,
@@ -381,6 +404,10 @@ export function App() {
     runBuiltinCommand,
     deleteSkill,
     importSkill,
+    saveMcpServer,
+    removeMcpServer,
+    inspectMcpServer,
+    readMcpServerDetail,
     respondExtensionUi,
     dismissError,
     reportError,
@@ -402,9 +429,11 @@ export function App() {
         await deleteSkill(item.id);
       } else if (item.kind === "package") {
         await removePackage(item.source, item.scope);
+      } else if (item.kind === "mcp") {
+        await removeMcpServer(item.id);
       }
     },
-    [deleteSkill, removePackage],
+    [deleteSkill, removePackage, removeMcpServer],
   );
 
   const [showPanel, setShowPanel] = useState(false);
@@ -2652,6 +2681,7 @@ export function App() {
           isBusy={state.isBootstrapping}
           onCreateProject={createProject}
           onUpdateProject={updateProject}
+          onSaveToolSettings={(input) => saveToolSettings(input)}
           onPinProject={pinProject}
           onReorderProjects={reorderProjects}
           onRemoveProject={removeProject}
@@ -3083,6 +3113,9 @@ export function App() {
               onInstallPackage={installPackage}
               onUpdatePackage={updatePackage}
               onInsertPackageCommand={insertPackageCommandIntoComposer}
+              onSaveMcpServer={saveMcpServer}
+              onInspectMcpServer={inspectMcpServer}
+              onReadMcpServer={readMcpServerDetail}
               customUiCancelVersion={customUiCancelVersion}
             />
           </div>
@@ -3200,6 +3233,9 @@ export function App() {
           onInstallPackage={installPackage}
           onUpdatePackage={updatePackage}
           onInsertPackageCommand={insertPackageCommandIntoComposer}
+          onSaveMcpServer={saveMcpServer}
+          onInspectMcpServer={inspectMcpServer}
+          onReadMcpServer={readMcpServerDetail}
         />
         </aside>
           </>
@@ -3212,6 +3248,8 @@ export function App() {
           onModelsChanged={() => void refreshAvailableModels()}
           personalization={bootstrap.personalization}
           onSavePersonalization={savePersonalization}
+          toolSettings={bootstrap.toolSettings}
+          onSaveToolSettings={(input) => saveToolSettings(input)}
           appearance={appearance}
           onAppearanceChange={setAppearance}
           archivedSessions={bootstrap.archivedSessions ?? []}
@@ -3659,6 +3697,8 @@ function SettingsModal({
   onModelsChanged,
   personalization,
   onSavePersonalization,
+  toolSettings,
+  onSaveToolSettings,
   appearance,
   onAppearanceChange,
   archivedSessions,
@@ -3673,6 +3713,9 @@ function SettingsModal({
   onModelsChanged: () => void;
   personalization: PersonalizationSettings;
   onSavePersonalization: (settings: PersonalizationSettings) => Promise<void>;
+  /** 工具开关（codemode）现状；写在 pi 自己的 settings 里，所以主题区一样是立即生效、不走保存按钮。 */
+  toolSettings?: ToolSettingsPayload;
+  onSaveToolSettings: (input: { scope: "user" | "project"; state: ToolToggleState }) => Promise<unknown>;
   /** 配色主题 id（`src/themes/<id>/`）；和明暗一样属于 UI 偏好，改完立即生效，不走下面的保存按钮。 */
   appearance: ThemeId;
   onAppearanceChange: (appearance: ThemeId) => void;
@@ -3687,6 +3730,8 @@ function SettingsModal({
   const [activeTab, setActiveTab] = useState<"models" | "personalization" | "archived" | "notifications">("models");
   const [personalizationDraft, setPersonalizationDraft] = useState(personalization);
   const [isSavingPersonalization, setIsSavingPersonalization] = useState(false);
+  const [isSavingToolToggle, setIsSavingToolToggle] = useState(false);
+  const [toolToggleError, setToolToggleError] = useState<string | null>(null);
 
   useEffect(() => {
     setPersonalizationDraft(personalization);
@@ -3698,6 +3743,19 @@ function SettingsModal({
       await onSavePersonalization(personalizationDraft);
     } finally {
       setIsSavingPersonalization(false);
+    }
+  }
+
+  /** 工具开关直接改 pi 的设置文件，所以是"拨了就跑"，不跟下面的保存按钮绑定。 */
+  async function toggleCodemode(enabled: boolean) {
+    setToolToggleError(null);
+    setIsSavingToolToggle(true);
+    try {
+      await onSaveToolSettings({ scope: "user", state: enabled ? "on" : "off" });
+    } catch (error) {
+      setToolToggleError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSavingToolToggle(false);
     }
   }
 
@@ -3931,6 +3989,40 @@ function SettingsModal({
                   <Save size={16} />
                   {isSavingPersonalization ? t("common.saving") : t("settings.savePersonalization")}
                 </Button>
+
+                {/* 这一段存的是 pi 自己的 `defaultTools`（终端 TUI 读的就是它），
+                    所以拨了立即生效，不跟上面那个保存按钮绑定。 */}
+                <div className="grid gap-2 rounded-md border border-border p-3.5">
+                  <strong className="text-sm">{t("settings.codemode.section")}</strong>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="grid min-w-0 gap-1">
+                      <Label htmlFor="settings-codemode">{t("settings.codemode.label")}</Label>
+                      <p className="text-sm text-muted-foreground">{t("settings.codemode.desc")}</p>
+                    </div>
+                    <Switch
+                      id="settings-codemode"
+                      checked={Boolean(toolSettings?.global)}
+                      disabled={isSavingToolToggle || !toolSettings}
+                      onCheckedChange={(checked) => void toggleCodemode(checked)}
+                    />
+                  </div>
+                  <p className="text-xs leading-relaxed text-muted-foreground">{t("settings.codemode.hint")}</p>
+                  {toolToggleError ? (
+                    <p className="text-sm text-destructive" role="status">
+                      {toolToggleError}
+                    </p>
+                  ) : null}
+                  {toolSettings?.project === "off" && toolSettings.global ? (
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {t("settings.codemode.projectOverride")}
+                    </p>
+                  ) : null}
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    {(toolSettings?.activeTools ?? []).includes("codemode")
+                      ? t("settings.codemode.activeOn")
+                      : t("settings.codemode.activeOff")}
+                  </p>
+                </div>
               </TabsContent>
 
               <TabsContent value="archived">
@@ -4160,6 +4252,8 @@ function SlashMenu({
 const CAPABILITY_TAB_META: Record<CapabilityScopeTab, { label: string; Icon: typeof BookOpen }> = {
   skill: { label: "Skills", Icon: BookOpen },
   package: { label: "Packages", Icon: Folder },
+  // pi 0.99 的内置 MCP：服务器定义住在 mcp.json，不再走 pi-mcp-adapter。
+  mcp: { label: "MCP", Icon: Plug },
 };
 
 /**
@@ -4559,6 +4653,9 @@ function CapabilityDetailDialog({
   onSetPinned,
   onDelete,
   onUpdatePackage,
+  onSaveMcpServer,
+  onInspectMcpServer,
+  onReadMcpServer,
 }: {
   item: CapabilityItem;
   /** The host's busy label; this sheet's own operations are tracked locally. */
@@ -4568,6 +4665,9 @@ function CapabilityDetailDialog({
   onSetPinned: (kind: CapabilityKind, id: string, pinned: boolean) => Promise<unknown>;
   onDelete: (item: CapabilityItem) => void;
   onUpdatePackage: (source?: string, onProgress?: (message: string) => void) => Promise<unknown>;
+  onSaveMcpServer: (server: Record<string, unknown>) => Promise<unknown>;
+  onInspectMcpServer: (id: string) => Promise<CapabilityMcpInspection>;
+  onReadMcpServer: (id: string) => Promise<CapabilityMcpDetail>;
 }) {
   const t = useT();
   const [busyAction, setBusyAction] = useState("");
@@ -4663,6 +4763,13 @@ function CapabilityDetailDialog({
               {isReadingSkill ? <p className="text-sm text-muted-foreground">{t("capability.detail.readingContent")}</p> : null}
               {skillContent ? <MarkdownContent text={skillContent} /> : null}
             </>
+          ) : item.kind === "mcp" ? (
+            <McpServerEditor
+              server={item}
+              onSave={onSaveMcpServer}
+              onInspect={onInspectMcpServer}
+              onRead={onReadMcpServer}
+            />
           ) : item.kind === "package" ? (
             <div className="grid gap-1.5">
               <p className="text-sm">{item.description}</p>
@@ -4693,6 +4800,9 @@ function CapabilitiesPage({
   onInstallPackage,
   onUpdatePackage,
   onInsertPackageCommand,
+  onSaveMcpServer,
+  onInspectMcpServer,
+  onReadMcpServer,
   customUiCancelVersion,
 }: {
   capabilities: CapabilitiesState;
@@ -4704,6 +4814,9 @@ function CapabilitiesPage({
   onUpdatePackage: (source?: string, onProgress?: (message: string) => void) => Promise<unknown>;
   /** 点 action 只把命令填进 composer（不执行）。 */
   onInsertPackageCommand: (packageId: string, command: string) => void;
+  onSaveMcpServer: (server: Record<string, unknown>) => Promise<unknown>;
+  onInspectMcpServer: (id: string) => Promise<CapabilityMcpInspection>;
+  onReadMcpServer: (id: string) => Promise<CapabilityMcpDetail>;
   customUiCancelVersion: number;
 }) {
   const t = useT();
@@ -4716,6 +4829,8 @@ function CapabilitiesPage({
   const [skillImportPath, setSkillImportPath] = useState("");
   const [isChoosingSkillFolder, setIsChoosingSkillFolder] = useState(false);
   const [installOpen, setInstallOpen] = useState(false);
+  /** 新增/编辑 MCP 服务器；`server` 为空是新增，scope 由 tab 上下文决定。 */
+  const [mcpDialog, setMcpDialog] = useState<{ server?: CapabilityMcpServer; defaultScope?: "user" | "project" } | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [resourceRequest, setResourceRequest] = useState<PackageResourcesRequest | null>(null);
@@ -4728,11 +4843,14 @@ function CapabilitiesPage({
 
   // This page is the *global* surface: builtin + agent-level skills and
   // user-scope packages. Project-scoped ones belong to the conversation panel.
-  const rawItems: CapabilityItem[] = tab === "skill" ? capabilities.skills : capabilities.packages;
+  const rawItems: CapabilityItem[] = tab === "skill"
+    ? capabilities.skills
+    : tab === "package"
+      ? capabilities.packages
+      : (capabilities.mcpServers ?? []);
   const globalItems = useMemo(() => scopedCapabilityItems(rawItems, "global"), [rawItems]);
   const searchedItems = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return globalItems.filter((item) => !needle || `${item.name} ${item.description} ${item.kind}`.toLowerCase().includes(needle));
+    return globalItems.filter((item) => matchesCapabilityQuery(item, query));
   }, [query, globalItems]);
   const pinnedItems = searchedItems.filter((item) => item.pinned);
   const installedItems = searchedItems.filter((item) => (
@@ -4826,7 +4944,60 @@ function CapabilitiesPage({
 
   const addLabel = tab === "skill"
     ? (isChoosingSkillFolder ? t("capability.market.choosingFolder") : t("capability.market.importSkill"))
-    : t("capability.market.installPackage");
+    : tab === "package"
+      ? t("capability.market.installPackage")
+      : t("capability.mcp.addServer");
+  const searchPlaceholder = tab === "skill"
+    ? t("capability.market.searchSkills")
+    : tab === "package"
+      ? t("capability.market.searchPackages")
+      : t("capability.mcp.searchServers");
+  function handleAdd() {
+    if (tab === "skill") {
+      void chooseSkillFolder();
+    } else if (tab === "package") {
+      openNewPackage();
+    } else {
+      setMcpDialog({ defaultScope: "user" });
+    }
+  }
+
+  /** MCP 卡片自成一系（连接状态/工具数/transport），其余三类共用市场卡片。 */
+  function renderCard(item: CapabilityItem) {
+    if (item.kind === "mcp") {
+      return (
+        <CapabilityMcpCard
+          key={`mcp:${item.id}`}
+          server={item}
+          selected={selected?.id === item.id}
+          busy={busy}
+          onOpen={openItem}
+          onEdit={() => setMcpDialog({ server: item, defaultScope: item.scope })}
+          onSetDefault={onSetDefault}
+          onSetPinned={onSetPinned}
+          onDelete={requestDelete}
+        />
+      );
+    }
+
+    return (
+      <CapabilityMarketCard
+        key={`${item.kind}:${item.id}`}
+        item={item}
+        selected={selected?.id === item.id}
+        busy={busy}
+        onOpen={openItem}
+        onOpenResources={openPackageResources}
+        onSetDefault={onSetDefault}
+        onSetPinned={onSetPinned}
+        onDelete={requestDelete}
+        onInsertPackageCommand={onInsertPackageCommand}
+      />
+    );
+  }
+
+  const installedTitle = tab === "mcp" ? t("capability.mcp.installedTitle") : t("capability.market.installedTitle");
+  const installedEmpty = tab === "mcp" ? t("capability.mcp.noServers") : t("capability.market.noInstalledProjects");
 
   return (
     <section className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-muted" aria-labelledby="capabilities-page-title">
@@ -4856,8 +5027,8 @@ function CapabilitiesPage({
             className="h-10 w-[min(100%,280px)] bg-background max-[920px]:w-full"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder={tab === "skill" ? t("capability.market.searchSkills") : t("capability.market.searchPackages")}
-            aria-label={tab === "skill" ? t("capability.market.searchSkills") : t("capability.market.searchPackages")}
+            placeholder={searchPlaceholder}
+            aria-label={searchPlaceholder}
           />
           {/* 目录入口只在 Packages 标签下出现：它通向 pi.dev 的 Package 目录，和 Skills 无关。 */}
           {tab === "package" ? (
@@ -4878,9 +5049,9 @@ function CapabilitiesPage({
             variant="outline"
             className="h-10 font-semibold"
             disabled={tab === "skill" && isChoosingSkillFolder}
-            onClick={tab === "skill" ? () => void chooseSkillFolder() : openNewPackage}
+            onClick={handleAdd}
           >
-            {tab === "skill" ? <FolderOpen /> : <Plus />}
+            {tab === "skill" ? <FolderOpen /> : tab === "package" ? <Plus /> : <Plug />}
             {addLabel}
           </Button>
         </div>
@@ -4897,27 +5068,14 @@ function CapabilitiesPage({
               <Badge variant="secondary" className="min-w-[26px] text-sm">{pinnedItems.length}</Badge>
             </div>
             <div className="grid min-w-0 grid-cols-3 gap-3.5 max-[1350px]:grid-cols-2 max-[920px]:grid-cols-1">
-              {pinnedItems.length ? pinnedItems.map((item) => (
-                <CapabilityMarketCard
-                  key={`featured:${item.kind}:${item.id}`}
-                  item={item}
-                  selected={selected?.id === item.id}
-                  busy={busy}
-                  onOpen={openItem}
-                  onOpenResources={openPackageResources}
-                  onSetDefault={onSetDefault}
-                  onSetPinned={onSetPinned}
-                  onDelete={requestDelete}
-                  onInsertPackageCommand={onInsertPackageCommand}
-                />
-              )) : null}
+              {pinnedItems.length ? pinnedItems.map((item) => renderCard(item)) : null}
             </div>
           </section>
           ) : null}
 
           <section className="mb-[30px] grid gap-3.5">
             <div className="flex min-w-0 items-baseline gap-[18px]">
-              <h2 className="text-2xl leading-tight font-semibold">{t("capability.market.installedTitle")}</h2>
+              <h2 className="text-2xl leading-tight font-semibold">{installedTitle}</h2>
               <Badge variant="secondary" className="min-w-[26px] text-sm">{installedItems.length}</Badge>
             </div>
             {tab === "skill" ? (
@@ -4938,20 +5096,7 @@ function CapabilitiesPage({
               </div>
             ) : null}
             <div className="grid min-w-0 grid-cols-3 gap-3.5 max-[1350px]:grid-cols-2 max-[920px]:grid-cols-1">
-              {installedItems.length ? installedItems.map((item) => (
-                <CapabilityMarketCard
-                  key={`${item.kind}:${item.id}`}
-                  item={item}
-                  selected={selected?.id === item.id}
-                  busy={busy}
-                  onOpen={openItem}
-                  onOpenResources={openPackageResources}
-                  onSetDefault={onSetDefault}
-                  onSetPinned={onSetPinned}
-                  onDelete={requestDelete}
-                  onInsertPackageCommand={onInsertPackageCommand}
-                />
-              )) : <p className="text-sm text-muted-foreground">{t("capability.market.noInstalledProjects")}</p>}
+              {installedItems.length ? installedItems.map((item) => renderCard(item)) : <p className="text-sm text-muted-foreground">{installedEmpty}</p>}
             </div>
           </section>
 
@@ -4970,6 +5115,16 @@ function CapabilitiesPage({
         />
       ) : null}
 
+      {mcpDialog ? (
+        <McpServerDialog
+          server={mcpDialog.server}
+          defaultScope={mcpDialog.defaultScope ?? "user"}
+          onClose={() => setMcpDialog(null)}
+          onSave={onSaveMcpServer}
+          onReadMcpServer={onReadMcpServer}
+        />
+      ) : null}
+
       {detailOpen && selected ? (
         <CapabilityDetailDialog
           item={selected}
@@ -4979,6 +5134,9 @@ function CapabilitiesPage({
           onSetPinned={onSetPinned}
           onDelete={requestDelete}
           onUpdatePackage={onUpdatePackage}
+          onSaveMcpServer={onSaveMcpServer}
+          onInspectMcpServer={onInspectMcpServer}
+          onReadMcpServer={onReadMcpServer}
         />
       ) : null}
 
@@ -5025,7 +5183,11 @@ function CapabilityDeleteDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {item?.kind === "package" ? t("capability.delete.packageTitle") : t("capability.delete.skillTitle")}
+            {item?.kind === "package"
+              ? t("capability.delete.packageTitle")
+              : item?.kind === "mcp"
+                ? t("capability.delete.mcpTitle")
+                : t("capability.delete.skillTitle")}
           </AlertDialogTitle>
           <AlertDialogDescription>
             {t("capability.delete.description", { name: item?.name ?? "" })}
@@ -5048,10 +5210,10 @@ function CapabilityDeleteDialog({
   );
 }
 
-type CapabilityItem = CapabilitySkill | CapabilityPackage | CapabilityExtension;
+type CapabilityItem = CapabilitySkill | CapabilityPackage | CapabilityExtension | CapabilityMcpServer;
 
 /** The project panel's two sections; the id is what UI preferences store as collapsed. */
-type CapabilitySectionId = "skills" | "packages";
+type CapabilitySectionId = "skills" | "packages" | "mcp";
 
 /** 超过这个数量才给搜索框：更短的列表一整屏就看得见，搜索只是噪音。 */
 const CAPABILITY_COMMAND_SEARCH_THRESHOLD = 6;
@@ -5383,7 +5545,7 @@ function CapabilityMarketCard({
         ) : null}
       </div>
       <p className="line-clamp-2 min-h-0 px-5 text-sm leading-relaxed break-words text-muted-foreground">
-        {item.description || (item.kind === "package" ? item.source : item.path)}
+        {item.description || (item.kind === "package" || item.kind === "mcp" ? item.source : item.path)}
       </p>
       <div className="mt-auto grid min-w-0 gap-2.5 px-5">
         {item.kind === "package" && item.loadErrors.length > 0 ? (
@@ -5413,6 +5575,542 @@ function CapabilityMarketCard({
   );
 }
 
+/** MCP 的 env / headers 共用一种两列行编辑器；行 ↔ 对象的转换在 shared/mcpForm.ts。 */
+const MCP_EXPOSURE_LABEL_KEYS: Record<CapabilityMcpExposure, string> = {
+  codemode: "capability.mcp.exposure.codemode",
+  "codemode-deferred": "capability.mcp.exposure.codemodeDeferred",
+  deferred: "capability.mcp.exposure.deferred",
+  direct: "capability.mcp.exposure.direct",
+  hidden: "capability.mcp.exposure.hidden",
+};
+
+const MCP_EXPOSURE_HINT_KEYS: Record<CapabilityMcpExposure, string> = {
+  codemode: "capability.mcp.exposureHint.codemode",
+  "codemode-deferred": "capability.mcp.exposureHint.codemodeDeferred",
+  deferred: "capability.mcp.exposureHint.deferred",
+  direct: "capability.mcp.exposureHint.direct",
+  hidden: "capability.mcp.exposureHint.hidden",
+};
+
+/** MCP 服务器卡片：连接状态用「工具数」表达，transport / exposure / 覆盖关系都是徽章。 */
+function CapabilityMcpCard({
+  server,
+  selected,
+  busy,
+  onOpen,
+  onEdit,
+  onSetDefault,
+  onSetPinned,
+  onDelete,
+}: {
+  server: CapabilityMcpServer;
+  selected: boolean;
+  busy: string;
+  onOpen: (item: CapabilityItem) => void;
+  onEdit: () => void;
+  onSetDefault: (kind: CapabilityKind, id: string, enabled: boolean) => Promise<unknown>;
+  onSetPinned: (kind: CapabilityKind, id: string, pinned: boolean) => Promise<unknown>;
+  onDelete: (item: CapabilityItem) => void;
+}) {
+  const t = useT();
+  const status = !server.enabled
+    ? t("capability.state.disabled")
+    : server.active
+      ? t("capability.mcp.connected", { count: server.toolCount })
+      : t("capability.mcp.notConnected");
+
+  return (
+    <Card
+      className={cn(
+        "min-h-[150px] cursor-pointer gap-3 rounded-lg border-transparent py-5 shadow-sm hover:border-border",
+        selected && "border-border",
+      )}
+      onClick={() => onOpen(server)}
+    >
+      <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 px-5">
+        <CapabilityDot kind="mcp">M</CapabilityDot>
+        <div className="min-w-0">
+          <h3 className="truncate text-base font-semibold">{server.name}</h3>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+            {server.scope === "project" ? t("capability.source.project") : t("capability.source.agent")}
+            {" · "}
+            {server.transport === "http" ? t("capability.mcp.transport.http") : t("capability.mcp.transport.stdio")}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="size-7"
+            disabled={Boolean(busy)}
+            onClick={onEdit}
+            aria-label={t("capability.mcp.edit")}
+            title={t("capability.mcp.edit")}
+          >
+            <Pencil />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="size-7"
+            disabled={Boolean(busy)}
+            onClick={() => onDelete(server)}
+            aria-label={t("capability.context.delete")}
+            title={t("capability.context.delete")}
+          >
+            <Trash2 />
+          </Button>
+          <Button
+            type="button"
+            variant={server.pinned ? "secondary" : "ghost"}
+            size="icon-sm"
+            className="size-7"
+            disabled={Boolean(busy)}
+            onClick={() => void onSetPinned("mcp", server.id, !server.pinned)}
+            aria-label={server.pinned ? t("capability.card.unpin") : t("capability.card.pin")}
+            title={server.pinned ? t("capability.card.unpin") : t("capability.card.pin")}
+          >
+            <Pin />
+          </Button>
+          <Switch
+            checked={server.enabled}
+            disabled={Boolean(busy)}
+            onCheckedChange={(next) => void onSetDefault("mcp", server.id, next)}
+            aria-label={t("capability.mcp.toggleEnabled", { name: server.name })}
+            title={t("capability.mcp.toggleEnabled", { name: server.name })}
+          />
+        </div>
+        <div className="col-span-3 flex min-w-0 flex-wrap items-center gap-1.5">
+          <Badge variant="secondary">{t(MCP_EXPOSURE_LABEL_KEYS[server.exposure])}</Badge>
+          {server.overridesGlobal ? <Badge variant="outline">{t("capability.mcp.overridesGlobal")}</Badge> : null}
+        </div>
+      </div>
+      <p className="line-clamp-2 min-h-0 px-5 text-sm leading-relaxed break-words text-muted-foreground">
+        {server.description || server.source}
+      </p>
+      <div className="mt-auto flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 px-5 text-xs text-muted-foreground">
+        <span>{status}</span>
+        <span className="min-w-0 truncate font-mono" title={server.source}>{server.source}</span>
+      </div>
+    </Card>
+  );
+}
+
+function KeyValueEditor({
+  label,
+  rows,
+  onChange,
+  keyPlaceholder,
+  valuePlaceholder,
+}: {
+  label: string;
+  rows: McpKeyValueRow[];
+  onChange: (rows: McpKeyValueRow[]) => void;
+  keyPlaceholder: string;
+  valuePlaceholder: string;
+}) {
+  const t = useT();
+  return (
+    <div className="grid gap-2">
+      <Label>{label}</Label>
+      {rows.map((row, index) => (
+        <div key={index} className="flex items-center gap-2">
+          <Input
+            className="h-9 flex-1 font-mono text-xs"
+            value={row.key}
+            placeholder={keyPlaceholder}
+            onChange={(event) => onChange(rows.map((entry, position) => (
+              position === index ? { ...entry, key: event.target.value } : entry
+            )))}
+          />
+          <Input
+            className="h-9 flex-1 font-mono text-xs"
+            value={row.value}
+            placeholder={valuePlaceholder}
+            onChange={(event) => onChange(rows.map((entry, position) => (
+              position === index ? { ...entry, value: event.target.value } : entry
+            )))}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t("capability.context.delete")}
+            title={t("capability.context.delete")}
+            onClick={() => onChange(rows.filter((_, position) => position !== index))}
+          >
+            <Trash2 />
+          </Button>
+        </div>
+      ))}
+      <div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="font-semibold"
+          onClick={() => onChange([...rows, { key: "", value: "" }])}
+        >
+          <Plus />
+          {t("capability.mcp.addRow")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * MCP 服务器表单。新增和编辑共用：编辑时先 `onRead` 拉回原始字段（env / headers
+ * 可能带密钥，能力清单里不带），`server.tools` 来自会话，用来配单工具 exposure。
+ */
+function McpServerEditor({
+  server,
+  defaultScope = "user",
+  onSave,
+  onInspect,
+  onRead,
+  onSaved,
+}: {
+  server?: CapabilityMcpServer;
+  defaultScope?: "user" | "project";
+  onSave: (server: Record<string, unknown>) => Promise<unknown>;
+  onInspect?: (id: string) => Promise<CapabilityMcpInspection>;
+  onRead?: (id: string) => Promise<CapabilityMcpDetail>;
+  onSaved?: () => void;
+}) {
+  const t = useT();
+  const editing = Boolean(server);
+  const [loading, setLoading] = useState(editing && Boolean(onRead));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [name, setName] = useState(server?.name ?? "");
+  const [scope, setScope] = useState<"user" | "project">(server?.scope ?? defaultScope);
+  const [transport, setTransport] = useState<"stdio" | "http">(server?.transport ?? "stdio");
+  const [command, setCommand] = useState("");
+  const [args, setArgs] = useState("");
+  const [cwd, setCwd] = useState("");
+  const [url, setUrl] = useState("");
+  const [envRows, setEnvRows] = useState<McpKeyValueRow[]>([]);
+  const [headerRows, setHeaderRows] = useState<McpKeyValueRow[]>([]);
+  const [exposure, setExposure] = useState<CapabilityMcpExposure>(server?.exposure ?? "codemode");
+  const [enabled, setEnabled] = useState(server?.enabled ?? true);
+  const [description, setDescription] = useState(server?.description ?? "");
+  const [toolExposure, setToolExposure] = useState<Record<string, string>>({});
+  const [hasOAuth, setHasOAuth] = useState(false);
+  const [inspection, setInspection] = useState<CapabilityMcpInspection | null>(null);
+  const [inspecting, setInspecting] = useState(false);
+
+  useEffect(() => {
+    if (!server || !onRead) {
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    onRead(server.id)
+      .then((detail) => {
+        if (cancelled) return;
+        setName(detail.name);
+        setScope(detail.scope);
+        setTransport(detail.transport);
+        setCommand(detail.command);
+        setArgs(detail.args.join(" "));
+        setCwd(detail.cwd);
+        setUrl(detail.url);
+        setEnvRows(recordToRows(detail.env));
+        setHeaderRows(recordToRows(detail.headers));
+        setExposure(detail.exposure);
+        setEnabled(detail.enabled);
+        setDescription(detail.description);
+        setToolExposure(detail.toolExposure ?? {});
+        setHasOAuth(Boolean(detail.hasOAuth));
+      })
+      .catch((nextError) => {
+        if (!cancelled) setError(nextError instanceof Error ? nextError.message : String(nextError));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [server?.id, onRead]);
+
+  const canSave = Boolean(name.trim()) && (transport === "http" ? Boolean(url.trim()) : Boolean(command.trim()));
+
+  async function handleSave() {
+    setSaving(true);
+    setError("");
+    try {
+      await onSave(buildMcpServerPayload({
+        originalId: server?.id,
+        name,
+        scope,
+        transport,
+        enabled,
+        exposure,
+        description,
+        command,
+        args,
+        cwd,
+        url,
+        env: envRows,
+        headers: headerRows,
+        toolExposure,
+      }));
+      onSaved?.();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleInspect() {
+    if (!server || !onInspect) {
+      return;
+    }
+    setInspecting(true);
+    setError("");
+    setInspection(null);
+    try {
+      setInspection(await onInspect(server.id));
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setInspecting(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-4">
+      {loading ? <p className="text-sm text-muted-foreground">{t("capability.mcp.loading")}</p> : null}
+      {error ? <p className="text-sm text-destructive" role="status">{error}</p> : null}
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-1.5">
+          <Label htmlFor="mcp-name">{t("capability.mcp.name")}</Label>
+          <Input
+            id="mcp-name"
+            className="h-9 font-mono text-sm"
+            value={name}
+            placeholder="teambition-mcp"
+            onChange={(event) => setName(event.target.value)}
+          />
+          <p className="text-[11px] text-muted-foreground">{t("capability.mcp.nameHint")}</p>
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="mcp-scope">{t("capability.mcp.scope")}</Label>
+          <Select value={scope} onValueChange={(value) => setScope(value as "user" | "project")}>
+            <SelectTrigger id="mcp-scope" className="h-9 w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="user">{t("capability.mcp.scopeUser")}</SelectItem>
+              <SelectItem value="project">{t("capability.mcp.scopeProject")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid gap-1.5">
+        <Label htmlFor="mcp-transport">{t("capability.mcp.transport")}</Label>
+        <Select value={transport} onValueChange={(value) => setTransport(value as "stdio" | "http")}>
+          <SelectTrigger id="mcp-transport" className="h-9 w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="stdio">{t("capability.mcp.transport.stdio")}</SelectItem>
+            <SelectItem value="http">{t("capability.mcp.transport.http")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {transport === "stdio" ? (
+        <>
+          <div className="grid gap-1.5">
+            <Label htmlFor="mcp-command">{t("capability.mcp.command")}</Label>
+            <Input
+              id="mcp-command"
+              className="h-9 font-mono text-sm"
+              value={command}
+              placeholder="npx"
+              onChange={(event) => setCommand(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="mcp-args">{t("capability.mcp.args")}</Label>
+            <Input
+              id="mcp-args"
+              className="h-9 font-mono text-sm"
+              value={args}
+              placeholder="-y @scope/server --flag"
+              onChange={(event) => setArgs(event.target.value)}
+            />
+            <p className="text-[11px] text-muted-foreground">{t("capability.mcp.argsHint")}</p>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="mcp-cwd">{t("capability.mcp.cwd")}</Label>
+            <Input
+              id="mcp-cwd"
+              className="h-9 font-mono text-sm"
+              value={cwd}
+              placeholder={t("capability.mcp.cwdPlaceholder")}
+              onChange={(event) => setCwd(event.target.value)}
+            />
+          </div>
+          <KeyValueEditor
+            label={t("capability.mcp.env")}
+            rows={envRows}
+            onChange={setEnvRows}
+            keyPlaceholder={t("capability.mcp.keyPlaceholder")}
+            valuePlaceholder={t("capability.mcp.valuePlaceholder")}
+          />
+        </>
+      ) : (
+        <>
+          <div className="grid gap-1.5">
+            <Label htmlFor="mcp-url">{t("capability.mcp.url")}</Label>
+            <Input
+              id="mcp-url"
+              className="h-9 font-mono text-sm"
+              value={url}
+              placeholder="https://mcp.example.com/mcp"
+              onChange={(event) => setUrl(event.target.value)}
+            />
+          </div>
+          <KeyValueEditor
+            label={t("capability.mcp.headers")}
+            rows={headerRows}
+            onChange={setHeaderRows}
+            keyPlaceholder={t("capability.mcp.keyPlaceholder")}
+            valuePlaceholder={t("capability.mcp.valuePlaceholder")}
+          />
+          {hasOAuth ? <p className="text-xs text-muted-foreground">{t("capability.mcp.oauthNotice")}</p> : null}
+        </>
+      )}
+
+      <div className="grid gap-1.5">
+        <Label htmlFor="mcp-exposure">{t("capability.mcp.exposureLabel")}</Label>
+        <Select value={exposure} onValueChange={(value) => setExposure(value as CapabilityMcpExposure)}>
+          <SelectTrigger id="mcp-exposure" className="h-9 w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {CAPABILITY_MCP_EXPOSURES.map((value) => (
+              <SelectItem key={value} value={value}>{t(MCP_EXPOSURE_LABEL_KEYS[value])}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-[11px] text-muted-foreground">{t(MCP_EXPOSURE_HINT_KEYS[exposure])}</p>
+      </div>
+
+      {editing && server && server.tools.length ? (
+        <div className="grid gap-2">
+          <Label>{t("capability.mcp.toolsTitle", { count: server.tools.length })}</Label>
+          <div className="grid gap-1.5">
+            {server.tools.map((tool) => (
+              <div key={tool.name} className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-muted px-2.5 py-1.5">
+                <div className="min-w-0">
+                  <p className="truncate font-mono text-xs">{tool.name}</p>
+                  {tool.description ? <p className="truncate text-[11px] text-muted-foreground">{tool.description}</p> : null}
+                </div>
+                <Select
+                  value={toolExposure[tool.name] ?? "__server"}
+                  onValueChange={(value) => setToolExposure((current) => {
+                    const next = { ...current };
+                    if (value === "__server") {
+                      delete next[tool.name];
+                    } else {
+                      next[tool.name] = value;
+                    }
+                    return next;
+                  })}
+                >
+                  <SelectTrigger className="h-8 w-[200px] shrink-0" aria-label={t("capability.mcp.toolExposureAria", { name: tool.name })}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__server">{t("capability.mcp.followServer", { exposure: t(MCP_EXPOSURE_LABEL_KEYS[exposure]) })}</SelectItem>
+                    {CAPABILITY_MCP_EXPOSURES.map((value) => (
+                      <SelectItem key={value} value={value}>{t(MCP_EXPOSURE_LABEL_KEYS[value])}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid gap-1.5">
+        <Label htmlFor="mcp-description">{t("capability.mcp.description")}</Label>
+        <Input
+          id="mcp-description"
+          className="h-9 text-sm"
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+        />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Switch id="mcp-enabled" checked={enabled} onCheckedChange={setEnabled} />
+        <Label htmlFor="mcp-enabled" className="font-normal">{t("capability.mcp.enabled")}</Label>
+      </div>
+
+      {editing ? <code className="rounded-md bg-muted px-2 py-1 font-mono text-xs break-all">{server?.source}</code> : null}
+      {inspection ? (
+        inspection.status === "ready"
+          ? <p className="text-xs text-muted-foreground" role="status">{t("capability.mcp.testOk", { count: inspection.tools.length })}</p>
+          : <p className="text-xs text-destructive" role="status">{inspection.error}</p>
+      ) : null}
+
+      <div className="flex justify-end gap-2">
+        {editing && onInspect ? (
+          <Button type="button" variant="outline" disabled={saving || inspecting} onClick={() => void handleInspect()}>
+            {inspecting ? <Loader2 className="animate-spin" /> : <Plug />}
+            {inspecting ? t("capability.mcp.testing") : t("capability.mcp.test")}
+          </Button>
+        ) : null}
+        <Button type="button" disabled={!canSave || saving || loading} onClick={() => void handleSave()}>
+          {saving ? <Loader2 className="animate-spin" /> : <Save />}
+          {saving ? t("capability.mcp.saving") : t("common.save")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function McpServerDialog({
+  server,
+  defaultScope,
+  onClose,
+  onSave,
+  onReadMcpServer,
+}: {
+  server?: CapabilityMcpServer;
+  defaultScope: "user" | "project";
+  onClose: () => void;
+  onSave: (server: Record<string, unknown>) => Promise<unknown>;
+  onReadMcpServer: (id: string) => Promise<CapabilityMcpDetail>;
+}) {
+  const t = useT();
+  return (
+    <Dialog open onOpenChange={(next) => { if (!next) { onClose(); } }}>
+      <DialogContent className="grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-2xl max-h-[min(86svh,760px)]">
+        <DialogHeader>
+          <DialogTitle>{server ? t("capability.mcp.editTitle") : t("capability.mcp.newTitle")}</DialogTitle>
+          <DialogDescription className="sr-only">{t("capability.mcp.dialogHint")}</DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 overflow-y-auto pr-1">
+          <McpServerEditor
+            server={server}
+            defaultScope={defaultScope}
+            onSave={onSave}
+            onRead={onReadMcpServer}
+            onSaved={onClose}
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function CapabilityDot({ kind, children }: { kind: CapabilityKind; children: ReactNode }) {
   return (
     <span
@@ -5430,6 +6128,7 @@ function CapabilityDot({ kind, children }: { kind: CapabilityKind; children: Rea
 function capabilityInitial(item: CapabilityItem) {
   if (item.kind === "package") return "P";
   if (item.kind === "extension") return "E";
+  if (item.kind === "mcp") return "M";
   return item.name.trim().slice(0, 1).toUpperCase() || "S";
 }
 
@@ -5491,6 +6190,9 @@ function ProjectCapabilitiesPanel({
   onInstallPackage,
   onUpdatePackage,
   onInsertPackageCommand,
+  onSaveMcpServer,
+  onInspectMcpServer,
+  onReadMcpServer,
 }: {
   capabilities: CapabilitiesState;
   /** 面板只列项目级能力，标题里却全是 Skills / Packages —— 用项目名把归属说清楚。 */
@@ -5503,6 +6205,9 @@ function ProjectCapabilitiesPanel({
   onUpdatePackage: (source?: string, onProgress?: (message: string) => void) => Promise<unknown>;
   /** 点 action 只把命令填进 composer（不执行）。 */
   onInsertPackageCommand: (packageId: string, command: string) => void;
+  onSaveMcpServer: (server: Record<string, unknown>) => Promise<unknown>;
+  onInspectMcpServer: (id: string) => Promise<CapabilityMcpInspection>;
+  onReadMcpServer: (id: string) => Promise<CapabilityMcpDetail>;
 }) {
   const t = useT();
   const [busy, setBusy] = useState("");
@@ -5512,6 +6217,7 @@ function ProjectCapabilitiesPanel({
   const [skillImportPath, setSkillImportPath] = useState("");
   const [isChoosingSkillFolder, setIsChoosingSkillFolder] = useState(false);
   const [installOpen, setInstallOpen] = useState(false);
+  const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
   const [resourceRequest, setResourceRequest] = useState<PackageResourcesRequest | null>(null);
   /** The row the detail sheet is open for; both kinds click through to the same sheet as the page. */
   const [selected, setSelected] = useState<CapabilityItem | null>(null);
@@ -5521,6 +6227,11 @@ function ProjectCapabilitiesPanel({
   );
   const projectSkills = useMemo(() => scopedCapabilityItems(capabilities.skills, "project"), [capabilities.skills]);
   const projectPackages = useMemo(() => scopedCapabilityItems(capabilities.packages, "project"), [capabilities.packages]);
+  // MCP 也是项目级能力的一种：面板只列 scope=project 的服务器，agent 级的在全局页。
+  const projectMcp = useMemo(
+    () => (capabilities.mcpServers ?? []).filter((server) => server.scope === "project"),
+    [capabilities.mcpServers],
+  );
   const searchedSkills = useMemo(
     () => projectSkills.filter((item) => matchesCapabilityQuery(item, query)),
     [projectSkills, query],
@@ -5528,6 +6239,10 @@ function ProjectCapabilitiesPanel({
   const searchedPackages = useMemo(
     () => projectPackages.filter((item) => matchesCapabilityQuery(item, query)),
     [projectPackages, query],
+  );
+  const searchedMcp = useMemo(
+    () => projectMcp.filter((item) => matchesCapabilityQuery(item, query)),
+    [projectMcp, query],
   );
 
   async function toggle(item: CapabilityItem, enabled: boolean) {
@@ -5629,7 +6344,9 @@ function ProjectCapabilitiesPanel({
               <div className="grid min-w-0 gap-1">
                 <strong className="truncate text-[13px] font-medium">{item.name}</strong>
                 <span className="truncate text-[12px] text-muted-foreground">
-                  {item.kind === "package" ? item.source : item.description || item.path}
+                  {item.kind === "package" || item.kind === "mcp"
+                    ? item.description || item.source
+                    : item.description || item.path}
                 </span>
                 {/* Same four resource types as the Global page's package cards, minus the empty
                     ones + the pill padding — a narrow panel row is a list, not a market grid. */}
@@ -5715,6 +6432,19 @@ function ProjectCapabilitiesPanel({
           <FolderOpen className="size-[17px]" />
         </Button>
       ))}
+      {renderSection("mcp", t("capability.section.mcp"), searchedMcp, t("capability.context.noMcp"), (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="-mr-1 size-7 shrink-0 text-muted-foreground"
+          onClick={() => setMcpDialogOpen(true)}
+          aria-label={t("capability.mcp.addServer")}
+          title={t("capability.mcp.addServer")}
+        >
+          <Plug className="size-[17px]" />
+        </Button>
+      ))}
       {renderSection("packages", t("capability.section.packages"), searchedPackages, t("capability.context.noPackages"), (
         <div className="flex shrink-0 items-center gap-0.5">
           {/* 面板这里和全局页的 Packages 一样，给一个通向 pi.dev 目录的入口。 */}
@@ -5758,6 +6488,14 @@ function ProjectCapabilitiesPanel({
           onInstall={onInstallPackage}
         />
       ) : null}
+      {mcpDialogOpen ? (
+        <McpServerDialog
+          defaultScope="project"
+          onClose={() => setMcpDialogOpen(false)}
+          onSave={onSaveMcpServer}
+          onReadMcpServer={onReadMcpServer}
+        />
+      ) : null}
       <PackageResourcesDialog request={resourceRequest} onClose={() => setResourceRequest(null)} />
       {selected ? (
         <CapabilityDetailDialog
@@ -5768,6 +6506,9 @@ function ProjectCapabilitiesPanel({
           onSetPinned={onSetPinned}
           onDelete={setPendingDelete}
           onUpdatePackage={onUpdatePackage}
+          onSaveMcpServer={onSaveMcpServer}
+          onInspectMcpServer={onInspectMcpServer}
+          onReadMcpServer={onReadMcpServer}
         />
       ) : null}
     </>
@@ -5865,6 +6606,7 @@ function ProjectSidebar({
   isBusy,
   onCreateProject,
   onUpdateProject,
+  onSaveToolSettings,
   onPinProject,
   onReorderProjects,
   onRemoveProject,
@@ -5893,6 +6635,8 @@ function ProjectSidebar({
   isBusy: boolean;
   onCreateProject: (name: string, cwd: string) => Promise<CreateProjectResult>;
   onUpdateProject: (projectId: string, name: string, cwd: string) => Promise<void>;
+  /** 工具开关（codemode）：写的是 pi 自己的 `defaultTools`，见 server/toolSettings.mjs。 */
+  onSaveToolSettings: (input: { scope: "user" | "project"; state: ToolToggleState; projectId?: string }) => Promise<unknown>;
   onPinProject: (projectId: string, pinned: boolean) => Promise<void>;
   onReorderProjects: (projectIds: string[]) => Promise<void>;
   onRemoveProject: (projectId: string) => Promise<void>;
@@ -6034,6 +6778,20 @@ function ProjectSidebar({
 
     if (dialog.kind === "edit-project") {
       await onUpdateProject(dialog.project.id, dialog.name, dialog.cwd);
+      // 项目自身的字段已经存好了；codemode 是另一份文件（`.pi/settings.json`），
+      // 只在真改过时才写，失败就把弹窗留着把服务端的原话显示出来（例如项目没被信任）。
+      if (dialog.codemode !== (dialog.project.codemode ?? "inherit")) {
+        try {
+          await onSaveToolSettings({
+            scope: "project",
+            projectId: dialog.project.id,
+            state: dialog.codemode,
+          });
+        } catch (error) {
+          setProjectSubmitError(error instanceof Error ? error.message : String(error));
+          return;
+        }
+      }
     }
 
     setDialog(null);
@@ -6630,7 +7388,13 @@ function ProjectSidebar({
                         <FolderOpen />
                         {revealLabel}
                       </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => setDialog({ kind: "edit-project", project, name: project.name, cwd: project.cwd })}>
+                      <DropdownMenuItem onSelect={() => setDialog({
+                        kind: "edit-project",
+                        project,
+                        name: project.name,
+                        cwd: project.cwd,
+                        codemode: project.codemode ?? "inherit",
+                      })}>
                         <Settings />
                         {t("sidebar.editProject")}
                       </DropdownMenuItem>
@@ -6783,7 +7547,13 @@ function ProjectSidebar({
                 onClick={() => {
                   const project = hoverCard.project;
                   hideHoverCard();
-                  setDialog({ kind: "edit-project", project, name: project.name, cwd: project.cwd });
+                  setDialog({
+                    kind: "edit-project",
+                    project,
+                    name: project.name,
+                    cwd: project.cwd,
+                    codemode: project.codemode ?? "inherit",
+                  });
                 }}
               >
                 <Settings className="size-[15px] shrink-0 text-muted-foreground" />
@@ -6996,7 +7766,7 @@ function SidebarSessionRow({
 
 type SidebarDialog =
   | { kind: "create-project"; name: string; cwd: string }
-  | { kind: "edit-project"; project: ProjectSummary; name: string; cwd: string }
+  | { kind: "edit-project"; project: ProjectSummary; name: string; cwd: string; codemode: ToolToggleState }
   | { kind: "remove-project"; project: ProjectSummary }
   | { kind: "archive-session"; projectId: string; sessionPath: string; title: string; inWorktree?: boolean };
 
@@ -7145,6 +7915,34 @@ function SidebarDialogView({
               <span className="min-w-0 break-words">
                 {t("trust.existingProject", { name: existingProject.name, cwd: existingProject.cwd })}
               </span>
+            </div>
+          ) : null}
+          {dialog.kind === "edit-project" ? (
+            <div className="grid gap-2 rounded-md border border-border p-3.5">
+              <div className="grid gap-1">
+                <Label htmlFor="sidebar-project-codemode">{t("dialog.codemode.label")}</Label>
+                <p className="text-sm text-muted-foreground">{t("dialog.codemode.desc")}</p>
+              </div>
+              <Select
+                value={dialog.codemode}
+                onValueChange={(value) =>
+                  onChange({ ...dialog, codemode: value as ToolToggleState })
+                }
+              >
+                <SelectTrigger id="sidebar-project-codemode" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {toolToggleOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {t(option.labelKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {t("dialog.codemode.hint", { cwd: dialog.cwd })}
+              </p>
             </div>
           ) : null}
           {pickerError ? (

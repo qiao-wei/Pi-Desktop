@@ -40,6 +40,30 @@ import { detectTerminalApps, revealRunLog, runProjectCommand } from "./runProjec
 import { createProjectCommandRuns } from "./projectCommandRuns.mjs";
 import { buildCommitMessagePrompt, normalizeGeneratedCommitMessage } from "./commitMessage.mjs";
 import { buildConflictPrompt } from "./conflictPrompt.mjs";
+import {
+  DEFAULT_MCP_EXPOSURE,
+  mcpConfigPath,
+  mcpFileScope,
+  mcpToolExposure,
+  mergeMcpServerEntries,
+  normalizeMcpServerEntry,
+  normalizeMcpServerName,
+  patchMcpServer,
+  readMcpConfigPath,
+  removeMcpServer as removeMcpServerEntry,
+  upsertMcpServer,
+  writeMcpConfigPath,
+} from "./mcpConfig.mjs";
+import {
+  MANAGED_TOOL_NAME,
+  applyToolToggle,
+  isToolToggleState,
+  readToolSettingsFile,
+  readToolSettingsSnapshot,
+  readToolToggle,
+  toolSettingsPath,
+  writeToolSettingsFile,
+} from "./toolSettings.mjs";
 import { oneShotModelError, oneShotThinkingEffort } from "./oneShotModel.mjs";
 import {
   applyModelToSession,
@@ -53,12 +77,15 @@ import {
 import { StringEnum, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import { Type } from "typebox";
-import { Client, SSEClientTransport, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import {
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
+  createCodemodeExtension,
+  createMcpExtension,
+  createToolSearchExtension,
   DefaultResourceLoader,
   DefaultPackageManager,
   main as runPiCli,
@@ -124,6 +151,7 @@ import {
   shouldRetryWithEphemeralPort,
 } from "./bridgeListen.mjs";
 import { resolveProjectTrusted } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/project-trust.js";
+import { hasTrustRequiringProjectResources } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/trust-manager.js";
 
 const host = process.env.PI_DESKTOP_HOST ?? process.env.ENGBUDDY_HOST ?? "127.0.0.1";
 // The bridge owns its port: prefer 6474, take any free one when that is taken. Hosts discover the
@@ -190,7 +218,7 @@ const diagnosticLogFile = process.env.PI_DESKTOP_DIAGNOSTIC_LOG?.trim() || join(
 const diagnosticsEnabled = process.env.PI_DESKTOP_DIAGNOSTICS_ENABLED === "1";
 let apiBase = bridgeUrlFor(host, port);
 const piDesktopCapabilitiesCustomType = "pi-desktop.capabilities";
-const capabilitiesConfigVersion = 2;
+const capabilitiesConfigVersion = 3;
 const capabilitiesDefaultsFile = process.env.PI_DESKTOP_CAPABILITIES_DEFAULTS_FILE?.trim()
   || join(serverDir, "..", "capabilities.defaults.json");
 const maxAttachmentCount = 10;
@@ -1075,8 +1103,8 @@ async function bindPiDesktopSessionExtensions(session, runtimeRef, uiBridge) {
     // behaves in "tui" mode; in plain "rpc" it is a headless stub. This host is not
     // headless - createExtensionUiBridge implements custom() for real (it renders the
     // TUI component to lines and forwards keystrokes), so extensions that guard
-    // terminal-only overlays with `ctx.mode === "tui"` (pi-mcp-adapter >= 2.27.0's
-    // canRenderPanel) would otherwise silently fall back to a text notification.
+    // terminal-only overlays with `ctx.mode === "tui"` (e.g. a registered MCP
+    // server's panel) would otherwise silently fall back to a text notification.
     mode: "tui",
     commandContextActions: createPiDesktopCommandContextActions(runtimeRef),
     abortHandler: () => {
@@ -1321,6 +1349,38 @@ undefined
       const body = await readJson(req);
       const result = await removeCapabilityExtension(body);
       sendJson(res, 200, result);
+      return;
+    }
+
+    // MCP 的写路径：服务器定义进 pi 的 mcp.json（全局 / 项目），app 元数据进 capabilities.json。
+    if (req.method === "POST" && url.pathname === "/api/capabilities/mcp/save") {
+      const body = await readJson(req);
+      sendJson(res, 200, await saveMcpServer(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/capabilities/mcp/remove") {
+      const body = await readJson(req);
+      sendJson(res, 200, await removeMcpServer(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/capabilities/mcp/inspect") {
+      const body = await readJson(req);
+      sendJson(res, 200, await inspectMcpServerCapability(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/capabilities/mcp/read") {
+      const body = await readJson(req);
+      sendJson(res, 200, readMcpServerCapability(body));
+      return;
+    }
+
+    // 「工具开关」（codemode）写的就是 pi 自己的 defaultTools，见 server/toolSettings.mjs。
+    if (req.method === "POST" && url.pathname === "/api/tools/settings") {
+      const body = await readJson(req);
+      sendJson(res, 200, await saveToolSettings(body));
       return;
     }
 
@@ -2042,6 +2102,11 @@ async function createRuntime(project, sessionPath, trace = {}) {
     },
     retry: { enabled: true, maxRetries: 2, baseDelayMs: 500 },
   });
+  // codemode / tool_search 是 pi 0.99 的内置扩展，注册时是 inactive，要靠 settings 里的
+  // `defaultTools` 打开。Desktop **不替用户默认打开**：这里既不写文件也不 applyOverrides，
+  // 读的就是 pi 自己的那份设置（不写 = 内建 read/bash/edit/write）。开关在「设置 → 个性化」，
+  // 项目层写在项目自己的 `.pi/settings.json`，和终端 TUI 是同一个键，两边不可能不一致。
+  // 有 codemode 型 MCP 服务器时 pi 仍会自动激活 codemode —— 内核行为，这里不插手。
 
   let sessionManager = sessionPath
     ? SessionManager.open(sessionPath, getProjectSessionDir(project))
@@ -2147,6 +2212,14 @@ async function createRuntime(project, sessionPath, trace = {}) {
         appendSystemPromptOverride: (base) => [...base, hostSystemPrompt],
         extensionFactories: [
           createPiDesktopRuntimeExtension(project, workspaceCwd),
+          // pi 的 CLI 把这几个当内置扩展加载；SDK 宿主必须自己加进 factories
+          // （docs/sdk.md#codemode-mcp）。加进来才能和 TUI 用同一份内核：
+          // - codemode：QuickJS 沙箱里跑模型写的 JS，可并行调工具；
+          // - tool_search：把 deferred（如 MCP）工具搜出来声明给模型；
+          // - mcp：读 agent 目录的 mcp.json + 信任项目的 .pi/mcp.json，session_start 连接。
+          createCodemodeExtension(),
+          createToolSearchExtension(),
+          createMcpExtension(),
         ],
       },
       resourceLoaderReloadOptions: {
@@ -2617,95 +2690,289 @@ function createPiDesktopRuntimeExtension(project, workspaceCwd = project.cwd) {
   };
 }
 
-function createMcpToolsStatus(status = "idle", message = "") {
+/**
+ * MCP 探测超时（毫秒）：只用于能力页显式的「测试连接」，不参与会话自身的连接流程。
+ */
+const mcpToolProbeTimeoutMs = Number(process.env.PI_DESKTOP_MCP_PROBE_TIMEOUT_MS ?? 15000);
+
+/** app 自己的 MCP 元数据（pinned / 描述）在 capabilities.json 里的键：`<scope>:<name>`。 */
+function mcpMetaKey(scope, name) {
+  return `${scope === "project" ? "project" : "user"}:${name}`;
+}
+
+/** 能力 id（`user:name` / `project:name`）反解成 scope + 服务器名。 */
+function parseMcpCapabilityId(value) {
+  const raw = String(value ?? "").trim();
+  const separator = raw.indexOf(":");
+  if (separator === -1) {
+    return null;
+  }
+  const scope = raw.slice(0, separator) === "project" ? "project" : "user";
+  const name = normalizeMcpServerName(raw.slice(separator + 1));
+  return name ? { scope, name } : null;
+}
+
+/**
+ * 全局 + 项目两份 `mcp.json` 的运行视图。同名时项目覆盖全局（pi 的语义），
+ * `pinned` / 描述这些 pi 不认识的字段来自 capabilities.json 的 `mcp` 段。
+ */
+function readMcpRuntimeState(targetRuntime) {
+  const project = findProject(targetRuntime.projectId);
+  const globalPath = mcpConfigPath({ agentDir, projectCwd: project.cwd, scope: "user" });
+  const projectPath = mcpConfigPath({ agentDir, projectCwd: project.cwd, scope: "project" });
+  const globalConfig = readMcpConfigPath(globalPath);
+  // 项目 `.pi/mcp.json` 和 `.pi/extensions` 同一条规矩：项目没被信任就根本不会加载，
+  // 这里也不读，免得 UI 显示一堆内核看不见的服务器。
+  const projectTrusted = targetRuntime.settingsManager?.isProjectTrusted?.() !== false;
+  const projectConfig = projectTrusted ? readMcpConfigPath(projectPath) : { config: { mcpServers: {} }, servers: [], errors: [] };
+  const config = readCapabilitiesConfig();
+  const metaMap = (scope, servers) => Object.fromEntries(
+    servers.map((server) => [server.name, config.mcp?.[mcpMetaKey(scope, server.name)] ?? {}]),
+  );
   return {
-    status,
-    message,
-    totalTools: 0,
-    enabledTools: 0,
-    errorCount: 0,
-    servers: [],
-    tools: [],
-    updatedAt: Date.now(),
-    selectionHash: "",
+    project,
+    globalPath,
+    projectPath,
+    globalConfig,
+    projectConfig,
+    servers: mergeMcpServerEntries(
+      globalConfig.servers,
+      projectConfig.servers,
+      metaMap("user", globalConfig.servers),
+      metaMap("project", projectConfig.servers),
+    ),
+    errors: [...globalConfig.errors, ...projectConfig.errors],
   };
 }
 
-async function inspectMcpServerTools(targetRuntime, server) {
-  let client;
-  let transport;
-  try {
-    ({ client, transport } = await connectMcpInspector(targetRuntime, server));
-    const result = await withMcpProbeTimeout(client.listTools(), `${server.name} listTools`);
-    const rawTools = Array.isArray(result?.tools) ? result.tools : [];
-    const tools = rawTools
-      .filter((tool) => tool?.name)
-      .map((tool) => {
-        const originalName = String(tool.name);
-        const name = formatMcpToolName(originalName, server.id);
-        return {
-          name,
-          originalName,
-          title: String(tool.title ?? originalName),
-          description: String(tool.description ?? ""),
-          enabled: isMcpToolEnabled(server, name, originalName),
-        };
-      })
-      .sort((left, right) => left.name.localeCompare(right.name));
-    return {
-      id: server.id,
-      name: server.name,
-      status: "ready",
-      toolCount: tools.length,
-      enabledToolCount: tools.filter((tool) => tool.enabled).length,
-      tools,
-    };
-  } catch (error) {
-    return {
-      id: server.id,
-      name: server.name,
-      status: "error",
-      toolCount: 0,
-      enabledToolCount: 0,
-      tools: [],
-      error: error instanceof Error ? error.message : String(error),
-    };
-  } finally {
-    await closeMcpInspector(client, transport);
+/**
+ * 当前会话里 pi 真正注册的 MCP 工具，按 `mcp__<server>` 命名空间分组。
+ * 不额外连一遍服务器——直接读会话状态，和 TUI 看到的是同一份内核事实。
+ */
+function mcpToolsByServer(targetRuntime) {
+  const grouped = new Map();
+  for (const tool of targetRuntime.session?.getAllTools?.() ?? []) {
+    const namespace = tool?.namespace?.name;
+    if (typeof namespace !== "string" || !namespace.startsWith("mcp__")) {
+      continue;
+    }
+    const server = namespace.slice("mcp__".length);
+    const name = typeof tool.name === "string" && tool.name.startsWith(`${namespace}__`)
+      ? tool.name.slice(namespace.length + 2)
+      : String(tool.name ?? "");
+    const list = grouped.get(server) ?? [];
+    list.push({
+      name,
+      description: String(tool.description ?? ""),
+      exposure: String(tool.exposure ?? DEFAULT_MCP_EXPOSURE),
+    });
+    grouped.set(server, list);
   }
+  for (const list of grouped.values()) {
+    list.sort((left, right) => left.name.localeCompare(right.name));
+  }
+  return grouped;
+}
+
+/** 能力清单的 MCP 条目：文件事实（mcp.json）× 会话事实（已注册工具）× app 元数据。 */
+function mcpCapabilityEntries(targetRuntime) {
+  const state = readMcpRuntimeState(targetRuntime);
+  const toolsByServer = mcpToolsByServer(targetRuntime);
+  const entries = state.servers.map((server) => {
+    const tools = toolsByServer.get(server.name) ?? [];
+    return {
+      id: `${server.scope}:${server.name}`,
+      kind: "mcp",
+      name: server.name,
+      description: String(server.meta?.description ?? ""),
+      transport: server.transport,
+      scope: server.scope,
+      source: server.scope === "project" ? state.projectPath : state.globalPath,
+      exposure: server.exposure,
+      enabled: server.enabled,
+      defaultEnabled: server.enabled,
+      overridesGlobal: Boolean(server.overridesGlobal),
+      active: server.enabled && tools.length > 0,
+      toolCount: tools.length,
+      tools: tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        exposure: mcpToolExposure(server, tool.name),
+        declaredExposure: tool.exposure,
+      })),
+      pinned: Boolean(server.meta?.pinned),
+    };
+  });
+  return { ...state, entries };
+}
+
+/** 写项目 `.pi/mcp.json` 前先确认项目已信任——未信任时 pi 根本不会加载它。 */
+function assertMcpWriteScope(targetRuntime, scope) {
+  if (scope === "project" && targetRuntime.settingsManager?.isProjectTrusted?.() === false) {
+    throw new Error("Trust this project before editing its .pi/mcp.json.");
+  }
+}
+
+/* ------------------------------- 工具开关 ------------------------------- */
+
+/**
+ * 桌面端的「工具开关」就是 pi 自己的 `defaultTools`（全局 + 项目 `.pi/settings.json`），
+ * 读写规则全在 `server/toolSettings.mjs`。这里只做三件事：读现状、写文件、把变化落到已打开的会话。
+ */
+function toolSettingsSnapshotFor(targetRuntime = runtime) {
+  // 会话对象上只有 projectId（没有 project），所以要回项目清单里查。
+  const project = projects.find((entry) => entry.id === targetRuntime?.projectId);
+  const snapshot = readToolSettingsSnapshot({
+    agentDir,
+    projectCwd: project?.cwd ?? appCwd,
+    // 和 `.pi/mcp.json` 同一条信任线：未信任的项目，pi 根本不会读它的 `.pi`。
+    projectTrusted: targetRuntime?.settingsManager?.isProjectTrusted?.() !== false,
+    toolName: MANAGED_TOOL_NAME,
+  });
+  // 会话里**实际**激活了哪些工具。不总是等于 effective：MCP 扩展会自己把 codemode 加回来，
+  // tool_search 也会因为 deferred 型工具而自动激活。暴露出来才看得出开关到底有没有生效。
+  return {
+    ...snapshot,
+    activeTools: targetRuntime?.session?.getActiveToolNames?.() ?? [],
+  };
+}
+
+/** 项目清单里每个项目自己那一层的三态（只读它自己的文件，不做合并）。 */
+function projectToolToggleState(project) {
+  return readToolToggle(
+    readToolSettingsFile(toolSettingsPath({ agentDir, projectCwd: project.cwd, scope: "project" })).defaultTools,
+    MANAGED_TOOL_NAME,
+  );
+}
+
+/**
+ * 有 codemode 型 MCP 服务器时 pi 会自己把 codemode 加回激活列表（`ensureDiscoveryActive`）。
+ * 那部分不归这个开关管，所以下面“关”的时候也不能把它摘掉——摘了 MCP 就不给模型了。
+ */
+function mcpNeedsCodemode(targetRuntime) {
+  try {
+    return mcpCapabilityEntries(targetRuntime).entries.some((entry) =>
+      entry.enabled !== false && (entry.exposure === "codemode" || entry.exposure === "codemode-deferred"),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** 写设置时判断一个项目信不信任；已打开的会话优先用它的真值，否则回落到 trust.json。 */
+function projectTrustForWrite(cwd) {
+  const open = [...openRuntimes.values()].find((candidate) =>
+    projects.find((entry) => entry.id === candidate.projectId)?.cwd === cwd,
+  );
+  if (open?.settingsManager?.isProjectTrusted) {
+    return open.settingsManager.isProjectTrusted();
+  }
+  const decision = new ProjectTrustStore(agentDir).get(cwd);
+  if (decision !== null && decision !== undefined) {
+    return decision;
+  }
+  if (!hasTrustRequiringProjectResources(cwd)) {
+    return true;
+  }
+  return readToolSettingsFile(join(agentDir, "settings.json")).defaultProjectTrust === "always";
+}
+
+/**
+ * 把开关的变化落到已经打开的会话上。
+ *
+ * 为什么要专门做这一步：pi 只在**建会话**的时候按 `defaultTools` 算激活工具，改设置对运行中的
+ * 会话没有任何影响（TUI 也一样，改完得重开）。这里补上，省得用户以为开关是坏的。
+ * 只碰 codemode 一个名字；有需要它的 MCP 服务器时不往下摘。
+ */
+function applyToolToggleToRuntimes({ projectId, scope } = {}) {
+  for (const targetRuntime of openRuntimes.values()) {
+    if (scope === "project" && projectId && targetRuntime.projectId !== projectId) {
+      continue;
+    }
+    // 和 reloadRuntimeTargets 同一个规矩：正在跑的会话别动它的工具清单。
+    if (isSessionBusy(targetRuntime.session)) {
+      continue;
+    }
+    const active = targetRuntime.session.getActiveToolNames();
+    const has = active.includes(MANAGED_TOOL_NAME);
+    const shouldHave = toolSettingsSnapshotFor(targetRuntime).effective || mcpNeedsCodemode(targetRuntime);
+    if (shouldHave && !has) {
+      targetRuntime.session.setActiveToolsByName([...active, MANAGED_TOOL_NAME]);
+    } else if (!shouldHave && has) {
+      targetRuntime.session.setActiveToolsByName(active.filter((name) => name !== MANAGED_TOOL_NAME));
+    }
+  }
+}
+
+/** 写开关：`scope: "user"` 写 agent 目录，`"project"` 写目标项目自己的 `.pi/settings.json`。 */
+async function saveToolSettings(body) {
+  const scope = body?.scope === "project" ? "project" : "user";
+  const state = body?.state;
+  if (!isToolToggleState(state)) {
+    throw new Error("Invalid tool toggle state.");
+  }
+  if (scope === "user" && state === "inherit") {
+    throw new Error("The global layer has nothing to inherit.");
+  }
+
+  const project = scope === "project"
+    ? projects.find((entry) => entry.id === String(body?.projectId ?? ""))
+    : null;
+  if (scope === "project" && !project) {
+    throw new Error("Project not found.");
+  }
+  if (scope === "project" && !projectTrustForWrite(project.cwd)) {
+    throw new Error("Trust this project before editing its .pi/settings.json.");
+  }
+
+  const path = toolSettingsPath({
+    agentDir,
+    projectCwd: project?.cwd ?? projects.find((entry) => entry.id === runtime.projectId)?.cwd ?? appCwd,
+    scope,
+  });
+  const settings = readToolSettingsFile(path);
+  const next = applyToolToggle(settings.defaultTools, state, { scope, toolName: MANAGED_TOOL_NAME });
+  if (next === undefined) {
+    delete settings.defaultTools;
+  } else {
+    settings.defaultTools = next;
+  }
+  writeToolSettingsFile(path, settings);
+
+  applyToolToggleToRuntimes({ projectId: project?.id, scope });
+  // 回整份 bootstrap：开关一变，`toolSettings` 和项目清单里的 `codemode` 都要跟着变，
+  // 而且这是一次用户动作（不是每次敲键），不值得为它单搞一个增量 patch 通道。
+  return buildSnapshot(getRuntimeForRequest(body));
+}
+
+/** 按能力 id 找到一条服务器的完整归一化配置（编辑器 / 探测用）。 */
+function findMcpServer(targetRuntime, id) {
+  const parsed = parseMcpCapabilityId(id);
+  if (!parsed) {
+    return null;
+  }
+  const state = readMcpRuntimeState(targetRuntime);
+  const server = state.servers.find((entry) => entry.name === parsed.name && entry.scope === parsed.scope);
+  return server ? { state, server } : null;
 }
 
 async function connectMcpInspector(targetRuntime, server) {
   if (server.transport === "stdio") {
+    const environment = Object.fromEntries(
+      Object.entries({ ...process.env, ...server.env })
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => [key, String(value)]),
+    );
     return connectMcpInspectorWithTransport(server, new StdioClientTransport({
       command: server.command,
       args: server.args,
-      env: normalizeMcpInspectorEnv({ ...process.env, ...server.env }),
-      cwd: resolveMcpServerCwd(targetRuntime, server),
+      env: environment,
+      cwd: resolveMcpInspectorCwd(findProject(targetRuntime.projectId), server),
       stderr: "pipe",
     }));
   }
-
-  const url = new URL(server.url);
   const requestInit = Object.keys(server.headers).length ? { headers: server.headers } : undefined;
-  if (server.transport === "sse") {
-    return connectMcpInspectorWithTransport(server, new SSEClientTransport(url, {
-      eventSourceInit: requestInit,
-      requestInit,
-    }));
-  }
-
-  try {
-    return await connectMcpInspectorWithTransport(server, new StreamableHTTPClientTransport(url, { requestInit }));
-  } catch (error) {
-    if (String(error instanceof Error ? error.message : error).toLowerCase().includes("unauthorized")) {
-      throw error;
-    }
-    return connectMcpInspectorWithTransport(server, new SSEClientTransport(url, {
-      eventSourceInit: requestInit,
-      requestInit,
-    }));
-  }
+  return connectMcpInspectorWithTransport(server, new StreamableHTTPClientTransport(new URL(server.url), { requestInit }));
 }
 
 async function connectMcpInspectorWithTransport(server, transport) {
@@ -2719,22 +2986,23 @@ async function connectMcpInspectorWithTransport(server, transport) {
   }
 }
 
-function resolveMcpServerCwd(targetRuntime, server) {
-  if (!server.cwd) {
-    return findProject(targetRuntime.projectId).cwd;
+/** 相对 cwd 按项目目录解析，`~/` 展开 home——和 pi 读配置时的规则一致。 */
+function resolveMcpInspectorCwd(project, server) {
+  const raw = String(server.cwd ?? "").trim();
+  if (!raw) {
+    return project.cwd;
   }
-  return isAbsolute(server.cwd) ? server.cwd : resolve(findProject(targetRuntime.projectId).cwd, server.cwd);
-}
-
-function normalizeMcpInspectorEnv(env) {
-  return Object.fromEntries(Object.entries(env).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]));
+  if (raw === "~") {
+    return homedir();
+  }
+  if (raw.startsWith("~/")) {
+    return resolve(homedir(), raw.slice(2));
+  }
+  return isAbsolute(raw) ? raw : resolve(project.cwd, raw);
 }
 
 async function closeMcpInspector(client, transport) {
-  await Promise.allSettled([
-    client?.close?.(),
-    transport?.close?.(),
-  ]);
+  await Promise.allSettled([client?.close?.(), transport?.close?.()]);
 }
 
 async function withMcpProbeTimeout(promise, label) {
@@ -2752,38 +3020,186 @@ async function withMcpProbeTimeout(promise, label) {
   }
 }
 
-function formatMcpToolName(toolName, serverId) {
-  const serverPrefix = String(serverId).replace(/[^A-Za-z0-9_-]/g, "_") || "mcp";
-  const sanitizedTool = String(toolName).replace(/\./g, "_");
-  return `${serverPrefix}_${sanitizedTool}`;
-}
-
-function isMcpToolEnabled(server, name, originalName) {
-  const candidates = [name, originalName].filter(Boolean);
-  const included = server.includeTools.length === 0 || selectorListMatches(server.includeTools, candidates);
-  const excluded = selectorListMatches(server.excludeTools, candidates);
-  return included && !excluded;
-}
-
-function selectorListMatches(selectors, candidates) {
-  return selectors.some((selector) => candidates.some((candidate) => toolSelectorMatches(selector, candidate)));
-}
-
-function toolSelectorMatches(selector, value) {
-  if (selector === value) {
-    return true;
+/** 显式探测：连一次、列出工具、把连接错误原文带回来。 */
+async function inspectMcpServer(targetRuntime, id) {
+  const found = findMcpServer(targetRuntime, id);
+  if (!found) {
+    throw new Error("MCP server not found.");
   }
-  const escaped = String(selector).replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
-  return new RegExp(`^${escaped}$`).test(String(value));
+  const { server } = found;
+  let client;
+  let transport;
+  try {
+    ({ client, transport } = await connectMcpInspector(targetRuntime, server));
+    const result = await withMcpProbeTimeout(client.listTools(), `${server.name} listTools`);
+    const tools = (Array.isArray(result?.tools) ? result.tools : [])
+      .filter((tool) => tool?.name)
+      .map((tool) => ({
+        name: String(tool.name),
+        title: String(tool.title ?? tool.name),
+        description: String(tool.description ?? ""),
+        exposure: mcpToolExposure(server, String(tool.name)),
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    return { id, name: server.name, status: "ready", tools, error: "" };
+  } catch (error) {
+    return { id, name: server.name, status: "error", tools: [], error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    await closeMcpInspector(client, transport);
+  }
+}
+
+/** 把能力页表单的字段拼成 pi 的 `mcpServers` 条目形状。 */
+function mcpRawConfigFromBody(body) {
+  const source = body && typeof body === "object" ? body : {};
+  const transport = source.transport === "http" ? "http" : "stdio";
+  const raw = transport === "http"
+    ? { url: String(source.url ?? "").trim(), headers: normalizeStringMap(source.headers) }
+    : {
+      command: String(source.command ?? "").trim(),
+      args: splitArgs(source.args),
+      env: normalizeStringMap(source.env),
+      cwd: String(source.cwd ?? "").trim(),
+    };
+  if (source.exposure) {
+    raw.exposure = String(source.exposure);
+  }
+  if (source.toolExposure && typeof source.toolExposure === "object" && !Array.isArray(source.toolExposure)) {
+    raw.toolExposure = source.toolExposure;
+  }
+  if (source.enabled === false) {
+    raw.enabled = false;
+  }
+  if (source.timeout !== undefined && source.timeout !== null && source.timeout !== "") {
+    raw.timeout = Number(source.timeout);
+  }
+  return raw;
+}
+
+/** 落盘一份服务器：pi 认识的字段进 mcp.json，app 的 pinned / 描述进 capabilities.json。 */
+function saveMcpServerDefinition(targetRuntime, body) {
+  const name = normalizeMcpServerName(body?.name);
+  if (!name) {
+    throw new Error('MCP server name may only contain letters, digits, "_" and "-".');
+  }
+  const scope = mcpFileScope(body?.scope);
+  assertMcpWriteScope(targetRuntime, scope);
+  const state = readMcpRuntimeState(targetRuntime);
+  const normalized = normalizeMcpServerEntry(name, mcpRawConfigFromBody(body));
+  if (normalized.error) {
+    throw new Error(normalized.error);
+  }
+
+  // 编辑器允许改名 / 换作用域：先把旧条目从它原来那份文件里摘掉（含元数据），
+  // 否则会留下一条指向旧名字的孤儿服务器。
+  const original = parseMcpCapabilityId(body?.originalId ?? body?.id);
+  if (original && (original.name !== name || original.scope !== scope)) {
+    assertMcpWriteScope(targetRuntime, original.scope);
+    const originPath = original.scope === "project" ? state.projectPath : state.globalPath;
+    const removed = removeMcpServerEntry(readMcpConfigPath(originPath).config, original.name);
+    if (removed.removed) {
+      writeMcpConfigPath(originPath, removed.config);
+    }
+    const originConfig = readCapabilitiesConfig();
+    if (originConfig.mcp) {
+      delete originConfig.mcp[mcpMetaKey(original.scope, original.name)];
+      writeCapabilitiesConfig(originConfig);
+    }
+  }
+
+  const path = scope === "project" ? state.projectPath : state.globalPath;
+  // 重新读一遍：上面可能刚写过别的文件，用最新内容做 upsert 更稳。
+  writeMcpConfigPath(path, upsertMcpServer(readMcpConfigPath(path).config, name, normalized.server));
+
+  const config = readCapabilitiesConfig();
+  const key = mcpMetaKey(scope, name);
+  config.mcp = {
+    ...(config.mcp ?? {}),
+    [key]: {
+      pinned: Boolean(body?.pinned ?? config.mcp?.[key]?.pinned),
+      description: String(body?.description ?? "").trim(),
+    },
+  };
+  writeCapabilitiesConfig(config);
+  return { scope, name, path };
+}
+
+/** 编辑器用的原始字段（含 env / headers 这类可能含密钥的值，所以只在点开时按需读）。 */
+function readMcpServerCapability(body) {
+  const targetRuntime = getRuntimeForRequest(body);
+  const id = String(body?.id ?? "");
+  const found = findMcpServer(targetRuntime, id);
+  if (!found) {
+    throw new Error("MCP server not found.");
+  }
+  const { server } = found;
+  return {
+    detail: {
+      id: `${server.scope}:${server.name}`,
+      name: server.name,
+      scope: server.scope,
+      transport: server.transport,
+      command: server.command,
+      args: [...server.args],
+      env: { ...server.env },
+      cwd: server.cwd,
+      url: server.url,
+      headers: { ...server.headers },
+      hasOAuth: Boolean(server.hasOAuth),
+      exposure: server.exposure,
+      toolExposure: { ...server.toolExposure },
+      enabled: server.enabled,
+      timeout: server.timeout,
+      description: String(server.meta?.description ?? ""),
+      pinned: Boolean(server.meta?.pinned),
+    },
+  };
+}
+
+async function saveMcpServer(body) {
+  const targetRuntime = getRuntimeForRequest(body);
+  const saved = saveMcpServerDefinition(targetRuntime, body);
+  await reloadOpenRuntimeCapabilities("all");
+  return { capabilities: await buildCapabilitiesSnapshot(targetRuntime), saved };
+}
+
+async function removeMcpServer(body) {
+  const targetRuntime = getRuntimeForRequest(body);
+  const parsed = parseMcpCapabilityId(body?.id)
+    ?? (normalizeMcpServerName(body?.name) ? { scope: mcpFileScope(body?.scope), name: normalizeMcpServerName(body?.name) } : null);
+  if (!parsed) {
+    throw new Error("MCP server id is required.");
+  }
+  assertMcpWriteScope(targetRuntime, parsed.scope);
+  const state = readMcpRuntimeState(targetRuntime);
+  const path = parsed.scope === "project" ? state.projectPath : state.globalPath;
+  const removed = removeMcpServerEntry(readMcpConfigPath(path).config, parsed.name);
+  if (removed.removed) {
+    writeMcpConfigPath(path, removed.config);
+  }
+  const config = readCapabilitiesConfig();
+  if (config.mcp) {
+    delete config.mcp[mcpMetaKey(parsed.scope, parsed.name)];
+  }
+  writeCapabilitiesConfig(config);
+  await reloadOpenRuntimeCapabilities("all");
+  return { capabilities: await buildCapabilitiesSnapshot(targetRuntime) };
+}
+
+async function inspectMcpServerCapability(body) {
+  const targetRuntime = getRuntimeForRequest(body);
+  return { inspection: await inspectMcpServer(targetRuntime, String(body?.id ?? "")) };
 }
 
 function createEmptyCapabilitiesConfig() {
+  // `mcp` 是 Pi Desktop 自有的 MCP 元数据（pinned / 描述），键是 `<scope>:<server>`；
+  // 服务器定义本身住在 pi 的 `mcp.json` 里（见 server/mcpConfig.mjs）。
   return {
     version: capabilitiesConfigVersion,
     skills: {},
     packages: {},
     extensions: {},
-    mcpServers: {},
+    mcp: {},
   };
 }
 
@@ -2884,21 +3300,38 @@ function normalizeCapabilitiesConfig(config) {
     };
   }
 
-  const mcpServers = {};
-  for (const [id, value] of Object.entries(source.mcpServers && typeof source.mcpServers === "object" ? source.mcpServers : {})) {
-    const server = normalizeMcpServerDefinition({ ...(value && typeof value === "object" ? value : {}), id }, { allowEmptyId: false });
-    if (server) {
-      mcpServers[server.id] = server;
-    }
-  }
-
   return {
     version: Number(source.version ?? capabilitiesConfigVersion),
     skills,
     packages: normalizeCapabilityMetadataMap(source.packages),
     extensions: normalizeCapabilityMetadataMap(source.extensions),
-    mcpServers,
+    mcp: normalizeMcpCapabilityMetadataMap(source.mcp),
   };
+}
+
+/**
+ * MCP 的 app 元数据比其它能力多一个 `description`：pi 的 `mcp.json` 不存描述，
+ * 而设置页要显示它，所以单独存一份（键是 `<scope>:<server>`）。
+ */
+function normalizeMcpCapabilityMetadataMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const result = {};
+  for (const [id, entry] of Object.entries(value)) {
+    const normalizedId = String(id).trim();
+    if (!normalizedId) {
+      continue;
+    }
+    const source = entry && typeof entry === "object" ? entry : {};
+    result[normalizedId] = {
+      defaultEnabled: source.defaultEnabled !== false,
+      pinned: Boolean(source.pinned),
+      description: typeof source.description === "string" ? source.description : "",
+    };
+  }
+  return result;
 }
 
 function normalizeCapabilityMetadataMap(value) {
@@ -2927,56 +3360,6 @@ function normalizeCapabilityId(value) {
 
 function skillCapabilityId(skill) {
   return skill.name;
-}
-
-function mcpCapabilityId(value) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-}
-
-function normalizeMcpServerDefinition(value, options = {}) {
-  const source = value && typeof value === "object" ? value : {};
-  const id = mcpCapabilityId(source.id || source.name);
-  if (!id && !options.allowEmptyId) {
-    return null;
-  }
-
-  const name = String(source.name ?? id).trim();
-  const transport = ["stdio", "sse", "http"].includes(String(source.transport ?? "")) ? String(source.transport) : "stdio";
-  const args = Array.isArray(source.args) ? source.args.map((arg) => String(arg)) : splitArgs(source.args);
-  const env = normalizeStringMap(source.env);
-  const headers = normalizeStringMap(source.headers);
-  const command = String(source.command ?? "").trim();
-  const url = String(source.url ?? "").trim();
-
-  if (transport === "stdio" && !command) {
-    throw new Error("MCP stdio server requires a command.");
-  }
-  if (transport !== "stdio" && !url) {
-    throw new Error("MCP remote server requires a URL.");
-  }
-
-  return {
-    id,
-    name: name || id,
-    description: String(source.description ?? "").trim(),
-    transport,
-    command,
-    args,
-    env,
-    url,
-    headers,
-    cwd: String(source.cwd ?? "").trim(),
-    defaultEnabled: Boolean(source.defaultEnabled),
-    pinned: Boolean(source.pinned),
-    directTools: Boolean(source.directTools),
-    includeTools: Array.isArray(source.includeTools) ? source.includeTools.map(String).filter(Boolean) : [],
-    excludeTools: Array.isArray(source.excludeTools) ? source.excludeTools.map(String).filter(Boolean) : [],
-  };
 }
 
 function splitArgs(value) {
@@ -3041,10 +3424,6 @@ function normalizeStringArray(value) {
 function defaultSkillEnabled(config, skillId) {
   const entry = config.skills[skillId];
   return entry?.defaultEnabled === true;
-}
-
-function defaultMcpEnabled(server) {
-  return Boolean(server.defaultEnabled);
 }
 
 function defaultSessionCapabilitySelection(config, skills, targetRuntime = runtime) {
@@ -3448,17 +3827,9 @@ async function buildCapabilitiesSnapshot(targetRuntime = runtime, options = {}) 
       .map((path) => canonicalPath(path))),
   );
   reportUnhealthyLoads(loadHealth, packages);
-  const activeToolNames = new Set(targetRuntime.session.getActiveToolNames?.() ?? []);
-  const mcpServers = Object.values(config.mcpServers).map((server) => ({
-    id: server.id,
-    kind: "mcp",
-    name: server.name,
-    description: server.description,
-    transport: server.transport,
-    defaultEnabled: server.defaultEnabled,
-    active: [...activeToolNames].some((toolName) => toolName.startsWith(`${server.id}_`)),
-    pinned: Boolean(server.pinned),
-  })).sort(compareCapabilityCards);
+  // MCP 不再读 capabilities.json（那里只剩 app 元数据）：服务器定义来自 pi 的 mcp.json，
+  // 工具/连接状态来自会话，见 mcpCapabilityEntries。
+  const mcpServers = mcpCapabilityEntries(targetRuntime).entries;
 
   return {
     skills: managed
@@ -3704,14 +4075,6 @@ function compareCapabilityCards(left, right) {
   return Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || left.name.localeCompare(right.name);
 }
 
-function createMcpAdapterStatus(status, message = "") {
-  return {
-    status,
-    message,
-    package: "pi-mcp-adapter",
-  };
-}
-
 async function setDefaultCapability(body) {
   const targetRuntime = getRuntimeForRequest(body);
   const kind = ["skill", "package", "extension", "mcp"].includes(body?.kind) ? body.kind : "skill";
@@ -3742,11 +4105,15 @@ async function setDefaultCapability(body) {
       defaultEnabled: enabled,
     };
   } else {
-    const server = config.mcpServers[id];
-    if (!server) {
+    const parsed = parseMcpCapabilityId(id);
+    if (!parsed) {
       throw new Error("MCP server not found.");
     }
-    server.defaultEnabled = enabled;
+    assertMcpWriteScope(targetRuntime, parsed.scope);
+    const state = readMcpRuntimeState(targetRuntime);
+    const path = parsed.scope === "project" ? state.projectPath : state.globalPath;
+    // MCP 的「默认」就是 pi 的 `enabled`：写回定义它的那份 mcp.json（pi 的 `/mcp` 面板同理）。
+    writeMcpConfigPath(path, patchMcpServer(readMcpConfigPath(path).config, parsed.name, { enabled }));
   }
 
   writeCapabilitiesConfig(config);
@@ -3792,11 +4159,13 @@ async function setCapabilityPinned(body) {
       pinned,
     };
   } else {
-    const server = config.mcpServers[id];
-    if (!server) {
+    const parsed = parseMcpCapabilityId(id);
+    const state = parsed ? readMcpRuntimeState(targetRuntime) : null;
+    if (!parsed || !state.servers.some((server) => server.name === parsed.name && server.scope === parsed.scope)) {
       throw new Error("MCP server not found.");
     }
-    server.pinned = pinned;
+    const key = mcpMetaKey(parsed.scope, parsed.name);
+    config.mcp = { ...(config.mcp ?? {}), [key]: { ...(config.mcp?.[key] ?? {}), pinned } };
   }
 
   writeCapabilitiesConfig(config);
@@ -6798,6 +7167,8 @@ async function buildSnapshot(targetRuntime = runtime, options = {}) {
       ready: true,
     },
     projectTrusted: targetRuntime.settingsManager.isProjectTrusted(),
+    // 工具开关（codemode）：全局层 + 当前项目层 + 实际生效，和 pi 自己的 defaultTools 同一个算法。
+    toolSettings: toolSettingsSnapshotFor(targetRuntime),
     canPrompt: Boolean(model && modelRuntime.hasConfiguredAuth(model.provider)) && !sessionIsStreaming(targetRuntime, options),
     sessionFile: targetRuntime.session.sessionFile,
     streamingSessionPaths: liveStreamingSessionPaths(targetRuntime, options),
@@ -7667,6 +8038,8 @@ function updateSessionStoreFromRuntime(targetRuntime) {
 function listProjectsWithSessions() {
   return projects.map((project) => ({
     ...project,
+    // 计算出来的，不是存的项目字段：`saveProjects()` 写盘时不会带上它。
+    codemode: projectToolToggleState(project),
     sessions: listProjectSessions(project),
   }));
 }

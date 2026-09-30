@@ -10,9 +10,23 @@ import type {
   SkillSummary,
   ThinkingLevel,
   PersonalizationSettings,
+  ToolToggleState,
 } from "../types";
 
 const DEFAULT_API_BASE = "http://127.0.0.1:6474";
+
+export interface ToolSettingsPayload {
+  /** 项目未被信任时 pi 不读它的 `.pi`，项目层等于没设。 */
+  projectTrusted: boolean;
+  global: boolean;
+  project: ToolToggleState;
+  effective: boolean;
+  tools: string[];
+  activeTools: string[];
+  globalPath?: string;
+  projectPath?: string;
+  agentDir?: string;
+}
 
 export interface BootstrapResponse {
   snapshot: AppSnapshot;
@@ -29,6 +43,8 @@ export interface BootstrapResponse {
     ready: boolean;
   };
   projectTrusted: boolean;
+  /** 工具开关（codemode）现状：写的是 pi 自己的 defaultTools，见 server/toolSettings.mjs。 */
+  toolSettings?: ToolSettingsPayload;
   canPrompt: boolean;
   sessionFile?: string;
   streamingSessionPaths?: string[];

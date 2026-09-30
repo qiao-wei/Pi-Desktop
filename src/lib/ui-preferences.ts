@@ -45,7 +45,7 @@ export interface UiPreferences {
   /** 右侧面板里被折叠起来的分区（`skills` / `packages`）；缺省 = 两个都展开。 */
   capabilityPanelCollapsedSections?: string[];
   /** 全局技能与扩展页上次停留的标签页；缺省 = 技能。 */
-  capabilityScopeTab?: "skill" | "package";
+  capabilityScopeTab?: "skill" | "package" | "mcp";
   /**
    * 任务完成后发系统提醒。缺省（undefined）= 关闭：系统通知会惊动整个屏幕，
    * 而且 macOS 首次发送会弹权限询问，必须是用户自己去设置页打开的。
