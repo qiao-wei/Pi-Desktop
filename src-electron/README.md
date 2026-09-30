@@ -15,7 +15,7 @@
 | `paths.js` | `BaseDirectory::Resource` 解析 | dev / 打包两种资源布局 |
 | `static-server.js` | Tauri 的自定义协议 | 生产模式用自定义协议把 `dist/` 伺服到固定源 `app://pi-desktop/` |
 | `../scripts/dev-electron.mjs` | `build.beforeDevCommand` + `devUrl` | 起 dev 服务（bridge + vite）并挂上外壳 |
-| `electron-builder.json` | `tauri.conf.json` 的 `bundle` | 打包配置 |
+| `electron-builder.json` + `electron-builder.config.cjs` | `tauri.conf.json` 的 `bundle` | 打包配置；`.cjs` 在 `.json` 之上派生 bundled/slim 差异，并按档位（`PI_DESKTOP_SIGN`）注入签名参数，是签名的唯一入口 |
 
 ## 运行
 
@@ -63,7 +63,8 @@ directory”推出模式，不需要把模式烘进包里。bundled 不能交叉
 > （`UNErrorDomain error 1`，还不弹权限框），也就是「任务完成后系统提醒」在打包版里静默失效。
 > ad-hoc 签名就够：`codesign` 对 bundle 默认用 `Info.plist` 的 `CFBundleIdentifier` 当 identifier，
 > 所以 `identity: "-"` 出来的包是自洽的，不需要证书。另外通知只对 `/Applications` 下的包生效，
-> 装在临时目录会被静默拒绝。
+> 装在临时目录会被静默拒绝。mac 段还带一份 `electronLanguages`（`en` / `zh_CN` / `zh_TW`）：Electron
+> 自带 220 个 locale 目录（49MB），每一个都要单独签一次名，伪本地化没有任何保留价值。
 >
 > 换完签名相关的东西，用 `npm run notification:verify` 验收（它会在一个独立 userData 的实例里，
 > 通过真实 IPC 调一次 `notify_turn_complete` 并读回 `{delivered, reason}`）；加 `--control` 跑阴性对照
