@@ -386,6 +386,7 @@ export function App() {
     reportError,
     dismissCompactionNotice,
     replaceBootstrap,
+    setDraft,
   } = usePiDesktopApp();
 
   // 输入框旁的模型列表和设置页读同一份自定义模型，设置页保存后这里跟着刷新。
@@ -876,6 +877,24 @@ export function App() {
     }
     editor.closest<HTMLElement>(".composer-surface")?.setAttribute("data-focus-quiet", "true");
     editor.focus({ preventScroll: true });
+  }
+
+  /**
+   * 「自动解决冲突」：把冲突清单/内容拼成的 prompt 拿回来，在**当前项目**新建一个会话，
+   * 填进 composer 并聚焦。到这里为止只准备，用户看完自己点提交，agent 才动手。
+   */
+  async function autoResolveConflicts() {
+    const prompt = await projectGit.conflictPrompt();
+    if (!prompt) {
+      return;
+    }
+    const projectId = bootstrap.activeProjectId;
+    if (!projectId) {
+      return;
+    }
+    await createSession(projectId);
+    setDraft(prompt);
+    focusComposerQuietly();
   }
 
   /**
@@ -2743,7 +2762,8 @@ export function App() {
               isCommitting={projectGit.isCommitting}
               isGeneratingMessage={projectGit.isGeneratingMessage}
               isPushing={projectGit.isPushing}
-              isMerging={projectGit.isMerging}
+              isPulling={projectGit.isPulling}
+              isMergingBranch={projectGit.isMergingBranch}
               isStreaming={state.isStreaming}
               error={projectGit.error}
               onInit={() => void projectGit.initRepo()}
@@ -2753,8 +2773,11 @@ export function App() {
               onRenameBranch={projectGit.renameBranch}
               onCommit={projectGit.commitChanges}
               onPush={projectGit.pushBranch}
-              onMerge={projectGit.mergeUpstream}
+              onPull={projectGit.pullBranch}
+              onMergeBranch={projectGit.mergeBranch}
               onOpenDiff={projectGit.openDiff}
+              onOpenFile={projectGit.openFile}
+              onAutoResolveConflicts={autoResolveConflicts}
               onGenerateMessage={projectGit.generateCommitMessage}
             />
             <Button

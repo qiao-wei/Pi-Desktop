@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Check, GitBranch, GitBranchPlus, GitMerge, Loader2, Pencil, RefreshCw, Sparkles, Upload } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, ArrowUp, Check, GitBranch, GitBranchPlus, GitMerge, Loader2, Pencil, RefreshCw, Sparkles, SquarePen, Upload, WandSparkles } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -13,6 +13,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,9 +32,12 @@ import {
   gitChangeTotals,
   gitCommitBlockReason,
   gitCommitPlan,
+  gitConflictedFiles,
   gitCreateBranchBlockReason,
   gitHeadLabel,
   gitMergeActionState,
+  gitMergeTargets,
+  gitPullActionState,
   gitPushActionState,
   gitRenameBranchBlockReason,
   gitStatusLabelKey,
@@ -54,8 +64,10 @@ export interface GitStatusBadgeProps {
   isGeneratingMessage: boolean;
   /** 推送（或首次关联远端并推送）在飞。 */
   isPushing: boolean;
-  /** 合并上游在飞。 */
-  isMerging: boolean;
+  /** 拉取（fetch + merge 上游）在飞。 */
+  isPulling: boolean;
+  /** 合并其它分支在飞。 */
+  isMergingBranch: boolean;
   /** 回答生成中：禁止切分支/提交（agent 正在改文件）。 */
   isStreaming: boolean;
   /** 最近一次写操作（init / 切分支 / 提交 / 生成信息）的失败原因；只有用户主动触发的操作会留下它。 */
@@ -70,8 +82,14 @@ export interface GitStatusBadgeProps {
   onCommit: (input: { message: string; paths: string[] }) => Promise<boolean>;
   /** 推送当前分支；没有上游时服务端会先关联远端（优先 origin）再推。 */
   onPush: () => Promise<boolean>;
-  /** 把上游分支合并进当前分支。 */
-  onMerge: () => Promise<boolean>;
+  /** 拉取上游分支并合并进当前分支。 */
+  onPull: () => Promise<boolean>;
+  /** 把选中的其它本地分支合并进当前分支；冲突算成功（info 已刷新为冲突状态）。 */
+  onMergeBranch: (branch: string) => Promise<boolean>;
+  /** 双击冲突文件：用宿主机 IDE 打开文件本身（编辑冲突标记）。 */
+  onOpenFile: (path: string) => Promise<boolean>;
+  /** 自动解决冲突：新建会话并把冲突 prompt 填进 composer。 */
+  onAutoResolveConflicts: () => Promise<void>;
   /** 双击改动文件：用宿主机的 IDE 打开它的 diff（HEAD ↔ 工作区）。 */
   onOpenDiff: (path: string) => void;
   onGenerateMessage: (paths: string[]) => Promise<string | null>;
@@ -109,7 +127,8 @@ export function GitStatusBadge({
   isCommitting,
   isGeneratingMessage,
   isPushing,
-  isMerging,
+  isPulling,
+  isMergingBranch,
   isStreaming,
   error,
   onInit,
@@ -119,7 +138,10 @@ export function GitStatusBadge({
   onRenameBranch,
   onCommit,
   onPush,
-  onMerge,
+  onPull,
+  onMergeBranch,
+  onOpenFile,
+  onAutoResolveConflicts,
   onOpenDiff,
   onGenerateMessage,
 }: GitStatusBadgeProps) {
@@ -136,6 +158,8 @@ export function GitStatusBadge({
   /** 改名表单里的名字（未 trim，初值是当前分支名）。 */
   const [renameName, setRenameName] = useState("");
   const [commitMessage, setCommitMessage] = useState("");
+  /** 「自动解决冲突」正在拿冲突 prompt（新建会话 + 填 composer 在 App 里做）。 */
+  const [isPreparingConflicts, setIsPreparingConflicts] = useState(false);
   /** 存“取消勾选”的路径（默认全选，见 gitCommitPlan）。 */
   const [unselected, setUnselected] = useState<ReadonlySet<string>>(() => new Set());
   const kind = gitBadgeKind(info);
@@ -175,11 +199,25 @@ export function GitStatusBadge({
     ? `${headTitle} · ${t("git.unborn")}`
     : `${headTitle} · ${changedFiles > 0 ? t("git.changedFiles", { count: changedFiles }) : t("git.clean")}`;
 
-  // 同步类动作（合并 / 推送）的可用性与提示：可用性由纯函数算（见 gitStatusBadge），这里
-  // 只把 reason 映射成文案。推送在回答生成中仍然可点（只碰远端 refs，不动工作区）；
-  // 没有上游时它变成「关联远端」而不是被禁用。
-  const mergeState = gitMergeActionState(info, { isStreaming, isMerging, isPushing });
-  const pushState = gitPushActionState(info, { isPushing, isMerging });
+  // 同步类动作（拉取 / 合并其它分支 / 推送）的可用性与提示：可用性由纯函数算（见
+  // gitStatusBadge），这里只把 reason 映射成文案。推送在回答生成中仍然可点（只碰远端
+  // refs，不动工作区）；没有上游时它变成「关联远端」而不是被禁用。
+  const mergeState = gitMergeActionState(info, { isStreaming, isMerging: isMergingBranch, isPulling, isPushing });
+  const pullState = gitPullActionState(info, { isStreaming, isPulling, isPushing });
+  const pushState = gitPushActionState(info, { isPushing, isPulling, isMerging: isMergingBranch });
+  const mergeTargets = gitMergeTargets(info);
+  const conflictFiles = gitConflictedFiles(info);
+
+  const pullTitle =
+    pullState.reason === "streaming"
+      ? t("git.pullDisabledStreaming")
+      : pullState.reason === "detached"
+        ? t("git.pullDisabledDetached")
+        : pullState.reason === "unborn"
+          ? t("git.pullDisabledUnborn")
+          : pullState.reason === "noUpstream"
+            ? t("git.pullDisabledNoUpstream")
+            : t("git.pull");
   const mergeTitle =
     mergeState.reason === "streaming"
       ? t("git.mergeDisabledStreaming")
@@ -187,8 +225,8 @@ export function GitStatusBadge({
         ? t("git.mergeDisabledDetached")
         : mergeState.reason === "unborn"
           ? t("git.mergeDisabledUnborn")
-          : mergeState.reason === "noUpstream"
-            ? t("git.mergeDisabledNoUpstream")
+          : mergeState.reason === "noTarget"
+            ? t("git.mergeDisabledNoTarget")
             : t("git.merge");
   const pushTitle =
     pushState.reason === "detached"
@@ -260,6 +298,28 @@ export function GitStatusBadge({
     const generated = await onGenerateMessage(plan.paths);
     if (generated) {
       setCommitMessage(generated);
+    }
+  };
+
+  /** 一键用 IDE 打开所有冲突文件（逐个；服务端各自校验路径仍在改动列表里）。 */
+  const openConflictsClick = () => {
+    for (const file of conflictFiles) {
+      void onOpenFile(file.path);
+    }
+  };
+
+  /** 自动解决冲突：App 会新建一个会话并把冲突 prompt 填进 composer，用户自己点提交。 */
+  const autoResolveConflictsClick = async () => {
+    if (isPreparingConflicts) {
+      return;
+    }
+    setIsPreparingConflicts(true);
+    try {
+      await onAutoResolveConflicts();
+      // 会话已经切走，弹层留在新会话头上会很怪 —— 收掉它。
+      setOpen(false);
+    } finally {
+      setIsPreparingConflicts(false);
     }
   };
 
@@ -439,18 +499,42 @@ export function GitStatusBadge({
           )}
           {isRenaming ? null : (
             <div className="flex shrink-0 items-center gap-0.5">
-              {/* 合并（fetch + merge 上游）/ 推送（无上游时先关联）排在刷新左边；三个都是
-                  同一行的小图标按钮，顺序是「合并 → 推送 → 刷新」。 */}
+              {/* 同步动作排在刷新左边，顺序是「拉取 → 合并其它分支 → 推送 → 刷新」。
+                  拉取 = fetch + merge 上游；合并 = 把选中的本地分支合进当前分支（有下拉）。 */}
               <button
                 type="button"
-                onClick={() => void onMerge()}
-                disabled={mergeState.disabled}
-                aria-label={mergeTitle}
-                title={mergeTitle}
+                onClick={() => void onPull()}
+                disabled={pullState.disabled}
+                aria-label={pullTitle}
+                title={pullTitle}
                 className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60"
               >
-                {isMerging ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <GitMerge className="size-3.5" aria-hidden="true" />}
+                {isPulling ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <ArrowDownToLine className="size-3.5" aria-hidden="true" />}
               </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    disabled={mergeState.disabled}
+                    aria-label={mergeTitle}
+                    title={mergeTitle}
+                    className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60"
+                  >
+                    {isMergingBranch ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <GitMerge className="size-3.5" aria-hidden="true" />}
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="max-h-64 overflow-y-auto">
+                  <DropdownMenuLabel className="text-[0.7rem] text-muted-foreground">
+                    {t("git.mergeIntoLabel", { current: head })}
+                  </DropdownMenuLabel>
+                  {mergeTargets.map((branch) => (
+                    <DropdownMenuItem key={branch.name} onSelect={() => void onMergeBranch(branch.name)}>
+                      <GitMerge className="size-3.5" aria-hidden="true" />
+                      <span className="min-w-0 truncate">{branch.name}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <button
                 type="button"
                 onClick={() => void onPush()}
@@ -502,6 +586,7 @@ export function GitStatusBadge({
               unselected={unselected}
               onToggle={toggleFile}
               onOpenDiff={onOpenDiff}
+              onOpenFile={onOpenFile}
             />
             <GitFileGroup
               title={t("git.group.unstaged")}
@@ -509,6 +594,7 @@ export function GitStatusBadge({
               unselected={unselected}
               onToggle={toggleFile}
               onOpenDiff={onOpenDiff}
+              onOpenFile={onOpenFile}
             />
             <GitFileGroup
               title={t("git.group.untracked")}
@@ -516,6 +602,7 @@ export function GitStatusBadge({
               unselected={unselected}
               onToggle={toggleFile}
               onOpenDiff={onOpenDiff}
+              onOpenFile={onOpenFile}
             />
           </div>
         )}
@@ -545,9 +632,38 @@ export function GitStatusBadge({
               className="max-h-32 min-h-[3rem] resize-none overflow-y-auto text-xs"
             />
             {plan.conflicted.length > 0 ? (
-              <p className="text-[0.7rem] text-amber-600 dark:text-amber-400">
-                {t("git.commitConflictHint", { count: plan.conflicted.length })}
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[0.7rem] text-amber-600 dark:text-amber-400">
+                  {t("git.conflictHint", { count: plan.conflicted.length })}
+                </p>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    title={t("git.openConflicts")}
+                    onClick={openConflictsClick}
+                  >
+                    <SquarePen className="size-3" aria-hidden="true" />
+                    {t("git.openConflicts")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    disabled={isPreparingConflicts}
+                    title={t("git.resolveConflicts")}
+                    onClick={() => void autoResolveConflictsClick()}
+                  >
+                    {isPreparingConflicts ? (
+                      <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <WandSparkles className="size-3" aria-hidden="true" />
+                    )}
+                    {isPreparingConflicts ? t("git.resolveConflictsPreparing") : t("git.resolveConflicts")}
+                  </Button>
+                </div>
+              </div>
             ) : null}
             <div className="flex items-center justify-between gap-2">
               <Button
@@ -720,12 +836,14 @@ function GitFileGroup({
   unselected,
   onToggle,
   onOpenDiff,
+  onOpenFile,
 }: {
   title: string;
   files: GitFileChange[];
   unselected: ReadonlySet<string>;
   onToggle: (path: string, checked: boolean) => void;
   onOpenDiff: (path: string) => void;
+  onOpenFile: (path: string) => void;
 }) {
   const t = useT();
   if (files.length === 0) {
@@ -744,6 +862,11 @@ function GitFileGroup({
             if ((event.target as HTMLElement).closest('[role="checkbox"]')) {
               return;
             }
+            // 冲突文件要看的是冲突标记本身，不是 HEAD ↔ 工作区的 diff。
+            if (file.conflicted) {
+              onOpenFile(file.path);
+              return;
+            }
             onOpenDiff(file.path);
           }}
           className={cn(
@@ -752,11 +875,11 @@ function GitFileGroup({
           )}
           title={`${
             file.conflicted
-              ? t("git.commitConflictHint", { count: 1 })
+              ? t("git.openConflictHint")
               : file.origPath
                 ? `${file.origPath} → ${file.path}`
                 : file.path
-          } · ${t("git.openDiffHint")}`}
+          }${file.conflicted ? "" : ` · ${t("git.openDiffHint")}`}`}
         >
           {file.conflicted ? (
             // 冲突文件不能提交：对冲突路径 `git add` 等于宣告冲突已解决，必须由用户在别处处理。

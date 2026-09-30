@@ -8,7 +8,7 @@
  *   也保证只读路径永远不碰写命令。
  */
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -17,15 +17,17 @@ import {
   GIT_NETWORK_TIMEOUT_MS,
   GIT_TIMEOUT_MS,
   MAX_COMMIT_MESSAGE_CHARS,
+  MAX_CONFLICT_FILES,
   commitGitChanges,
   commitablePaths,
   createGitBranch,
   emptyGitInfo,
   initGitRepo,
+  isMergeConflict,
   isReadOnlyGitArgs,
   isSafeBranchName,
   isUnknownGitSubcommand,
-  mergeGitUpstream,
+  mergeGitBranchInto,
   normalizeCommitMessage,
   parseBranchHeader,
   parseBranches,
@@ -33,8 +35,10 @@ import {
   parseNumstat,
   parsePorcelainV2,
   parseUpstreamTrack,
+  pullGitBranch,
   pushGitBranch,
   readChangedEntries,
+  readConflictContext,
   readGitInfo,
   renameGitBranch,
   runReadOnlyGit,
@@ -662,7 +666,7 @@ test("renameGitBranch：游离 HEAD 被 git 拒绝时把原文抛出", async () 
   assert.deepEqual(branchWriteCalls(calls).map((call) => call.args), [["branch", "-m", "topic"]]);
 });
 
-/* ------------------------------------------------------------------ pushGitBranch / mergeGitUpstream */
+/* ------------------------------------------------------------------ pushGitBranch / pullGitBranch / mergeGitBranchInto */
 
 const SYNC_STATUS_ARGS = ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"];
 const syncHeader = (...chunks) => chunks.join("\u0000");
@@ -766,7 +770,7 @@ test("pushGitBranch：git 拒绝（需要认证 / 非快进）时把原文抛出
   await assert.rejects(() => pushGitBranch("/tmp/repo", { execImpl: exec }), /could not read Username/);
 });
 
-test("mergeGitUpstream：先 fetch 远端再 `merge --no-edit <upstream>`", async () => {
+test("pullGitBranch：先 fetch 远端再 `merge --no-edit <upstream>`", async () => {
   const { exec, calls } = fakeExecFile(
     syncPlan({
       overrides: {
@@ -776,37 +780,37 @@ test("mergeGitUpstream：先 fetch 远端再 `merge --no-edit <upstream>`", asyn
     }),
   );
 
-  const output = await mergeGitUpstream("/tmp/repo", { execImpl: exec });
+  const output = await pullGitBranch("/tmp/repo", { execImpl: exec });
 
   assert.equal(output, "Already up to date.");
   assert.deepEqual(calls.map((call) => call.args), [SYNC_STATUS_ARGS, ["remote"], ["fetch", "origin"], ["merge", "--no-edit", "origin/main"]]);
   assert.equal(calls[2].options.timeout, GIT_NETWORK_TIMEOUT_MS, "fetch 是网络操作");
 });
 
-test("mergeGitUpstream：没有上游 / 远端不存在 / 游离 HEAD → 一条 fetch/merge 都不发", async () => {
+test("pullGitBranch：没有上游 / 远端不存在 / 游离 HEAD → 一条 fetch/merge 都不发", async () => {
   const noUpstream = fakeExecFile(syncPlan({ header: SYNC_NO_UPSTREAM }));
-  await assert.rejects(() => mergeGitUpstream("/tmp/repo", { execImpl: noUpstream.exec }), /no upstream branch to merge/);
+  await assert.rejects(() => pullGitBranch("/tmp/repo", { execImpl: noUpstream.exec }), /no upstream branch to merge/);
   assert.deepEqual(pushMergeCalls(noUpstream.calls), [], "没有上游时连远端列表都不用读");
   assert.equal(noUpstream.calls.length, 1);
 
   const unknownRemote = fakeExecFile(syncPlan({ remotes: "gitlab\n" }));
-  await assert.rejects(() => mergeGitUpstream("/tmp/repo", { execImpl: unknownRemote.exec }), /Unknown remote: origin/);
+  await assert.rejects(() => pullGitBranch("/tmp/repo", { execImpl: unknownRemote.exec }), /Unknown remote: origin/);
   assert.deepEqual(pushMergeCalls(unknownRemote.calls), []);
 
   const detached = fakeExecFile(syncPlan({ header: SYNC_DETACHED }));
-  await assert.rejects(() => mergeGitUpstream("/tmp/repo", { execImpl: detached.exec }), /detached HEAD/);
+  await assert.rejects(() => pullGitBranch("/tmp/repo", { execImpl: detached.exec }), /detached HEAD/);
   assert.deepEqual(pushMergeCalls(detached.calls), []);
 
   const unborn = fakeExecFile(syncPlan({ header: SYNC_UNBORN }));
-  await assert.rejects(() => mergeGitUpstream("/tmp/repo", { execImpl: unborn.exec }), /before the first commit/);
+  await assert.rejects(() => pullGitBranch("/tmp/repo", { execImpl: unborn.exec }), /before the first commit/);
   assert.deepEqual(pushMergeCalls(unborn.calls), []);
 
-  await assert.rejects(() => mergeGitUpstream("", { execImpl: noUpstream.exec }), /without a project folder/);
+  await assert.rejects(() => pullGitBranch("", { execImpl: noUpstream.exec }), /without a project folder/);
 });
 
-test("mergeGitUpstream：fetch 失败就不 merge；合并冲突把 git 原文抛出", async () => {
+test("pullGitBranch：fetch 失败就不 merge；合并冲突把 git 原文抛出", async () => {
   const fetchFails = fakeExecFile(syncPlan({ overrides: { "fetch origin": { ok: false, code: 128, stderr: "fatal: unable to access\n" } } }));
-  await assert.rejects(() => mergeGitUpstream("/tmp/repo", { execImpl: fetchFails.exec }), /unable to access/);
+  await assert.rejects(() => pullGitBranch("/tmp/repo", { execImpl: fetchFails.exec }), /unable to access/);
   assert.deepEqual(pushMergeCalls(fetchFails.calls), [["fetch", "origin"]], "fetch 失败后不应继续 merge");
 
   const conflict = fakeExecFile(
@@ -821,7 +825,152 @@ test("mergeGitUpstream：fetch 失败就不 merge；合并冲突把 git 原文�
       },
     }),
   );
-  await assert.rejects(() => mergeGitUpstream("/tmp/repo", { execImpl: conflict.exec }), /Merge conflict in src\/app\.ts/);
+  await assert.rejects(() => pullGitBranch("/tmp/repo", { execImpl: conflict.exec }), /Merge conflict in src\/app\.ts/);
+});
+
+test("isMergeConflict：只认「产生冲突」的输出，不把别的失败当冲突", () => {
+  assert.equal(isMergeConflict("CONFLICT (content): Merge conflict in a.ts\n"), true);
+  assert.equal(isMergeConflict("Automatic merge failed; fix conflicts and then commit the result.\n"), true);
+  assert.equal(isMergeConflict("error: Your local changes would be overwritten\n"), false);
+  assert.equal(isMergeConflict(""), false);
+});
+
+/** 合并其它分支：status 头 + 本地分支列表。 */
+function mergePlan({ header = SYNC_MAIN, branches = REPO_BRANCHES, overrides = {} } = {}) {
+  return (args) => {
+    const key = args.join(" ");
+    if (overrides[key]) {
+      return overrides[key];
+    }
+    if (args[0] === "status") {
+      return { ok: true, stdout: header };
+    }
+    if (key.startsWith("for-each-ref")) {
+      return { ok: true, stdout: branches };
+    }
+    return { ok: false, code: 1, stdout: "", stderr: `unexpected: ${key}` };
+  };
+}
+
+function mergeCalls(calls) {
+  return calls.filter((call) => call.args[0] === "merge").map((call) => call.args);
+}
+
+test("mergeGitBranchInto：把选中的本地分支 `merge --no-edit` 进当前分支", async () => {
+  const { exec, calls } = fakeExecFile(
+    mergePlan({ overrides: { "merge --no-edit feature": { ok: true, stdout: "Merge made by the 'ort' strategy.\n" } } }),
+  );
+
+  const result = await mergeGitBranchInto("/tmp/repo", "feature", { execImpl: exec });
+
+  assert.deepEqual(result, { branch: "feature", conflict: false, output: "Merge made by the 'ort' strategy." });
+  assert.deepEqual(mergeCalls(calls), [["merge", "--no-edit", "feature"]]);
+  assert.equal(calls.at(-1).options.cwd, "/tmp/repo");
+});
+
+test("mergeGitBranchInto：冲突是正常结局，返回 conflict:true 而不是抛错", async () => {
+  const { exec } = fakeExecFile(
+    mergePlan({
+      overrides: {
+        "merge --no-edit feature": {
+          ok: false,
+          code: 1,
+          stderr: "CONFLICT (content): Merge conflict in src/app.ts\nAutomatic merge failed; fix conflicts and then commit the result.\n",
+        },
+      },
+    }),
+  );
+
+  const result = await mergeGitBranchInto("/tmp/repo", "feature", { execImpl: exec });
+
+  assert.equal(result.conflict, true);
+  assert.equal(result.branch, "feature");
+  assert.match(result.output, /Merge conflict in src\/app\.ts/);
+});
+
+test("mergeGitBranchInto：非冲突的失败仍然抛错（脏树被拒）", async () => {
+  const { exec } = fakeExecFile(
+    mergePlan({
+      overrides: {
+        "merge --no-edit feature": { ok: false, code: 1, stderr: "error: Your local changes to the following files would be overwritten by merge\n" },
+      },
+    }),
+  );
+
+  await assert.rejects(() => mergeGitBranchInto("/tmp/repo", "feature", { execImpl: exec }), /would be overwritten by merge/);
+});
+
+test("mergeGitBranchInto：当前分支 / 不存在的分支 / 非法名字 / 游离 HEAD → 一条 merge 都不发", async () => {
+  const self = fakeExecFile(mergePlan());
+  await assert.rejects(() => mergeGitBranchInto("/tmp/repo", "main", { execImpl: self.exec }), /into itself/);
+  assert.deepEqual(mergeCalls(self.calls), []);
+
+  const unknown = fakeExecFile(mergePlan());
+  await assert.rejects(() => mergeGitBranchInto("/tmp/repo", "nope", { execImpl: unknown.exec }), /Unknown branch: nope/);
+  assert.deepEqual(mergeCalls(unknown.calls), []);
+
+  const unsafe = fakeExecFile(mergePlan());
+  await assert.rejects(() => mergeGitBranchInto("/tmp/repo", "--force", { execImpl: unsafe.exec }), /Invalid branch name/);
+  assert.equal(unsafe.calls.length, 0, "名字不合法时连 status 都不用读");
+
+  const detached = fakeExecFile(mergePlan({ header: SYNC_DETACHED }));
+  await assert.rejects(() => mergeGitBranchInto("/tmp/repo", "feature", { execImpl: detached.exec }), /detached HEAD/);
+  assert.deepEqual(mergeCalls(detached.calls), []);
+
+  const unborn = fakeExecFile(mergePlan({ header: SYNC_UNBORN }));
+  await assert.rejects(() => mergeGitBranchInto("/tmp/repo", "feature", { execImpl: unborn.exec }), /before the first commit/);
+  assert.deepEqual(mergeCalls(unborn.calls), []);
+
+  await assert.rejects(() => mergeGitBranchInto("", "feature", { execImpl: self.exec }), /without a project folder/);
+});
+
+test("readConflictContext：列出冲突文件并读出带冲突标记的内容，非冲突直接报错", async () => {
+  const repo = mkdtempSync(join(tmpdir(), "pi-conflicts-"));
+  try {
+    mkdirSync(join(repo, "src"), { recursive: true });
+    const conflictedText = "<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> feature\n";
+    writeFileSync(join(repo, "src", "app.ts"), conflictedText);
+
+    const status = `${[
+      "# branch.head main",
+      "u UU N... 100644 100644 100644 100644 ggg hhh iii src/app.ts",
+    ].join("\u0000")}\u0000`;
+    const { exec } = fakeExecFile((args) => (args[0] === "status" ? { ok: true, stdout: status } : { ok: false, code: 1, stderr: "unexpected" }));
+
+    const context = await readConflictContext(repo, { execImpl: exec });
+    assert.equal(context.branch, "main");
+    assert.equal(context.cwd, repo);
+    assert.deepEqual(context.files.map((file) => file.path), ["src/app.ts"]);
+    assert.equal(context.files[0].text, conflictedText);
+    assert.equal(context.files[0].truncated, false);
+    assert.equal(context.skipped, 0);
+
+    const clean = fakeExecFile(() => ({ ok: true, stdout: "# branch.head main\u0000" }));
+    await assert.rejects(() => readConflictContext(repo, { execImpl: clean.exec }), /No merge conflicts/);
+    await assert.rejects(() => readConflictContext("", { execImpl: exec }), /without a project folder/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("readConflictContext：超过上限的冲突文件只列前 MAX_CONFLICT_FILES 个", async () => {
+  const repo = mkdtempSync(join(tmpdir(), "pi-conflicts-many-"));
+  try {
+    const entries = ["# branch.head main"];
+    for (let index = 0; index < MAX_CONFLICT_FILES + 3; index += 1) {
+      const path = `f${index}.ts`;
+      writeFileSync(join(repo, path), `<<<<<<< HEAD\na\n=======\nb\n>>>>>>> other\n`);
+      entries.push(`u UU N... 100644 100644 100644 100644 ggg hhh iii ${path}`);
+    }
+    const status = `${entries.join("\u0000")}\u0000`;
+    const { exec } = fakeExecFile((args) => (args[0] === "status" ? { ok: true, stdout: status } : { ok: false, code: 1, stderr: "unexpected" }));
+
+    const context = await readConflictContext(repo, { execImpl: exec });
+    assert.equal(context.files.length, MAX_CONFLICT_FILES);
+    assert.equal(context.skipped, 3);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 /* ------------------------------------------------------------------ commitGitChanges */

@@ -303,13 +303,13 @@ export function gitCommitBlockReason({
 }
 
 /**
- * 「合并上游 / 推送」两枚按钮的状态。
+ * 「拉取 / 合并 / 推送」三枚按钮的状态。
  *
  * `reason` 同时是禁用原因和提示文案的 key：`streaming` 回答生成中（agent 正在改文件）、
  * `busy` 另一个同步操作在飞、`detached` 游离 HEAD、`unborn` 还没有提交、
- * `noUpstream` 没有上游分支（合并没有目标）。
+ * `noUpstream` 没有上游分支（拉取没有目标）、`noTarget` 没有其它本地分支可合并。
  */
-export type GitSyncBlockReason = "ok" | "streaming" | "busy" | "detached" | "unborn" | "noUpstream";
+export type GitSyncBlockReason = "ok" | "streaming" | "busy" | "detached" | "unborn" | "noUpstream" | "noTarget";
 
 export interface GitSyncActionState {
   disabled: boolean;
@@ -317,17 +317,17 @@ export interface GitSyncActionState {
 }
 
 /**
- * 合并（把上游分支合并进当前分支）：会动工作区，所以和切分支一样在流式输出时禁用。
- * 没有上游 = 没有可合并的目标，禁用；推送在飞时也禁（两个都是同步类写操作，不排队）。
+ * 拉取（fetch + merge 上游）：会动工作区，所以和切分支一样在流式输出时禁用。
+ * 没有上游 = 没有可拉取的目标，禁用；合并/推送在飞时也禁（同步类写操作不排队）。
  */
-export function gitMergeActionState(
+export function gitPullActionState(
   info: Pick<GitInfo, "detached" | "unborn" | "upstream">,
-  { isStreaming, isMerging, isPushing }: { isStreaming: boolean; isMerging: boolean; isPushing: boolean },
+  { isStreaming, isPulling, isPushing }: { isStreaming: boolean; isPulling: boolean; isPushing: boolean },
 ): GitSyncActionState {
   if (isStreaming) {
     return { disabled: true, reason: "streaming" };
   }
-  if (isMerging || isPushing) {
+  if (isPulling || isPushing) {
     return { disabled: true, reason: "busy" };
   }
   if (info.detached) {
@@ -344,14 +344,55 @@ export function gitMergeActionState(
 }
 
 /**
+ * 「合并其它分支」可以选哪些分支：除当前分支以外的本地分支。
+ *
+ * 远端跟踪分支不在这里：合并 `origin/main` 的需求由「拉取」覆盖；本地分支列表才是
+ * `git for-each-ref refs/heads` 刚刚报出来的东西（目标不由用户输入决定）。
+ */
+export function gitMergeTargets(info: Pick<GitInfo, "branches" | "detached">): GitBranchSummary[] {
+  if (info.detached) {
+    return [];
+  }
+
+  return info.branches.filter((branch) => !branch.current);
+}
+
+/**
+ * 合并（把选中的其它本地分支合并进当前分支）：和拉取一样会动工作区，流式时禁用；
+ * 没有其它本地分支 = 没有可合并的目标，禁用。
+ */
+export function gitMergeActionState(
+  info: Pick<GitInfo, "branches" | "detached" | "unborn">,
+  { isStreaming, isMerging, isPulling, isPushing }: { isStreaming: boolean; isMerging: boolean; isPulling: boolean; isPushing: boolean },
+): GitSyncActionState {
+  if (isStreaming) {
+    return { disabled: true, reason: "streaming" };
+  }
+  if (isMerging || isPulling || isPushing) {
+    return { disabled: true, reason: "busy" };
+  }
+  if (info.detached) {
+    return { disabled: true, reason: "detached" };
+  }
+  if (info.unborn) {
+    return { disabled: true, reason: "unborn" };
+  }
+  if (gitMergeTargets(info).length === 0) {
+    return { disabled: true, reason: "noTarget" };
+  }
+
+  return { disabled: false, reason: "ok" };
+}
+
+/**
  * 推送：只碰远端 refs，不动工作区，所以回答生成中也可以推（不禁 `streaming`）。
  * 没有上游时**不是**禁用 —— 那正是「关联远端」（`push -u`）要做的事。
  */
 export function gitPushActionState(
   info: Pick<GitInfo, "detached" | "unborn">,
-  { isPushing, isMerging }: { isPushing: boolean; isMerging: boolean },
+  { isPushing, isPulling, isMerging }: { isPushing: boolean; isPulling: boolean; isMerging: boolean },
 ): GitSyncActionState {
-  if (isPushing || isMerging) {
+  if (isPushing || isPulling || isMerging) {
     return { disabled: true, reason: "busy" };
   }
   if (info.detached) {
@@ -362,6 +403,11 @@ export function gitPushActionState(
   }
 
   return { disabled: false, reason: "ok" };
+}
+
+/** 有没有未解决的合并冲突（有的话弹层要给出「打开/自动解决」的入口）。 */
+export function gitConflictedFiles(info: Pick<GitInfo, "files">): GitFileChange[] {
+  return info.files.filter((file) => file.conflicted);
 }
 
 /**

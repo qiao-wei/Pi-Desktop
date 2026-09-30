@@ -21,7 +21,7 @@ import { extensionWidgetRequest } from "./extensionUiRequests.mjs";
 import { openSqliteDatabase } from "./sqlite.mjs";
 import { ensureSessionArchiveColumn, listArchivedSessionRows, listProjectSessionRows } from "./sessionArchive.mjs";
 import { revealFolder } from "./revealFolder.mjs";
-import { commitGitChanges, createGitBranch, initGitRepo, mergeGitUpstream, pushGitBranch, readCommitDiff, readGitInfo, renameGitBranch, switchGitBranch } from "./gitInfo.mjs";
+import { commitGitChanges, createGitBranch, initGitRepo, mergeGitBranchInto, pullGitBranch, pushGitBranch, readCommitDiff, readConflictContext, readGitInfo, renameGitBranch, switchGitBranch } from "./gitInfo.mjs";
 import {
   createManagedWorktree,
   isManagedWorktreePath,
@@ -34,11 +34,12 @@ import {
   worktreeRootFor,
 } from "./gitWorktree.mjs";
 import { resolveSessionWorkspaceCwd } from "./sessionWorkspace.mjs";
-import { openGitFileDiff } from "./openDiff.mjs";
+import { openGitFileDiff, openGitFileInIde } from "./openDiff.mjs";
 import { createProjectProbe, detectProjectCommands } from "./projectCommandDetect.mjs";
 import { detectTerminalApps, revealRunLog, runProjectCommand } from "./runProjectCommand.mjs";
 import { createProjectCommandRuns } from "./projectCommandRuns.mjs";
 import { buildCommitMessagePrompt, normalizeGeneratedCommitMessage } from "./commitMessage.mjs";
+import { buildConflictPrompt } from "./conflictPrompt.mjs";
 import { oneShotModelError, oneShotThinkingEffort } from "./oneShotModel.mjs";
 import {
   applyModelToSession,
@@ -1599,14 +1600,49 @@ undefined
       return;
     }
 
-    // 「合并上游」：`fetch` 上游远端后把它合并进当前分支（等价于固定成 merge 的 pull）。
-    // 目标上游由 `mergeGitUpstream` 从 `status`/`for-each-ref` 自己读，不接收参数。
+    // 「拉取」：`fetch` 上游远端后把它合并进当前分支（用户拍板：不要再叫 merge，pull 归 pull）。
+    // 目标上游由 `pullGitBranch` 从 `status`/`for-each-ref` 自己读，不接收参数。
+    if (req.method === "POST" && url.pathname === "/api/projects/git/pull") {
+      const body = await readJson(req);
+      const project = findProject(String(body?.projectId ?? ""));
+      const cwd = requestWorkspaceCwd(project, body);
+      await pullGitBranch(cwd);
+      sendJson(res, 200, await readGitInfo(cwd));
+      return;
+    }
+
+    // 「合并其它分支」：目标分支由 UI 在本地分支列表里选（服务端再拿 `for-each-ref` 对一遍）。
+    // 冲突不是失败：返回 `{ conflict: true }` + 刷新后的 info，让 UI 把冲突文件摆出来。
     if (req.method === "POST" && url.pathname === "/api/projects/git/merge") {
       const body = await readJson(req);
       const project = findProject(String(body?.projectId ?? ""));
       const cwd = requestWorkspaceCwd(project, body);
-      await mergeGitUpstream(cwd);
-      sendJson(res, 200, await readGitInfo(cwd));
+      const result = await mergeGitBranchInto(cwd, String(body?.branch ?? ""));
+      sendJson(res, 200, { ...result, info: await readGitInfo(cwd) });
+      return;
+    }
+
+    // 「自动解决冲突」：只读冲突清单与内容，拼成一条 prompt 交给前端（前端新建会话并填进
+    // composer，用户自己点提交）。不启动模型、不落盘。
+    if (req.method === "POST" && url.pathname === "/api/projects/git/conflicts") {
+      const body = await readJson(req);
+      const project = findProject(String(body?.projectId ?? ""));
+      const cwd = requestWorkspaceCwd(project, body);
+      const context = await readConflictContext(cwd);
+      sendJson(res, 200, {
+        prompt: buildConflictPrompt({ locale: body?.locale, context: { ...context, projectCwd: project.cwd } }),
+        paths: context.files.map((file) => file.path),
+        cwd,
+      });
+      return;
+    }
+
+    // 「用 IDE 打开改动文件本身」（不是 diff）：冲突文件要靠它直接编辑冲突标记。
+    if (req.method === "POST" && url.pathname === "/api/projects/git/open-file") {
+      const body = await readJson(req);
+      const project = findProject(String(body?.projectId ?? ""));
+      const cwd = requestWorkspaceCwd(project, body);
+      sendJson(res, 200, await openGitFileInIde(cwd, String(body?.path ?? "")));
       return;
     }
 

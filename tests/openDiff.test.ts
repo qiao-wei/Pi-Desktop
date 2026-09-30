@@ -20,6 +20,7 @@ import {
   ideDiffLaunchers,
   launchDetached,
   openGitFileDiff,
+  openGitFileInIde,
   resolveDiffIde,
   sideFileName,
   staleDiffDirectories,
@@ -423,4 +424,44 @@ test("macOS：用应用包里的 IDE 打开后补一次 activate（后台进程�
     { command, args: ["--diff", result.left, result.right] },
     { command: "osascript", args: ["-e", 'tell application "CodeBuddy" to activate'] },
   ]);
+});
+
+/* ------------------------------------------------------------------ 打开文件本身（冲突） */
+
+test("打开冲突文件：直接用 IDE 打开文件本身，不传 --diff", async () => {
+  const repo = makeRepo();
+  writeFileSync(join(repo, "a.ts"), "<<<<<<< HEAD\none\n=======\ntwo\n>>>>>>> other\n");
+
+  const ide = fakeIde();
+  const { calls, spawnImpl } = fakeSpawn();
+  const result = await openGitFileInIde(repo, "a.ts", { platform: "linux", env: ide.env, spawnImpl });
+
+  assert.equal(result.ide, "vscode");
+  assert.equal(result.path, join(repo, "a.ts"));
+  assert.deepEqual(calls, [{ command: ide.command, args: [join(repo, "a.ts")] }]);
+});
+
+test("打开冲突文件：不是当前改动 / 目录 / 没装 IDE → 报错，不启动任何东西", async () => {
+  const repo = makeRepo();
+  writeFileSync(join(repo, "a.ts"), "changed\n");
+  const ide = fakeIde();
+  const { calls, spawnImpl } = fakeSpawn();
+
+  await assert.rejects(
+    () => openGitFileInIde(repo, "nope.ts", { platform: "linux", env: ide.env, spawnImpl }),
+    /Not a changed file/,
+  );
+  await assert.rejects(
+    () => openGitFileInIde(repo, "", { platform: "linux", env: ide.env, spawnImpl }),
+    /without a project folder and a file path/,
+  );
+  await assert.rejects(
+    () => openGitFileInIde(repo, "fresh-dir/", { platform: "linux", env: ide.env, spawnImpl }),
+    /Not a file/,
+  );
+  await assert.rejects(
+    () => openGitFileInIde(repo, "a.ts", { platform: "linux", env: { PATH: "" }, exists: () => false, spawnImpl }),
+    /No IDE found/,
+  );
+  assert.equal(calls.length, 0);
 });

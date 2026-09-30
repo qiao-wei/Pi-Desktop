@@ -16,9 +16,12 @@ import {
   gitChangeTotals,
   gitCommitBlockReason,
   gitCommitPlan,
+  gitConflictedFiles,
   gitCreateBranchBlockReason,
   gitHeadLabel,
   gitMergeActionState,
+  gitMergeTargets,
+  gitPullActionState,
   gitPushActionState,
   gitRenameBranchBlockReason,
   gitStatusLabelKey,
@@ -348,70 +351,157 @@ test("分支名后面有铅笔：点它把当前分支名变成输入框，回�
   assert.ok(!/renameGitBranch\([^)]*body\?\.(from|old)/.test(serverSource), "客户端不能指定要改哪个分支");
 });
 
-/* ------------------------------------------------------------------ 同步动作（合并 / 推送） */
+/* ------------------------------------------------------------------ 同步动作（拉取 / 合并 / 推送 / 冲突） */
 
-test("合并按钮：没有上游 / 流式 / 游离 HEAD / 空仓库 / 有同步在飞 → 禁用；有上游且空闲 → 可点", () => {
-  const idle = { isStreaming: false, isMerging: false, isPushing: false };
+test("拉取按钮：没有上游 / 流式 / 游离 HEAD / 空仓库 / 有同步在飞 → 禁用；有上游且空闲 → 可点", () => {
+  const idle = { isStreaming: false, isPulling: false, isPushing: false };
   const withUpstream = makeInfo({ upstream: "origin/main" });
 
-  assert.deepEqual(gitMergeActionState(withUpstream, idle), { disabled: false, reason: "ok" });
-  assert.deepEqual(gitMergeActionState(makeInfo(), idle), { disabled: true, reason: "noUpstream" }, "没有上游就没有可合并的目标");
+  assert.deepEqual(gitPullActionState(withUpstream, idle), { disabled: false, reason: "ok" });
+  assert.deepEqual(gitPullActionState(makeInfo(), idle), { disabled: true, reason: "noUpstream" }, "没有上游就没有可拉取的目标");
   assert.deepEqual(
-    gitMergeActionState(withUpstream, { ...idle, isStreaming: true }),
+    gitPullActionState(withUpstream, { ...idle, isStreaming: true }),
     { disabled: true, reason: "streaming" },
-    "合并会动工作区，流式时禁用（同切分支）",
+    "拉取会动工作区，流式时禁用（同切分支）",
   );
-  assert.deepEqual(gitMergeActionState(withUpstream, { ...idle, isMerging: true }), { disabled: true, reason: "busy" });
-  assert.deepEqual(gitMergeActionState(withUpstream, { ...idle, isPushing: true }), { disabled: true, reason: "busy" }, "推送在飞时禁合并");
+  assert.deepEqual(gitPullActionState(withUpstream, { ...idle, isPulling: true }), { disabled: true, reason: "busy" });
+  assert.deepEqual(gitPullActionState(withUpstream, { ...idle, isPushing: true }), { disabled: true, reason: "busy" }, "推送在飞时禁拉取");
   assert.deepEqual(
-    gitMergeActionState(makeInfo({ upstream: "origin/main", detached: true }), idle),
+    gitPullActionState(makeInfo({ upstream: "origin/main", detached: true }), idle),
     { disabled: true, reason: "detached" },
   );
   assert.deepEqual(
-    gitMergeActionState(makeInfo({ upstream: "origin/main", unborn: true }), idle),
+    gitPullActionState(makeInfo({ upstream: "origin/main", unborn: true }), idle),
+    { disabled: true, reason: "unborn" },
+  );
+});
+
+test("合并按钮：没有其它本地分支 / 流式 / 游离 HEAD / 空仓库 / 有同步在飞 → 禁用；有目标且空闲 → 可点", () => {
+  const idle = { isStreaming: false, isMerging: false, isPulling: false, isPushing: false };
+  const withTarget = makeInfo({
+    branch: "main",
+    branches: [makeBranch({ name: "main", current: true }), makeBranch({ name: "feature" })],
+  });
+
+  assert.deepEqual(gitMergeTargets(withTarget).map((branch) => branch.name), ["feature"], "当前分支不算合并目标");
+  assert.deepEqual(gitMergeTargets(makeInfo({ detached: true, branches: [makeBranch({ name: "feature" })] })), [], "游离 HEAD 没有目标");
+  assert.deepEqual(gitMergeActionState(withTarget, idle), { disabled: false, reason: "ok" });
+  assert.deepEqual(
+    gitMergeActionState(makeInfo({ branches: [makeBranch({ name: "main", current: true })] }), idle),
+    { disabled: true, reason: "noTarget" },
+    "只有当前分支时没有目标",
+  );
+  assert.deepEqual(gitMergeActionState(withTarget, { ...idle, isStreaming: true }), { disabled: true, reason: "streaming" });
+  assert.deepEqual(gitMergeActionState(withTarget, { ...idle, isMerging: true }), { disabled: true, reason: "busy" });
+  assert.deepEqual(gitMergeActionState(withTarget, { ...idle, isPulling: true }), { disabled: true, reason: "busy" });
+  assert.deepEqual(gitMergeActionState(withTarget, { ...idle, isPushing: true }), { disabled: true, reason: "busy" });
+  assert.deepEqual(
+    gitMergeActionState(makeInfo({ detached: true, branches: [makeBranch({ name: "feature" })] }), idle),
+    { disabled: true, reason: "detached" },
+  );
+  assert.deepEqual(
+    gitMergeActionState(makeInfo({ unborn: true, branches: [makeBranch({ name: "feature" })] }), idle),
     { disabled: true, reason: "unborn" },
   );
   assert.equal(
-    gitMergeActionState(makeInfo({ upstream: "origin/main" }), { ...idle, isStreaming: true, isMerging: true }).reason,
+    gitMergeActionState(withTarget, { ...idle, isStreaming: true, isMerging: true }).reason,
     "streaming",
     "流式优先报 streaming（文案不同）",
   );
 });
 
 test("推送按钮：没有上游仍然可点（那是「关联远端」）；游离 HEAD / 空仓库 / 有同步在飞 → 禁用", () => {
-  const idle = { isPushing: false, isMerging: false };
+  const idle = { isPushing: false, isPulling: false, isMerging: false };
 
   assert.deepEqual(gitPushActionState(makeInfo(), idle), { disabled: false, reason: "ok" }, "没有上游 = 关联远端，不该禁用");
   assert.deepEqual(gitPushActionState(makeInfo({ upstream: "origin/main" }), idle), { disabled: false, reason: "ok" });
   assert.deepEqual(gitPushActionState(makeInfo({ detached: true }), idle), { disabled: true, reason: "detached" });
   assert.deepEqual(gitPushActionState(makeInfo({ unborn: true }), idle), { disabled: true, reason: "unborn" });
-  assert.deepEqual(gitPushActionState(makeInfo(), { isPushing: true, isMerging: false }), { disabled: true, reason: "busy" });
-  assert.deepEqual(gitPushActionState(makeInfo(), { isPushing: false, isMerging: true }), { disabled: true, reason: "busy" }, "合并在飞时禁推送");
+  assert.deepEqual(gitPushActionState(makeInfo(), { isPushing: true, isPulling: false, isMerging: false }), { disabled: true, reason: "busy" });
+  assert.deepEqual(
+    gitPushActionState(makeInfo(), { isPushing: false, isPulling: true, isMerging: false }),
+    { disabled: true, reason: "busy" },
+    "拉取在飞时禁推送",
+  );
+  assert.deepEqual(
+    gitPushActionState(makeInfo(), { isPushing: false, isPulling: false, isMerging: true }),
+    { disabled: true, reason: "busy" },
+    "合并在飞时禁推送",
+  );
 });
 
-test("弹层顶部：合并 → 推送 → 刷新三枚图标，推送无上游时叫「关联远端」", () => {
-  assert.match(badgeSource, /gitMergeActionState\(info, \{ isStreaming, isMerging, isPushing \}\)/, "合并可用性由纯函数算");
-  assert.match(badgeSource, /gitPushActionState\(info, \{ isPushing, isMerging \}\)/, "推送可用性由纯函数算");
-  assert.match(badgeSource, /<GitMerge[\s\S]{0,2000}<Upload[\s\S]{0,1500}<RefreshCw/, "三枚图标按合并/推送/刷新排列");
-  assert.match(badgeSource, /onClick=\{\(\) => void onMerge\(\)\}/, "合并按钮要有处理函数");
+test("冲突文件：gitConflictedFiles 只挑冲突条目", () => {
+  const info = makeInfo({
+    files: [
+      makeFile({ path: "a.ts" }),
+      makeFile({ path: "conflict.ts", conflicted: true, status: "conflicted" }),
+    ],
+  });
+
+  assert.deepEqual(gitConflictedFiles(info).map((file) => file.path), ["conflict.ts"]);
+  assert.deepEqual(gitConflictedFiles(makeInfo()), []);
+});
+
+test("弹层顶部：拉取 → 合并（下拉）→ 推送 → 刷新；推送无上游时叫「关联远端」", () => {
+  assert.match(badgeSource, /gitPullActionState\(info, \{ isStreaming, isPulling, isPushing \}\)/, "拉取可用性由纯函数算");
+  assert.match(
+    badgeSource,
+    /gitMergeActionState\(info, \{ isStreaming, isMerging: isMergingBranch, isPulling, isPushing \}\)/,
+    "合并可用性由纯函数算",
+  );
+  assert.match(badgeSource, /gitPushActionState\(info, \{ isPushing, isPulling, isMerging: isMergingBranch \}\)/, "推送可用性由纯函数算");
+  assert.match(badgeSource, /gitMergeTargets\(info\)/, "合并目标来自本地分支纯函数");
+  assert.match(badgeSource, /<ArrowDownToLine[\s\S]{0,2600}<GitMerge[\s\S]{0,2600}<Upload[\s\S]{0,1800}<RefreshCw/, "四枚图标按拉取/合并/推送/刷新排列");
+  assert.match(badgeSource, /onClick=\{\(\) => void onPull\(\)\}/, "拉取按钮要有处理函数");
+  assert.match(badgeSource, /onSelect=\{\(\) => void onMergeBranch\(branch\.name\)\}/, "合并下拉每一项触发合并");
   assert.match(badgeSource, /onClick=\{\(\) => void onPush\(\)\}/, "推送按钮要有处理函数");
+  assert.match(badgeSource, /aria-label=\{pullTitle\}/, "拉取按钮要有无障碍名字");
   assert.match(badgeSource, /aria-label=\{mergeTitle\}/, "合并按钮要有无障碍名字（图标按钮不能只有 title）");
   assert.match(badgeSource, /aria-label=\{pushTitle\}/, "推送按钮要有无障碍名字");
   assert.match(badgeSource, /t\("git\.pushSetUpstream"\)/, "没有上游时推送要显示为「关联远端」");
+  assert.match(badgeSource, /t\("git\.mergeIntoLabel", \{ current: head \}\)/, "合并下拉要说清楚合到当前分支");
+  assert.match(badgeSource, /disabled=\{pullState\.disabled\}/, "拉取按钮受状态控制");
   assert.match(badgeSource, /disabled=\{mergeState\.disabled\}/, "合并按钮受状态控制");
   assert.match(badgeSource, /disabled=\{pushState\.disabled\}/, "推送按钮受状态控制");
   assert.match(hookSource, /postJson<GitInfo>\("\/api\/projects\/git\/push", \{ projectId, sessionPath \}\)/, "要打推送的路由");
-  assert.match(hookSource, /postJson<GitInfo>\("\/api\/projects\/git\/merge", \{ projectId, sessionPath \}\)/, "要打合并的路由");
+  assert.match(hookSource, /postJson<GitInfo>\("\/api\/projects\/git\/pull", \{ projectId, sessionPath \}\)/, "要打拉取的路由（不再是 merge）");
+  assert.match(hookSource, /postJson<\{ conflict: boolean; branch: string; info: GitInfo \}>\("\/api\/projects\/git\/merge"/, "合并走 merge 路由并带回 info");
   assert.match(hookSource, /t\("git\.pushFailed", \{ reason \}\)/, "推送失败原因要进会话错误横幅");
+  assert.match(hookSource, /t\("git\.pullFailed", \{ reason \}\)/, "拉取失败原因要进会话错误横幅");
   assert.match(hookSource, /t\("git\.mergeFailed", \{ reason \}\)/, "合并失败原因要进会话错误横幅");
   assert.match(appSource, /onPush=\{projectGit\.pushBranch\}/, "App.tsx 要接上 pushBranch");
-  assert.match(appSource, /onMerge=\{projectGit\.mergeUpstream\}/, "App.tsx 要接上 mergeUpstream");
+  assert.match(appSource, /onPull=\{projectGit\.pullBranch\}/, "App.tsx 要接上 pullBranch");
+  assert.match(appSource, /onMergeBranch=\{projectGit\.mergeBranch\}/, "App.tsx 要接上 mergeBranch");
   assert.match(appSource, /isPushing=\{projectGit\.isPushing\}/, "推送中要能禁用按钮");
-  assert.match(appSource, /isMerging=\{projectGit\.isMerging\}/, "合并中要能禁用按钮");
+  assert.match(appSource, /isPulling=\{projectGit\.isPulling\}/, "拉取中要能禁用按钮");
+  assert.match(appSource, /isMergingBranch=\{projectGit\.isMergingBranch\}/, "合并中要能禁用按钮");
   assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/push"/, "缺少 POST /api/projects/git/push");
+  assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/pull"/, "缺少 POST /api/projects/git/pull");
   assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/merge"/, "缺少 POST /api/projects/git/merge");
   assert.match(serverSource, /await pushGitBranch\(cwd\)/, "推送在会话 workspace 里执行");
-  assert.match(serverSource, /await mergeGitUpstream\(cwd\)/, "合并在会话 workspace 里执行");
+  assert.match(serverSource, /await pullGitBranch\(cwd\)/, "拉取在会话 workspace 里执行");
+  assert.match(serverSource, /await mergeGitBranchInto\(cwd, String\(body\?\.branch \?\? ""\)\)/, "合并只收分支名，目标由服务端校验");
+});
+
+test("冲突入口：双击开文件（不是 diff），另有「打开冲突文件 / 自动解决冲突」", () => {
+  assert.match(badgeSource, /if \(file\.conflicted\) \{\s*onOpenFile\(file\.path\);/, "冲突行双击打开文件本身");
+  assert.match(badgeSource, /t\("git\.openConflictHint"\)/, "冲突行要说清楚双击是编辑冲突");
+  assert.match(badgeSource, /gitConflictedFiles\(info\)/, "冲突清单由纯函数算");
+  assert.match(badgeSource, /onClick=\{openConflictsClick\}/, "要有「用 IDE 打开冲突文件」按钮");
+  assert.match(badgeSource, /onClick=\{\(\) => void autoResolveConflictsClick\(\)\}/, "要有「自动解决冲突」按钮");
+  assert.match(badgeSource, /t\("git\.resolveConflicts"\)/, "自动解决按钮要有 i18n 文案");
+  assert.match(hookSource, /postJson<\{ ide: string \}>\("\/api\/projects\/git\/open-file", \{ projectId, sessionPath, path \}\)/, "要打打开文件的路由");
+  assert.match(hookSource, /postJson<\{ prompt: string \}>\("\/api\/projects\/git\/conflicts"/, "要打冲突 prompt 的路由");
+  assert.match(hookSource, /t\("git\.openConflictFailed", \{ reason \}\)/, "打开冲突文件失败要进会话错误横幅");
+  assert.match(hookSource, /t\("git\.conflictPromptFailed", \{ reason \}\)/, "读冲突信息失败要进会话错误横幅");
+  assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/open-file"/, "缺少 POST /api/projects/git/open-file");
+  assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/conflicts"/, "缺少 POST /api/projects/git/conflicts");
+  assert.match(serverSource, /openGitFileInIde\(cwd, String\(body\?\.path \?\? ""\)\)/, "打开文件要在会话 workspace 里执行");
+  assert.match(serverSource, /buildConflictPrompt\(\{ locale: body\?\.locale, context: \{ \.\.\.context, projectCwd: project\.cwd \} \}\)/, "prompt 由服务端按 locale 拼");
+  assert.match(appSource, /onOpenFile=\{projectGit\.openFile\}/, "App.tsx 要接上 openFile");
+  assert.match(appSource, /onAutoResolveConflicts=\{autoResolveConflicts\}/, "App.tsx 要接上自动解决冲突");
+  assert.match(appSource, /await createSession\(projectId\);\s*setDraft\(prompt\);/, "自动解决：新建会话后把 prompt 填进 composer");
+  assert.match(appSource, /setDraft,/, "App 要从 hook 拿到 setDraft");
 });
 
 /* ------------------------------------------------------------------ 界面接线 */
@@ -449,20 +539,21 @@ test("提交面板：勾选框 + 信息框 + 受控按钮，冲突文件不可�
   assert.match(badgeSource, /disabled=\{blockReason !== "ok"\}/, "按钮禁用要由 gitCommitBlockReason 决定");
   assert.match(badgeSource, /onClick=\{\(\) => void commitClick\(\)\}/, "提交按钮要有处理函数");
   assert.match(badgeSource, /const committed = await onCommit\(\{ message: commitMessage\.trim\(\)/, "提交前 trim，成功后才清空输入");
-  assert.match(badgeSource, /file\.conflicted[\s\S]{0,160}git\.commitConflictHint/, "冲突文件要换成警告而不是勾选框");
+  assert.match(badgeSource, /if \(file\.conflicted\) \{\s*onOpenFile\(file\.path\);/, "冲突文件行双击打开文件本身，不是 diff");
+  assert.match(badgeSource, /git\.openConflictHint/, "冲突文件行要说清楚双击是编辑冲突");
   assert.match(badgeSource, /gitCommitPlan\(info, unselected\)/, "提交计划由纯函数算");
   assert.match(badgeSource, /t\("git\.commit"\)/, "提交按钮要有 i18n 文案");
 });
 
 test("提交按钮用最小尺寸，旁边是「用当前模型生成」", () => {
-  // 用户反馈过按钮太大：提交/生成都用 xs（h-6）。只数提交面板里的：新建分支表单也有自己的
-  // xs 按钮，不该被当成"提交面板多出来的按钮"。
+  // 用户反馈过按钮太大：提交/生成/冲突操作都用 xs（h-6）。只数提交面板里的：新建分支表单也有
+  // 自己的 xs 按钮，不该被当成"提交面板多出来的按钮"。
   const panelStart = badgeSource.indexOf("{/* 提交面板");
   const panelEnd = badgeSource.indexOf("{gitBranchListVisible(info)", panelStart);
   assert.notEqual(panelStart, -1, "找不到提交面板的标记注释");
   const commitPanel = badgeSource.slice(panelStart, panelEnd);
-  assert.equal((commitPanel.match(/size="xs"/g) ?? []).length, 2, "提交和生成两个按钮都要用最小尺寸");
-  const commitButton = /<Button[\s\S]{0,80}?size="xs"[\s\S]{0,500}?t\("git\.commit"\)/.exec(badgeSource)?.[0] ?? "";
+  assert.equal((commitPanel.match(/size="xs"/g) ?? []).length, 4, "生成/提交 + 打开冲突/自动解决四个按钮都用最小尺寸");
+  const commitButton = /<Button[\s\S]{0,300}?onClick=\{\(\) => void commitClick\(\)\}[\s\S]{0,200}?t\("git\.commit"\)/.exec(badgeSource)?.[0] ?? "";
   assert.match(commitButton, /size="xs"/, "提交按钮要用最小尺寸");
   assert.match(commitButton, /onClick=\{\(\) => void commitClick\(\)\}/, "这段确实就是提交按钮");
   assert.ok(!/size="sm"/.test(badgeSource), "提交面板里不应再出现大号按钮");

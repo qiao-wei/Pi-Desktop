@@ -35,8 +35,10 @@ export interface ProjectGitController {
   isGeneratingMessage: boolean;
   /** 推送（或首次关联远端并推送）在飞。 */
   isPushing: boolean;
-  /** 合并上游在飞。 */
-  isMerging: boolean;
+  /** 拉取（fetch + merge 上游）在飞。 */
+  isPulling: boolean;
+  /** 合并其它分支在飞。 */
+  isMergingBranch: boolean;
   /** 最近一次写操作（init / 切分支 / 提交）的失败原因；下一步成功会清掉。 */
   error: string;
   refresh: () => Promise<void>;
@@ -49,12 +51,18 @@ export interface ProjectGitController {
   commitChanges: (input: { message: string; paths: string[] }) => Promise<boolean>;
   /** 双击改动文件：用宿主机的 IDE 打开 HEAD ↔ 工作区的 diff；返回是否成功。 */
   openDiff: (path: string) => Promise<boolean>;
+  /** 双击冲突文件：用宿主机的 IDE 打开文件本身（编辑冲突标记）；返回是否成功。 */
+  openFile: (path: string) => Promise<boolean>;
   /** 用当前会话的模型根据选中改动生成提交信息；失败返回 null。 */
   generateCommitMessage: (paths: string[]) => Promise<string | null>;
   /** 推送当前分支；没有上游时关联远端（优先 origin）再推。返回是否成功。 */
   pushBranch: () => Promise<boolean>;
-  /** 把上游分支合并进当前分支；返回是否成功。 */
-  mergeUpstream: () => Promise<boolean>;
+  /** 拉取上游分支并合并进当前分支；返回是否成功。 */
+  pullBranch: () => Promise<boolean>;
+  /** 把选中的其它本地分支合并进当前分支；返回是否成功（冲突算成功，已刷新为冲突状态）。 */
+  mergeBranch: (branch: string) => Promise<boolean>;
+  /** 读冲突清单与内容拼成一条 prompt（自动解决冲突用）；没有冲突时返回 null。 */
+  conflictPrompt: () => Promise<string | null>;
 }
 
 function messageOf(error: unknown): string {
@@ -84,7 +92,8 @@ export function useProjectGit({ projectId, sessionPath = "", isStreaming, onErro
   const [isCommitting, setIsCommitting] = useState(false);
   const [isGeneratingMessage, setIsGeneratingMessage] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
-  const [isMerging, setIsMerging] = useState(false);
+  const [isPulling, setIsPulling] = useState(false);
+  const [isMergingBranch, setIsMergingBranch] = useState(false);
   const [error, setError] = useState("");
   /** 项目切换/并发刷新时只认最后一次请求，避免旧项目的响应急回来覆盖新项目。 */
   const requestSeq = useRef(0);
@@ -306,6 +315,31 @@ export function useProjectGit({ projectId, sessionPath = "", isStreaming, onErro
   );
 
   /**
+   * 双击冲突文件：让宿主机上的 IDE 打开**文件本身**（不是 diff），跟改动列表里的其它按钮
+   * 一样先过服务端的“这是不是当前改动”校验。
+   */
+  const openFile = useCallback(
+    async (path: string): Promise<boolean> => {
+      if (!projectId || !path) {
+        return false;
+      }
+
+      setError("");
+
+      try {
+        await postJson<{ ide: string }>("/api/projects/git/open-file", { projectId, sessionPath, path });
+        return true;
+      } catch (openError) {
+        const reason = messageOf(openError);
+        setError(reason);
+        onError?.(t("git.openConflictFailed", { reason }));
+        return false;
+      }
+    },
+    [projectId, sessionPath, onError],
+  );
+
+  /**
    * 用当前会话的模型生成提交信息。只拿回文本填进输入框，不直接提交 —— 用户还能改。
    * 失败（没选模型 / 没配 key / 模型没给内容）一律进 `error` + 会话错误横幅。
    */
@@ -368,21 +402,58 @@ export function useProjectGit({ projectId, sessionPath = "", isStreaming, onErro
   );
 
   /**
-   * 把上游分支合并进当前分支（服务端跑 fetch + merge）。失败时 git 的原话进 `error`
-   * （弹层内显示）并交给会话错误横幅（比如冲突 / 需要认证）。
+   * 拉取上游分支（服务端跑 fetch + merge）。失败时 git 的原话进 `error`（弹层内显示）
+   * 并交给会话错误横幅（比如冲突 / 需要认证）。
    */
-  const mergeUpstream = useCallback(
+  const pullBranch = useCallback(
     async (): Promise<boolean> => {
-      if (!projectId || isMerging) {
+      if (!projectId || isPulling) {
         return false;
       }
 
-      setIsMerging(true);
+      setIsPulling(true);
       setError("");
 
       try {
-        const next = await postJson<GitInfo>("/api/projects/git/merge", { projectId, sessionPath });
+        const next = await postJson<GitInfo>("/api/projects/git/pull", { projectId, sessionPath });
         setInfo(next);
+        return true;
+      } catch (pullError) {
+        const reason = messageOf(pullError);
+        // 拉取冲突时 git 已经把冲突标记写进工作区，但接口是 500（抛错）：必须再读一次 info，
+        // 否则弹层里看不到刚产生的冲突文件，「自动解决冲突」也就没得点。
+        await refresh();
+        setError(reason);
+        onError?.(t("git.pullFailed", { reason }));
+        return false;
+      } finally {
+        setIsPulling(false);
+      }
+    },
+    [projectId, sessionPath, isPulling, onError, refresh],
+  );
+
+  /**
+   * 把选中的其它本地分支合并进当前分支。冲突**不是**失败：服务端回 `conflict: true` +
+   * 刷新后的 info，`setInfo` 把冲突文件摆到列表里，由弹层里的「自动解决冲突」接手。
+   * 其它失败（脏树被 git 拒、分支不见了）才进 `error`。
+   */
+  const mergeBranch = useCallback(
+    async (branch: string): Promise<boolean> => {
+      if (!projectId || !branch || isMergingBranch) {
+        return false;
+      }
+
+      setIsMergingBranch(true);
+      setError("");
+
+      try {
+        const result = await postJson<{ conflict: boolean; branch: string; info: GitInfo }>("/api/projects/git/merge", {
+          projectId,
+          sessionPath,
+          branch,
+        });
+        setInfo(result.info);
         return true;
       } catch (mergeError) {
         const reason = messageOf(mergeError);
@@ -390,11 +461,40 @@ export function useProjectGit({ projectId, sessionPath = "", isStreaming, onErro
         onError?.(t("git.mergeFailed", { reason }));
         return false;
       } finally {
-        setIsMerging(false);
+        setIsMergingBranch(false);
       }
     },
-    [projectId, sessionPath, isMerging, onError],
+    [projectId, sessionPath, isMergingBranch, onError],
   );
 
-  return { info, isRefreshing, isInitializing, switchingTo, isCreatingBranch, isRenamingBranch, isCommitting, isGeneratingMessage, isPushing, isMerging, error, refresh, initRepo, switchBranch, createBranch, renameBranch, commitChanges, openDiff, generateCommitMessage, pushBranch, mergeUpstream };
+  /**
+   * 「自动解决冲突」的第一步：拿服务端拼好的冲突提示词。真正的“新建会话 + 填进 composer”
+   * 在 App 里做（那是会话层的动作，不属于 git hook）。没有冲突 / 读失败返回 null。
+   */
+  const conflictPrompt = useCallback(
+    async (): Promise<string | null> => {
+      if (!projectId) {
+        return null;
+      }
+
+      setError("");
+
+      try {
+        const result = await postJson<{ prompt: string }>("/api/projects/git/conflicts", {
+          projectId,
+          sessionPath,
+          locale: getLocale(),
+        });
+        return String(result?.prompt ?? "").trim() || null;
+      } catch (conflictError) {
+        const reason = messageOf(conflictError);
+        setError(reason);
+        onError?.(t("git.conflictPromptFailed", { reason }));
+        return null;
+      }
+    },
+    [projectId, sessionPath, onError],
+  );
+
+  return { info, isRefreshing, isInitializing, switchingTo, isCreatingBranch, isRenamingBranch, isCommitting, isGeneratingMessage, isPushing, isPulling, isMergingBranch, error, refresh, initRepo, switchBranch, createBranch, renameBranch, commitChanges, openDiff, openFile, generateCommitMessage, pushBranch, pullBranch, mergeBranch, conflictPrompt };
 }
