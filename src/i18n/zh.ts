@@ -702,6 +702,7 @@ export const zh = {
   "git.mergeDisabledUnborn": "还没有提交，无法合并",
   "git.mergeDisabledNoTarget": "没有其它本地分支可合并",
   "git.mergeIntoLabel": "合并到 {current}",
+  "git.mergeSuccess": "已把 {branch} 合并进 {current}",
   "git.openConflictHint": "双击用默认 IDE 编辑冲突",
   "git.openConflictFailed": "打开冲突文件失败：{reason}",
   "git.conflictPromptFailed": "读取冲突信息失败：{reason}",

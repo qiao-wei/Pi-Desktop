@@ -75,6 +75,8 @@ export interface GitStatusBadgeProps {
   isStreaming: boolean;
   /** 最近一次写操作（init / 切分支 / 提交 / 生成信息）的失败原因；只有用户主动触发的操作会留下它。 */
   error: string;
+  /** 最近一次写操作成功后的状态提示（目前来自合并）；显示几秒后自己消失。 */
+  notice: string;
   onInit: () => void;
   onRefresh: () => void;
   onSwitchBranch: (branch: string) => Promise<boolean>;
@@ -137,6 +139,7 @@ export function GitStatusBadge({
   isMergingBranch,
   isStreaming,
   error,
+  notice,
   onInit,
   onRefresh,
   onSwitchBranch,
@@ -866,6 +869,11 @@ export function GitStatusBadge({
           </div>
         ) : null}
 
+        {notice ? (
+          <p role="status" className="shrink-0 border-t px-3 py-2 text-emerald-600 dark:text-emerald-400">
+            {notice}
+          </p>
+        ) : null}
         {error ? <p className="border-t px-3 py-2 text-destructive">{error}</p> : null}
 
         <div className="flex items-center justify-between gap-2 border-t px-3 py-1.5 text-[0.7rem] text-muted-foreground">
