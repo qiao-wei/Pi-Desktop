@@ -38,6 +38,8 @@ const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "
 const badgeSource = readFileSync(new URL("../src/components/GitStatusBadge.tsx", import.meta.url), "utf8");
 const hookSource = readFileSync(new URL("../src/features/chat/useProjectGit.ts", import.meta.url), "utf8");
 const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const zhSource = readFileSync(new URL("../src/i18n/zh.ts", import.meta.url), "utf8");
+const enSource = readFileSync(new URL("../src/i18n/en.ts", import.meta.url), "utf8");
 
 function makeInfo(patch: Partial<GitInfo> = {}): GitInfo {
   return {
@@ -528,6 +530,19 @@ test("弹层顶部：拉取 → 合并（下拉）→ 推送 → 刷新；推送
   assert.match(serverSource, /await mergeGitBranchInto\(cwd, String\(body\?\.branch \?\? ""\)\)/, "合并只收分支名，目标由服务端校验");
 });
 
+test("合并成功后弹层里要有成功提示（快进合并可能什么都不变，列表看不出来）", () => {
+  assert.match(
+    hookSource,
+    /if \(!result\.conflict\) \{\s*showNotice\(t\("git\.mergeSuccess", \{ branch: result\.branch, current: result\.info\.branch \}\)\);/,
+    "干净合并在 hook 里发成功提示（冲突不发，避免和冲突提示自相矛盾）",
+  );
+  assert.match(hookSource, /notice: string;/, "controller 要暴露 notice 字段");
+  assert.match(hookSource, /GIT_NOTICE_DISMISS_MS/, "提示会自动消失，不赖在弹层里");
+  assert.match(badgeSource, /notice: string;/, "弹层 props 要收 notice");
+  assert.match(badgeSource, /role="status"/, "成功提示要能被辅助技术读出来");
+  assert.match(appSource, /notice=\{projectGit\.notice\}/, "App.tsx 要把 notice 传给弹层");
+});
+
 test("冲突入口：双击开文件（不是 diff），另有「打开冲突文件 / 自动解决冲突」", () => {
   assert.match(badgeSource, /if \(file\.conflicted\) \{\s*onOpenFile\(file\.path\);/, "冲突行双击打开文件本身");
   assert.match(badgeSource, /t\("git\.openConflictHint"\)/, "冲突行要说清楚双击是编辑冲突");
@@ -550,6 +565,11 @@ test("冲突入口：双击开文件（不是 diff），另有「打开冲突文
 });
 
 /* ------------------------------------------------------------------ 界面接线 */
+
+test("合并成功提示文案中英都在，且用 {branch}/{current} 两个占位符", () => {
+  assert.match(zhSource, /"git\.mergeSuccess": "[^"]*\{branch\}[^"]*\{current\}[^"]*"/, "中文要用上两个占位符");
+  assert.match(enSource, /"git\.mergeSuccess": "[^"]*\{branch\}[^"]*\{current\}[^"]*"/, "英文要用上两个占位符");
+});
 
 test("git 徽标挂在会话头部的右部（标题之后），不是别处", () => {
   const start = appSource.indexOf('<header className="conversation-header');
@@ -724,7 +744,10 @@ test("徽标组件只消费数据：自己不发请求、不碰 git 进程", () 
 test("hook 的刷新只由事件驱动，不做轮询", () => {
   assert.match(hookSource, /window\.addEventListener\("focus"/, "窗口重新聚焦时刷新");
   assert.match(hookSource, /wasStreaming\.current && !isStreaming/, "流式结束的那一刻刷新");
-  assert.ok(!/setInterval|setTimeout/.test(hookSource), "不许轮询");
+  assert.ok(!/setInterval/.test(hookSource), "不许轮询");
+  // setTimeout 只允许用来让成功提示自己消失（`GIT_NOTICE_DISMISS_MS`），不能拿它定时刷新。
+  assert.ok(!/setTimeout\([^)]*refresh/.test(hookSource), "不许用定时器定时刷新");
+  assert.match(hookSource, /GIT_NOTICE_DISMISS_MS/, "唯一的一次性定时器是提示自动消失");
   assert.match(hookSource, /requestSeq/, "并发/切项目的旧响应要丢弃");
   assert.ok(!/child_process|execFile/.test(hookSource), "渲染层不直接跑 git（走服务端 /api/projects/git）");
 });

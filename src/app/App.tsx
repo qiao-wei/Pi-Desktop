@@ -2767,6 +2767,7 @@ export function App() {
               isMergingBranch={projectGit.isMergingBranch}
               isStreaming={state.isStreaming}
               error={projectGit.error}
+              notice={projectGit.notice}
               onInit={() => void projectGit.initRepo()}
               onRefresh={() => void projectGit.refresh()}
               onSwitchBranch={projectGit.switchBranch}
