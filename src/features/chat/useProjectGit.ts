@@ -43,6 +43,11 @@ export interface ProjectGitController {
   isMergingBranch: boolean;
   /** 最近一次写操作（init / 切分支 / 提交）的失败原因；下一步成功会清掉。 */
   error: string;
+  /**
+   * 最近一次写操作成功后的状态提示，显示 {@link GIT_NOTICE_DISMISS_MS} 后自动消失。
+   * 快进合并这类「分支名、文件列表都可能毫无变化」的动作必须显式回话，否则用户分不清成功没成功。
+   */
+  notice: string;
   refresh: () => Promise<void>;
   initRepo: () => Promise<void>;
   switchBranch: (branch: string) => Promise<boolean>;
@@ -73,6 +78,9 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** 成功提示的停留时间：够读完一句「已把 X 合并进 Y」，又不至于赖在弹层里。 */
+export const GIT_NOTICE_DISMISS_MS = 6000;
+
 /**
  * 当前项目的 git 信息。
  *
@@ -100,8 +108,41 @@ export function useProjectGit({ projectId, sessionPath = "", isStreaming, onErro
   const [isPulling, setIsPulling] = useState(false);
   const [isMergingBranch, setIsMergingBranch] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   /** 项目切换/并发刷新时只认最后一次请求，避免旧项目的响应急回来覆盖新项目。 */
   const requestSeq = useRef(0);
+  const noticeTimerRef = useRef<number | null>(null);
+
+  /** 收起成功提示并清掉定时器（新的一条进来时先收掉旧的，卸载时也不留挂起的 setState）。 */
+  const clearNotice = useCallback(() => {
+    if (noticeTimerRef.current != null) {
+      window.clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = null;
+    }
+    setNotice("");
+  }, []);
+
+  const showNotice = useCallback((text: string) => {
+    if (noticeTimerRef.current != null) {
+      window.clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = null;
+    }
+    setNotice(text);
+    noticeTimerRef.current = window.setTimeout(() => {
+      noticeTimerRef.current = null;
+      setNotice("");
+    }, GIT_NOTICE_DISMISS_MS);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (noticeTimerRef.current != null) {
+        window.clearTimeout(noticeTimerRef.current);
+        noticeTimerRef.current = null;
+      }
+    },
+    [],
+  );
 
   const refresh = useCallback(async () => {
     if (!projectId) {
@@ -480,6 +521,7 @@ export function useProjectGit({ projectId, sessionPath = "", isStreaming, onErro
 
       setIsMergingBranch(true);
       setError("");
+      clearNotice();
 
       try {
         const result = await postJson<{ conflict: boolean; branch: string; info: GitInfo }>("/api/projects/git/merge", {
@@ -488,6 +530,10 @@ export function useProjectGit({ projectId, sessionPath = "", isStreaming, onErro
           branch,
         });
         setInfo(result.info);
+        // 冲突不报「已合并」：冲突文件与琥珀色提示已经在弹层里说明问题，绿色成功提示会自相矛盾。
+        if (!result.conflict) {
+          showNotice(t("git.mergeSuccess", { branch: result.branch, current: result.info.branch }));
+        }
         return true;
       } catch (mergeError) {
         const reason = messageOf(mergeError);
@@ -498,7 +544,7 @@ export function useProjectGit({ projectId, sessionPath = "", isStreaming, onErro
         setIsMergingBranch(false);
       }
     },
-    [projectId, sessionPath, isMergingBranch, onError],
+    [projectId, sessionPath, isMergingBranch, onError, clearNotice, showNotice],
   );
 
   /**
@@ -530,5 +576,5 @@ export function useProjectGit({ projectId, sessionPath = "", isStreaming, onErro
     [projectId, sessionPath, onError],
   );
 
-  return { info, isRefreshing, isInitializing, switchingTo, isCreatingBranch, isRenamingBranch, deletingBranch, isCommitting, isGeneratingMessage, isPushing, isPulling, isMergingBranch, error, refresh, initRepo, switchBranch, createBranch, renameBranch, deleteBranch, commitChanges, openDiff, openFile, generateCommitMessage, pushBranch, pullBranch, mergeBranch, conflictPrompt };
+  return { info, isRefreshing, isInitializing, switchingTo, isCreatingBranch, isRenamingBranch, deletingBranch, isCommitting, isGeneratingMessage, isPushing, isPulling, isMergingBranch, error, notice, refresh, initRepo, switchBranch, createBranch, renameBranch, deleteBranch, commitChanges, openDiff, openFile, generateCommitMessage, pushBranch, pullBranch, mergeBranch, conflictPrompt };
 }

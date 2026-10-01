@@ -15,6 +15,32 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
+ * 边框默认色（Tailwind v4 必修项）。
+ *
+ * v4 的 preflight 把 `border-color` 默认值从 v3 的 gray-200 改成了 `currentColor`
+ * （preflight 里写的是 `border: 0 solid`）。于是所有只给宽度、不给颜色的边框
+ * （裸 `border` / `border-b` / `border-t` …）都会取文字色：浅色下是近黑硬线
+ * （git 面板实测 rgb(10,10,10)），深色下是近白硬线 —— 也就是常说的「黑框」。
+ *
+ * shadcn 官方 v4 模板在全局样式里补了 `* { border-color: var(--border) }`，
+ * 本项目从 v3 迁过来时漏了，所以补在这里。
+ *
+ * 必须放在 `@layer base`：不带 layer 的裸规则优先级高于所有 layer，会盖掉
+ * utilities 里的 `border-input` / `border-destructive` 等显式颜色；base 层则会被
+ * 它们正常覆盖。`--border` 由各主题（`src/themes/<id>/theme.css`）定义，所以这一条
+ * 同时管默认主题 / codex 主题的浅色与深色。
+ */
+@layer base {
+  *,
+  ::before,
+  ::after,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--border);
+  }
+}
+
+/*
  * Tailwind 骨架：layer 顺序、Tailwind 自身的 @theme 映射、以及少量 @custom-variant。
  *
  * **配色主题不在这里** —— 每个主题一个目录（`src/themes/<id>/`：`meta.ts` 名片 +
