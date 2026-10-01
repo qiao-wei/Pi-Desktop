@@ -21,6 +21,7 @@ import {
   commitGitChanges,
   commitablePaths,
   createGitBranch,
+  deleteGitBranch,
   emptyGitInfo,
   initGitRepo,
   isMergeConflict,
@@ -664,6 +665,63 @@ test("renameGitBranch：游离 HEAD 被 git 拒绝时把原文抛出", async () 
     /cannot rename the current branch while not on any/,
   );
   assert.deepEqual(branchWriteCalls(calls).map((call) => call.args), [["branch", "-m", "topic"]]);
+});
+
+/* ------------------------------------------------------------------ deleteGitBranch */
+
+test("deleteGitBranch：删一个已有本地分支只发一条 `git branch -d --`", async () => {
+  const { exec, calls } = fakeExecFile(
+    switchPlan({ "branch -d -- feature": { ok: true, stdout: "Deleted branch feature (was 1234567).\n" } }),
+  );
+
+  await deleteGitBranch("/tmp/repo", "feature", { execImpl: exec });
+
+  assert.deepEqual(
+    branchWriteCalls(calls).map((call) => call.args),
+    [["branch", "-d", "--", "feature"]],
+    "用 git 的安全删除（-d），并把名字放在 -- 之后",
+  );
+  assert.equal(branchWriteCalls(calls)[0].options.cwd, "/tmp/repo");
+});
+
+test("deleteGitBranch：当前分支 / 不认识的分支 / 非法名字 / 没目录 → 写命令根本不出门", async () => {
+  const current = fakeExecFile(switchPlan());
+  await assert.rejects(
+    () => deleteGitBranch("/tmp/repo", "main", { execImpl: current.exec }),
+    /Cannot delete the current branch: main/,
+  );
+  assert.equal(branchWriteCalls(current.calls).length, 0, "HEAD 所在的分支不能删（git 也会拒绝）");
+
+  const unknown = fakeExecFile(switchPlan());
+  await assert.rejects(() => deleteGitBranch("/tmp/repo", "nope", { execImpl: unknown.exec }), /Unknown branch: nope/);
+  assert.equal(branchWriteCalls(unknown.calls).length, 0, "目标必须是本地分支列表里的名字");
+
+  const unsafe = fakeExecFile(switchPlan());
+  await assert.rejects(() => deleteGitBranch("/tmp/repo", "-D", { execImpl: unsafe.exec }), /Invalid branch name/);
+  await assert.rejects(() => deleteGitBranch("/tmp/repo", "   ", { execImpl: unsafe.exec }), /Invalid branch name/);
+  assert.equal(unsafe.calls.length, 0, "名字不合法时连探测都不需要");
+
+  await assert.rejects(() => deleteGitBranch("", "feature", { execImpl: unknown.exec }), /without a project folder/);
+});
+
+test("deleteGitBranch：未合并分支被 git 拒绝时把原文抛出（不降级成 -D）", async () => {
+  const { exec, calls } = fakeExecFile(
+    switchPlan({
+      "branch -d -- feature": {
+        ok: false,
+        code: 1,
+        stderr:
+          "error: The branch 'feature' is not fully merged.\nIf you are sure you want to delete it, run 'git branch -D feature'.\n",
+      },
+    }),
+  );
+
+  await assert.rejects(() => deleteGitBranch("/tmp/repo", "feature", { execImpl: exec }), /not fully merged/);
+  assert.deepEqual(
+    branchWriteCalls(calls).map((call) => call.args),
+    [["branch", "-d", "--", "feature"]],
+    "安全删除：未合并时也只试 -d，绝不自动升级成 -D",
+  );
 });
 
 /* ------------------------------------------------------------------ pushGitBranch / pullGitBranch / mergeGitBranchInto */

@@ -11,6 +11,7 @@ import test from "node:test";
 
 import {
   gitBadgeKind,
+  gitBranchDeleteState,
   gitBranchListVisible,
   gitBranchSwitchState,
   gitChangeTotals,
@@ -173,6 +174,11 @@ test("分支行的可点击状态：当前分支 / 回答生成中 / 已有切�
   assert.equal(creating.reason, "busy");
   assert.equal(creating.isSwitching, false, "新建分支不给某一行转圈");
 
+  // 删除分支期间，别的分支行也不能切（写操作不排队）。
+  const deleting = gitBranchSwitchState(makeBranch(), { isStreaming: false, switchingTo: "", isBusy: true });
+  assert.equal(deleting.disabled, true);
+  assert.equal(deleting.reason, "busy");
+
   assert.deepEqual(gitBranchSwitchState(makeBranch(), idle), {
     isCurrent: false,
     isSwitching: false,
@@ -188,6 +194,45 @@ test("分支列表：有本地分支就显示（包括只有一个分支的情�
   assert.equal(gitBranchListVisible(makeInfo()), false);
   assert.equal(gitBranchListVisible(makeInfo({ branches: [makeBranch({ current: true, name: "main" })] })), true);
   assert.equal(gitBranchListVisible(makeInfo({ branches: [makeBranch({ current: true, name: "main" }), makeBranch()] })), true);
+});
+
+test("删除图标状态：当前分支 → current；删除中/别的写在飞 → busy；流式 → streaming", () => {
+  const idle = { isStreaming: false, deletingBranch: "" };
+
+  assert.deepEqual(gitBranchDeleteState(makeBranch({ current: true }), idle), {
+    isCurrent: true,
+    isDeleting: false,
+    disabled: true,
+    reason: "current",
+  });
+
+  // 正在删的那一行转圈。
+  assert.deepEqual(gitBranchDeleteState(makeBranch(), { isStreaming: false, deletingBranch: "feature" }), {
+    isCurrent: false,
+    isDeleting: true,
+    disabled: true,
+    reason: "busy",
+  });
+
+  // 别的行在删除期间也不能点（避免并发写）。
+  const other = gitBranchDeleteState(makeBranch({ name: "other" }), { isStreaming: false, deletingBranch: "feature" });
+  assert.equal(other.disabled, true);
+  assert.equal(other.reason, "busy");
+  assert.equal(other.isDeleting, false);
+
+  assert.equal(
+    gitBranchDeleteState(makeBranch({ name: "other" }), { isStreaming: true, deletingBranch: "feature" }).reason,
+    "streaming",
+    "流式优先报 streaming（提示文案不同）",
+  );
+  assert.equal(gitBranchDeleteState(makeBranch(), { isStreaming: false, deletingBranch: "", isBusy: true }).reason, "busy");
+
+  assert.deepEqual(gitBranchDeleteState(makeBranch(), idle), {
+    isCurrent: false,
+    isDeleting: false,
+    disabled: false,
+    reason: "ok",
+  });
 });
 
 test("新建分支表单：流式 > 新建中 > 空名字 > 重名 > ok", () => {
@@ -315,7 +360,7 @@ test("分支名后面有铅笔：点它把当前分支名变成输入框，回�
   assert.match(badgeSource, /onClick=\{openRenameForm\}/, "点铅笔展开改名表单");
   assert.match(
     badgeSource,
-    /onOpenChange=\{\(next\) => \{[\s\S]{0,260}closeRenameForm\(\)/,
+    /onOpenChange=\{\(next\) => \{[\s\S]{0,500}closeRenameForm\(\)/,
     "收起弹层要重置改名表单，不该带着上次没提交的名字",
   );
   assert.match(badgeSource, /setRenameName\(head\)/, "输入框预填当前分支名");
@@ -625,7 +670,11 @@ test("生成信息走服务端且用当前会话的模型，不把 diff 发到�
 });
 
 test("分支行是按钮：当前分支不可点，脏工作区先弹确认", () => {
-  assert.match(badgeSource, /gitBranchSwitchState\(branch, \{ isStreaming, switchingTo, isCreating: isCreatingBranch \}\)/, "每行都要算可点状态");
+  assert.match(
+    badgeSource,
+    /gitBranchSwitchState\(branch, \{\s*isStreaming,\s*switchingTo,\s*isCreating: isCreatingBranch,\s*isBusy: isRenamingBranch \|\| Boolean\(deletingBranch\),\s*\}\)/,
+    "每行都要算可点状态",
+  );
   assert.match(badgeSource, /onClick=\{\(\) => branchClick\(branch\.name\)\}/, "点分支行触发切换");
   assert.match(badgeSource, /disabled=\{state\.disabled\}/, "不可点的行要真的 disabled");
   assert.match(badgeSource, /changedFiles > 0[\s\S]{0,200}setPendingBranch\(branch\)/, "脏工作区要先记下待确认的目标分支");
@@ -633,6 +682,36 @@ test("分支行是按钮：当前分支不可点，脏工作区先弹确认", ()
   assert.match(badgeSource, /t\("git\.switchDirtyDesc", \{ count: changedFiles, branch: pendingBranch \}\)/, "确认框要说清楚会带上哪些改动");
   assert.match(badgeSource, /onClick=\{\(\) => void runSwitch\(pendingBranch\)\}/, "确认后才真的切");
   assert.match(badgeSource, /const switched = await onSwitchBranch\(branch\)/, "切换结果决定弹层关不关");
+});
+
+test("分支行末尾的删除图标：当前分支不显示，点击先弹确认框再删", () => {
+  assert.match(
+    badgeSource,
+    /gitBranchDeleteState\(branch, \{ isStreaming, deletingBranch, isBusy: branchWriteBusy \}\)/,
+    "每行删除图标都要算可用状态",
+  );
+  assert.match(badgeSource, /aria-label=\{t\("git\.deleteBranch"\)\}/, "删除图标要有可访问名");
+  assert.match(badgeSource, /<Trash2 className="size-3" aria-hidden="true" \/>/, "删除图标用 Trash2");
+  assert.match(badgeSource, /deleteState\.isCurrent \? null :/, "当前分支不渲染删除图标");
+  assert.match(badgeSource, /setPendingDelete\(branch\.name\)/, "点删除记下待确认的分支名");
+  assert.ok(!/setOpen\(false\);\s*setPendingDelete/.test(badgeSource), "点删除不再先收弹层：确认删分支时 git 面板要留在视野里");
+  assert.match(
+    badgeSource,
+    /if \(!next && pendingDelete\) \{\s*return;/,
+    "删除确认框开着时不许让焦点移走把 Popover 自动收起",
+  );
+  assert.match(
+    badgeSource,
+    /onFocusOutside=\{\(event\) => \{\s*if \(pendingDelete\) \{\s*event\.preventDefault\(\)/,
+    "焦点移进 AlertDialog 时不许收面板",
+  );
+  assert.match(badgeSource, /<AlertDialog\s*open=\{Boolean\(pendingDelete\)\}/, "删除确认要用 AlertDialog");
+  assert.ok(!/\bconfirm\(/.test(badgeSource), "不许用浏览器内置 confirm");
+  assert.match(badgeSource, /t\("git\.deleteBranchDesc", \{ branch: pendingDelete \}\)/, "确认框要说清楚删的是哪个分支");
+  assert.match(badgeSource, /const deleted = await onDeleteBranch\(branch\)/, "确认后才真的删");
+  assert.match(appSource, /onDeleteBranch=\{projectGit\.deleteBranch\}/, "App 要把删除接到 hook");
+  assert.match(appSource, /deletingBranch=\{projectGit\.deletingBranch\}/, "删除中的分支名要传给徽标转圈");
+  assert.match(hookSource, /postJson<GitInfo>\("\/api\/projects\/git\/delete-branch"/, "删除走服务端路由");
 });
 
 test("徽标组件只消费数据：自己不发请求、不碰 git 进程", () => {
@@ -661,4 +740,10 @@ test("服务端提供只读查询 / init / 切分支 / 提交四条路由，路�
   assert.match(serverSource, /initGitRepo\(project\.cwd\)/, "init 路由应从项目表取 cwd");
   assert.match(serverSource, /const cwd = requestWorkspaceCwd\(project, body\);\s*await switchGitBranch\(cwd, String\(body\?\.branch \?\? ""\)\)/, "切分支要在会话 workspace 里执行");
   assert.match(serverSource, /commitGitChanges\(cwd, \{ message: body\?\.message, paths: body\?\.paths \}\)/, "提交路由要把信息与路径交给服务端校验");
+  assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/delete-branch"/, "缺少 POST /api/projects/git/delete-branch");
+  assert.match(
+    serverSource,
+    /await deleteGitBranch\(cwd, String\(body\?\.branch \?\? ""\)\)/,
+    "删除分支要在会话 workspace 里执行，且目标只从请求体取分支名",
+  );
 });

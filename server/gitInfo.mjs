@@ -10,14 +10,16 @@
  * - 所有 argv 都在这里拼。`READ_ONLY_SUBCOMMANDS` 是 `runReadOnlyGit` 执行的只读白名单，
  *   以后有人想在读路径里夹带 `commit`/`checkout`/`push` 会被直接拒绝。
  * - `git init`（`initGitRepo`）、`git switch`（`switchGitBranch`）、`git switch -c`
- *   （`createGitBranch`）、`git branch -m`（`renameGitBranch`）和 `git commit`
+ *   （`createGitBranch`）、`git branch -m`（`renameGitBranch`）、`git branch -d`
+ *   （`deleteGitBranch`）和 `git commit`
  *   （`commitGitChanges`）、`git push`（`pushGitBranch`）、`git fetch` + `git merge`（`pullGitBranch`）
- *   与「合并其它分支」（`mergeGitBranchInto`）是本功能仅有的八个写操作：都不走
+ *   与「合并其它分支」（`mergeGitBranchInto`）是本功能仅有的九个写操作：都不走
  *   只读 helper，只在用户点按钮/点分支/改名/写提交信息后触发。切分支前先拿 `for-each-ref` 对一遍
  *   本地分支名，提交前先拿 `status` 对一遍改动文件路径，推送/拉取/合并前先拿 `status` 对一遍当前
  *   分支与上游，远端名只可能是 `git remote` 报出来的 —— 目标必须是 git 刚刚报出来的东西。
  *   新建分支是唯一一处用户输入要进 argv 正题的地方（分支名本来就是要新建的东西，没有现成
- *   清单可对），所以它过 `isSafeBranchName`，再用 `for-each-ref` 确认不重名。
+ *   清单可对），所以它过 `isSafeBranchName`，再用 `for-each-ref` 确认不重名；删除分支同样要求
+ *   目标在本地分支列表里且不是 HEAD。
  *
  * 不需要子进程就能判断的部分全部是下面导出的纯解析函数，`node --test` 直接对 porcelain
  * 文本做用例，不依赖机器上装没装 git。
@@ -966,6 +968,50 @@ export async function renameGitBranch(cwd, name, { execImpl = execFile, timeoutM
   }
 
   return renamed.stdout.trim();
+}
+
+/**
+ * 删除一个**本地分支**（`git branch -d <name>`）。
+ *
+ * 用 `-d` 而不是 `-D`：分支上还有没合进任何地方的提交时，git 会拒绝并给出"不是完全合并"
+ * 的原文，改动不会因为点一下图标就丢掉（想强删得用户自己在终端里跑 `git branch -D`）。
+ * 正因为有这层保护，UI 那边只要一个确认框就够了。
+ *
+ * 三道校验，和切换/合并一样"目标必须是 git 刚刚报出来的东西"：
+ * 1. 名字过 `isSafeBranchName`（前导 `-` 不会被当成选项）；
+ * 2. 必须出现在 `for-each-ref` 的本地分支列表里；
+ * 3. 不能是当前 HEAD 所在的分支（git 自己也会拒绝，这里先给更直白的错误）。
+ * 在别的 worktree 里检出的分支由 git 自己拒绝（"used by worktree at ..."），原文照抛。
+ */
+export async function deleteGitBranch(cwd, branch, { execImpl = execFile, timeoutMs = GIT_TIMEOUT_MS } = {}) {
+  const project = String(cwd ?? "").trim();
+  if (!project) {
+    throw new Error("Cannot delete a branch without a project folder");
+  }
+
+  const target = String(branch ?? "").trim();
+  if (!isSafeBranchName(target)) {
+    throw new Error(`Invalid branch name: ${target || "(empty)"}`);
+  }
+
+  const options = { execImpl, timeoutMs };
+  const git = createGitRunner(options);
+
+  const listed = await runReadOnlyGit(project, ["for-each-ref", `--format=${BRANCH_FORMAT}`, "refs/heads"], options);
+  const branches = parseBranches(listed.ok ? listed.stdout : "");
+  if (!branches.some((candidate) => candidate.name === target)) {
+    throw new Error(`Unknown branch: ${target}`);
+  }
+  if (branches.some((candidate) => candidate.current && candidate.name === target)) {
+    throw new Error(`Cannot delete the current branch: ${target}`);
+  }
+
+  const deleted = await git(["branch", "-d", "--", target], { cwd: project });
+  if (!deleted.ok) {
+    throw new Error(gitFailureReason(deleted));
+  }
+
+  return deleted.stdout.trim() || deleted.stderr.trim();
 }
 
 /**
