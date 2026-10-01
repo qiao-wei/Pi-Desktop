@@ -116,7 +116,8 @@ export interface GroupedGitFiles {
  * 分支列表里一行可不可以点。
  *
  * `reason` 决定点击要弹什么/要不要拦下：`current` 已是当前分支；`streaming` 回答生成中
- * （agent 正在改文件，这时候换分支最危险）；`busy` 已有一个切换在飞；`ok` 可以切。
+ * （agent 正在改文件，这时候换分支最危险）；`busy` 已有别的分支写操作（切换/新建/删除）在飞；
+ * `ok` 可以切。
  */
 export interface GitBranchSwitchState {
   isCurrent: boolean;
@@ -127,7 +128,12 @@ export interface GitBranchSwitchState {
 
 export function gitBranchSwitchState(
   branch: Pick<GitBranchSummary, "name" | "current">,
-  { isStreaming, switchingTo, isCreating = false }: { isStreaming: boolean; switchingTo: string; isCreating?: boolean },
+  {
+    isStreaming,
+    switchingTo,
+    isCreating = false,
+    isBusy = false,
+  }: { isStreaming: boolean; switchingTo: string; isCreating?: boolean; isBusy?: boolean },
 ): GitBranchSwitchState {
   if (branch.current) {
     return { isCurrent: true, isSwitching: false, disabled: true, reason: "current" };
@@ -137,11 +143,55 @@ export function gitBranchSwitchState(
     return { isCurrent: false, isSwitching: false, disabled: true, reason: "streaming" };
   }
 
-  if (switchingTo || isCreating) {
+  if (switchingTo || isCreating || isBusy) {
     return { isCurrent: false, isSwitching: switchingTo === branch.name, disabled: true, reason: "busy" };
   }
 
   return { isCurrent: false, isSwitching: false, disabled: false, reason: "ok" };
+}
+
+/**
+ * 分支列表里「删除」图标的可用性。
+ *
+ * 删除是破坏性操作，闸门和切换同一套：当前分支不能删（删了 HEAD 就悬空了，git 自己也会
+ * 拒绝），回答生成中禁（agent 正在改文件），别的分支写操作在飞时禁（写操作不排队）。
+ * 服务端只回答另一半：这个分支名确实是本地分支、且不是 HEAD。
+ */
+export type GitDeleteBranchBlockReason = "ok" | "current" | "streaming" | "busy";
+
+export interface GitBranchDeleteState {
+  isCurrent: boolean;
+  /** 正在删这一行（用来在图标位置转圈）。 */
+  isDeleting: boolean;
+  disabled: boolean;
+  reason: GitDeleteBranchBlockReason;
+}
+
+export function gitBranchDeleteState(
+  branch: Pick<GitBranchSummary, "name" | "current">,
+  {
+    isStreaming,
+    deletingBranch,
+    isBusy = false,
+  }: { isStreaming: boolean; deletingBranch: string; isBusy?: boolean },
+): GitBranchDeleteState {
+  if (branch.current) {
+    return { isCurrent: true, isDeleting: false, disabled: true, reason: "current" };
+  }
+
+  if (deletingBranch === branch.name) {
+    return { isCurrent: false, isDeleting: true, disabled: true, reason: "busy" };
+  }
+
+  if (isStreaming) {
+    return { isCurrent: false, isDeleting: false, disabled: true, reason: "streaming" };
+  }
+
+  if (deletingBranch || isBusy) {
+    return { isCurrent: false, isDeleting: false, disabled: true, reason: "busy" };
+  }
+
+  return { isCurrent: false, isDeleting: false, disabled: false, reason: "ok" };
 }
 
 /**

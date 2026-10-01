@@ -29,6 +29,8 @@ export interface ProjectGitController {
   isCreatingBranch: boolean;
   /** 重命名当前分支请求在飞。 */
   isRenamingBranch: boolean;
+  /** 正在删除的分支名；空串 = 没在删。 */
+  deletingBranch: string;
   /** 提交请求在飞。 */
   isCommitting: boolean;
   /** 「智能生成提交信息」在飞。 */
@@ -48,6 +50,8 @@ export interface ProjectGitController {
   createBranch: (name: string) => Promise<boolean>;
   /** 给当前分支改名；返回是否成功。 */
   renameBranch: (name: string) => Promise<boolean>;
+  /** 删除一个本地分支（`git branch -d`，未合并时 git 会拒绝）；返回是否成功。 */
+  deleteBranch: (branch: string) => Promise<boolean>;
   commitChanges: (input: { message: string; paths: string[] }) => Promise<boolean>;
   /** 双击改动文件：用宿主机的 IDE 打开 HEAD ↔ 工作区的 diff；返回是否成功。 */
   openDiff: (path: string) => Promise<boolean>;
@@ -89,6 +93,7 @@ export function useProjectGit({ projectId, sessionPath = "", isStreaming, onErro
   const [switchingTo, setSwitchingTo] = useState("");
   const [isCreatingBranch, setIsCreatingBranch] = useState(false);
   const [isRenamingBranch, setIsRenamingBranch] = useState(false);
+  const [deletingBranch, setDeletingBranch] = useState("");
   const [isCommitting, setIsCommitting] = useState(false);
   const [isGeneratingMessage, setIsGeneratingMessage] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
@@ -257,6 +262,35 @@ export function useProjectGit({ projectId, sessionPath = "", isStreaming, onErro
       }
     },
     [projectId, isRenamingBranch, onError],
+  );
+
+  /**
+   * 删除一个本地分支（服务端跑 `git branch -d`）。返回是否成功，供弹层决定要不要收确认框：
+   * 失败时把 git 的原话留在 `error`（弹层内显示）并交给会话错误横幅（比如“分支还没完全合并”）。
+   */
+  const deleteBranch = useCallback(
+    async (branch: string): Promise<boolean> => {
+      if (!projectId || !branch || deletingBranch) {
+        return false;
+      }
+
+      setDeletingBranch(branch);
+      setError("");
+
+      try {
+        const next = await postJson<GitInfo>("/api/projects/git/delete-branch", { projectId, sessionPath, branch });
+        setInfo(next);
+        return true;
+      } catch (deleteError) {
+        const reason = messageOf(deleteError);
+        setError(reason);
+        onError?.(t("git.deleteBranchFailed", { branch, reason }));
+        return false;
+      } finally {
+        setDeletingBranch("");
+      }
+    },
+    [projectId, sessionPath, deletingBranch, onError],
   );
 
   /**
@@ -496,5 +530,5 @@ export function useProjectGit({ projectId, sessionPath = "", isStreaming, onErro
     [projectId, sessionPath, onError],
   );
 
-  return { info, isRefreshing, isInitializing, switchingTo, isCreatingBranch, isRenamingBranch, isCommitting, isGeneratingMessage, isPushing, isPulling, isMergingBranch, error, refresh, initRepo, switchBranch, createBranch, renameBranch, commitChanges, openDiff, openFile, generateCommitMessage, pushBranch, pullBranch, mergeBranch, conflictPrompt };
+  return { info, isRefreshing, isInitializing, switchingTo, isCreatingBranch, isRenamingBranch, deletingBranch, isCommitting, isGeneratingMessage, isPushing, isPulling, isMergingBranch, error, refresh, initRepo, switchBranch, createBranch, renameBranch, deleteBranch, commitChanges, openDiff, openFile, generateCommitMessage, pushBranch, pullBranch, mergeBranch, conflictPrompt };
 }

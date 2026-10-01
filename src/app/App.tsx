@@ -2789,6 +2789,7 @@ export function App() {
               switchingTo={projectGit.switchingTo}
               isCreatingBranch={projectGit.isCreatingBranch}
               isRenamingBranch={projectGit.isRenamingBranch}
+              deletingBranch={projectGit.deletingBranch}
               isCommitting={projectGit.isCommitting}
               isGeneratingMessage={projectGit.isGeneratingMessage}
               isPushing={projectGit.isPushing}
@@ -2801,6 +2802,7 @@ export function App() {
               onSwitchBranch={projectGit.switchBranch}
               onCreateBranch={projectGit.createBranch}
               onRenameBranch={projectGit.renameBranch}
+              onDeleteBranch={projectGit.deleteBranch}
               onCommit={projectGit.commitChanges}
               onPush={projectGit.pushBranch}
               onPull={projectGit.pullBranch}
