@@ -21,7 +21,7 @@ import { extensionWidgetRequest } from "./extensionUiRequests.mjs";
 import { openSqliteDatabase } from "./sqlite.mjs";
 import { ensureSessionArchiveColumn, listArchivedSessionRows, listProjectSessionRows } from "./sessionArchive.mjs";
 import { revealFolder } from "./revealFolder.mjs";
-import { commitGitChanges, createGitBranch, initGitRepo, mergeGitBranchInto, pullGitBranch, pushGitBranch, readCommitDiff, readConflictContext, readGitInfo, renameGitBranch, switchGitBranch } from "./gitInfo.mjs";
+import { commitGitChanges, createGitBranch, deleteGitBranch, initGitRepo, mergeGitBranchInto, pullGitBranch, pushGitBranch, readCommitDiff, readConflictContext, readGitInfo, renameGitBranch, switchGitBranch } from "./gitInfo.mjs";
 import {
   createManagedWorktree,
   isManagedWorktreePath,
@@ -1590,6 +1590,18 @@ undefined
       const project = findProject(String(body?.projectId ?? ""));
       await renameGitBranch(project.cwd, String(body?.name ?? ""));
       sendJson(res, 200, await readGitInfo(project.cwd));
+      return;
+    }
+
+    // 「删除分支」：目标必须是本地分支列表里的名字，由 `deleteGitBranch` 再校验一次。用 git 的
+    // 安全删除（`-d`）：还有未合并提交时 git 拒绝，原文当错误抛出。带 `sessionPath` 时在会话的
+    // worktree 里删（它自带的分支可能就在那边检出的，由 git 自己判断能否删）。
+    if (req.method === "POST" && url.pathname === "/api/projects/git/delete-branch") {
+      const body = await readJson(req);
+      const project = findProject(String(body?.projectId ?? ""));
+      const cwd = requestWorkspaceCwd(project, body);
+      await deleteGitBranch(cwd, String(body?.branch ?? ""));
+      sendJson(res, 200, await readGitInfo(cwd));
       return;
     }
 

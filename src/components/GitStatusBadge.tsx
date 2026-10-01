@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowDownToLine, ArrowUp, Check, GitBranch, GitBranchPlus, GitMerge, Loader2, Pencil, RefreshCw, Sparkles, SquarePen, Upload, WandSparkles } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, ArrowUp, Check, GitBranch, GitBranchPlus, GitMerge, Loader2, Pencil, RefreshCw, Sparkles, SquarePen, Trash2, Upload, WandSparkles } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { useT } from "../i18n/react";
 import {
   gitBadgeKind,
+  gitBranchDeleteState,
   gitBranchListVisible,
   gitBranchSwitchState,
   gitChangeTotals,
@@ -58,6 +59,8 @@ export interface GitStatusBadgeProps {
   isCreatingBranch: boolean;
   /** 给当前分支改名在飞。 */
   isRenamingBranch: boolean;
+  /** 正在删除的分支名；空串 = 没在删。 */
+  deletingBranch: string;
   /** 提交请求在飞。 */
   isCommitting: boolean;
   /** 「智能生成提交信息」在飞。 */
@@ -79,6 +82,8 @@ export interface GitStatusBadgeProps {
   onCreateBranch: (name: string) => Promise<boolean>;
   /** 给当前分支改名。 */
   onRenameBranch: (name: string) => Promise<boolean>;
+  /** 删除一个本地分支（未合并时 git 会拒绝，原因进 error）。 */
+  onDeleteBranch: (branch: string) => Promise<boolean>;
   onCommit: (input: { message: string; paths: string[] }) => Promise<boolean>;
   /** 推送当前分支；没有上游时服务端会先关联远端（优先 origin）再推。 */
   onPush: () => Promise<boolean>;
@@ -124,6 +129,7 @@ export function GitStatusBadge({
   switchingTo,
   isCreatingBranch,
   isRenamingBranch,
+  deletingBranch,
   isCommitting,
   isGeneratingMessage,
   isPushing,
@@ -136,6 +142,7 @@ export function GitStatusBadge({
   onSwitchBranch,
   onCreateBranch,
   onRenameBranch,
+  onDeleteBranch,
   onCommit,
   onPush,
   onPull,
@@ -149,6 +156,8 @@ export function GitStatusBadge({
   const [open, setOpen] = useState(false);
   /** 脏工作区时待确认的目标分支；非空时弹确认框。 */
   const [pendingBranch, setPendingBranch] = useState("");
+  /** 待确认删除的分支名；非空时弹删除确认框。 */
+  const [pendingDelete, setPendingDelete] = useState("");
   /** 新建分支的表单是否展开（收起时连输入框都不渲染）。 */
   const [isCreatingFormOpen, setIsCreatingFormOpen] = useState(false);
   /** 新建分支表单里的名字（未 trim）。 */
@@ -207,6 +216,8 @@ export function GitStatusBadge({
   const pushState = gitPushActionState(info, { isPushing, isPulling, isMerging: isMergingBranch });
   const mergeTargets = gitMergeTargets(info);
   const conflictFiles = gitConflictedFiles(info);
+  /** 是否有别的分支写操作在飞（切换/新建/改名），用来拦住并发的删除。 */
+  const branchWriteBusy = Boolean(switchingTo) || isCreatingBranch || isRenamingBranch;
 
   const pullTitle =
     pullState.reason === "streaming"
@@ -242,6 +253,14 @@ export function GitStatusBadge({
     setPendingBranch("");
     if (switched) {
       setOpen(false);
+    }
+  };
+
+  /** 删除确认框里的"删除"：成功才收框（失败时把框留着，原因由会话错误横幅告诉用户）。 */
+  const runDelete = async (branch: string) => {
+    const deleted = await onDeleteBranch(branch);
+    if (deleted) {
+      setPendingDelete("");
     }
   };
 
@@ -389,6 +408,11 @@ export function GitStatusBadge({
       <Popover
         open={open}
         onOpenChange={(next) => {
+          // 删除确认框开着时不让弹层自动收起：焦点会移到 AlertDialog，Radix 会当"点到外面"
+          // 把 Popover 关掉。用户要的是确认删分支时 git 面板一直留在视野里。
+          if (!next && pendingDelete) {
+            return;
+          }
           setOpen(next);
           if (next) {
             onRefresh();
@@ -438,6 +462,17 @@ export function GitStatusBadge({
         // 不能靠内容自然撑开 —— 提交信息框是 field-sizing-content，写长了会把整个弹层顶出窗口底部，
         // 而弹层是 fixed 定位的，页面滚不动，用户就永远点不到下面的按钮。
         className="flex max-h-[var(--radix-popover-content-available-height,calc(100vh-4rem))] w-[24rem] max-w-[92vw] flex-col overflow-y-auto overscroll-contain p-0 text-xs"
+        // 删除确认框开着时，不许焦点之外/指针之外的判定把面板收掉（同上：面板要留在视野里）。
+        onInteractOutside={(event) => {
+          if (pendingDelete) {
+            event.preventDefault();
+          }
+        }}
+        onFocusOutside={(event) => {
+          if (pendingDelete) {
+            event.preventDefault();
+          }
+        }}
       >
         <div className="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2">
           {isRenaming ? (
@@ -702,39 +737,75 @@ export function GitStatusBadge({
           <div className="max-h-40 overflow-auto border-t py-1">
             <div className="px-3 py-1 text-[0.7rem] font-medium text-muted-foreground">{t("git.branches")}</div>
             {info.branches.map((branch) => {
-              const state = gitBranchSwitchState(branch, { isStreaming, switchingTo, isCreating: isCreatingBranch });
+              const state = gitBranchSwitchState(branch, {
+                isStreaming,
+                switchingTo,
+                isCreating: isCreatingBranch,
+                isBusy: isRenamingBranch || Boolean(deletingBranch),
+              });
+              const deleteState = gitBranchDeleteState(branch, { isStreaming, deletingBranch, isBusy: branchWriteBusy });
+              const deleteTitle =
+                deleteState.reason === "current"
+                  ? t("git.deleteBranchDisabledCurrent")
+                  : deleteState.reason === "streaming"
+                    ? t("git.deleteBranchDisabledStreaming")
+                    : deleteState.reason === "busy"
+                      ? t("git.deleteBranchDisabledBusy")
+                      : t("git.deleteBranch");
               return (
-                <button
-                  key={branch.name}
-                  type="button"
-                  disabled={state.disabled}
-                  onClick={() => branchClick(branch.name)}
-                  aria-label={state.isCurrent ? `${branch.name} (${t("git.currentBranch")})` : t("git.switchTo", { branch: branch.name })}
-                  title={
-                    state.reason === "streaming"
-                      ? t("git.switchDisabledStreaming")
-                      : state.isCurrent
-                        ? t("git.currentBranch")
-                        : t("git.switchTo", { branch: branch.name })
-                  }
-                  className={cn(
-                    "flex w-full items-center gap-2 px-3 py-[3px] text-left transition-colors",
-                    state.disabled ? "cursor-default" : "hover:bg-accent hover:text-accent-foreground",
-                    state.reason === "streaming" && "opacity-60",
+                // 行本身是 div：切换和删除是两个并列的真按钮（按钮不能嵌按钮）。
+                <div key={branch.name} className="flex items-center">
+                  <button
+                    type="button"
+                    disabled={state.disabled}
+                    onClick={() => branchClick(branch.name)}
+                    aria-label={state.isCurrent ? `${branch.name} (${t("git.currentBranch")})` : t("git.switchTo", { branch: branch.name })}
+                    title={
+                      state.reason === "streaming"
+                        ? t("git.switchDisabledStreaming")
+                        : state.isCurrent
+                          ? t("git.currentBranch")
+                          : t("git.switchTo", { branch: branch.name })
+                    }
+                    className={cn(
+                      "flex min-w-0 flex-1 items-center gap-2 py-[3px] pr-1 pl-3 text-left transition-colors",
+                      state.disabled ? "cursor-default" : "hover:bg-accent hover:text-accent-foreground",
+                      state.reason === "streaming" && "opacity-60",
+                    )}
+                  >
+                    <span className="flex w-3 shrink-0 items-center justify-center" aria-hidden="true">
+                      {state.isSwitching ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : state.isCurrent ? (
+                        <Check className="size-3" />
+                      ) : null}
+                    </span>
+                    <span className={cn("min-w-0 flex-1 truncate", state.isCurrent && "font-medium")}>{branch.name}</span>
+                    {branch.gone ? <span className="shrink-0 text-amber-600 dark:text-amber-400">{t("git.upstreamGone")}</span> : null}
+                    {branch.ahead > 0 ? <span className="shrink-0 tabular-nums text-muted-foreground">↑{branch.ahead}</span> : null}
+                    {branch.behind > 0 ? <span className="shrink-0 tabular-nums text-muted-foreground">↓{branch.behind}</span> : null}
+                  </button>
+                  {/* 当前分支不渲染删除图标（删了 HEAD 就悬空了）；其余分支常显，失败原因由错误行说明。 */}
+                  {deleteState.isCurrent ? null : (
+                    <button
+                      type="button"
+                      disabled={deleteState.disabled}
+                      onClick={() => {
+                        // 不收弹层：删除确认框和 git 面板要同时在场（服务端失败原因也在面板里）。
+                        setPendingDelete(branch.name);
+                      }}
+                      aria-label={t("git.deleteBranch")}
+                      title={deleteTitle}
+                      className="mr-2 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-destructive focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60"
+                    >
+                      {deleteState.isDeleting ? (
+                        <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Trash2 className="size-3" aria-hidden="true" />
+                      )}
+                    </button>
                   )}
-                >
-                  <span className="flex w-3 shrink-0 items-center justify-center" aria-hidden="true">
-                    {state.isSwitching ? (
-                      <Loader2 className="size-3 animate-spin" />
-                    ) : state.isCurrent ? (
-                      <Check className="size-3" />
-                    ) : null}
-                  </span>
-                  <span className={cn("min-w-0 flex-1 truncate", state.isCurrent && "font-medium")}>{branch.name}</span>
-                  {branch.gone ? <span className="shrink-0 text-amber-600 dark:text-amber-400">{t("git.upstreamGone")}</span> : null}
-                  {branch.ahead > 0 ? <span className="shrink-0 tabular-nums text-muted-foreground">↑{branch.ahead}</span> : null}
-                  {branch.behind > 0 ? <span className="shrink-0 tabular-nums text-muted-foreground">↓{branch.behind}</span> : null}
-                </button>
+                </div>
               );
             })}
           </div>
@@ -823,6 +894,39 @@ export function GitStatusBadge({
           <AlertDialogFooter>
             <AlertDialogCancel>{t("git.switchCancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={() => void runSwitch(pendingBranch)}>{t("git.switchConfirm")}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 删除分支：破坏性操作，先弹确认框（不用浏览器原生 confirm）。确定后真的删；
+          失败（多为“还没完全合并”）由会话错误横幅告知，这里不撒谎地关掉。 */}
+      <AlertDialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(next) => {
+          if (!next) {
+            setPendingDelete("");
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("git.deleteBranchTitle", { branch: pendingDelete })}</AlertDialogTitle>
+            <AlertDialogDescription>{t("git.deleteBranchDesc", { branch: pendingDelete })}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={Boolean(deletingBranch)}>{t("git.deleteBranchCancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={Boolean(deletingBranch)}
+              // 故意 preventDefault：留在框里等结果，成功才由 runDelete 收框；
+              // 失败时把框留着，用户看到错误横幅后可以取消或重试。
+              onClick={(event) => {
+                event.preventDefault();
+                void runDelete(pendingDelete);
+              }}
+            >
+              {deletingBranch ? t("git.deleteBranchPending") : t("git.deleteBranchConfirm")}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
