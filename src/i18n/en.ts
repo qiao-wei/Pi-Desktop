@@ -771,6 +771,7 @@ export const en = {
   "git.mergeDisabledUnborn": "No commits yet, nothing to merge",
   "git.mergeDisabledNoTarget": "No other local branch to merge",
   "git.mergeIntoLabel": "Merge into {current}",
+  "git.mergeSuccess": "Merged {branch} into {current}",
   "git.openConflictHint": "Double-click to edit the conflict in your default IDE",
   "git.openConflictFailed": "Could not open the conflicted file: {reason}",
   "git.conflictPromptFailed": "Could not read the conflict details: {reason}",
