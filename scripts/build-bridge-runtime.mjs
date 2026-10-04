@@ -156,11 +156,11 @@ export function buildBridgeRuntime({ skipInstall = false, target = "", targetPla
     runNpm(bridgeDir);
   }
 
-  // npm installs every platform variant of esbuild and friends when pi's shipped
-  // npm-shrinkwrap.json is in play (the os/cpu filter does not apply to a shrinkwrap tree). They are
-  // 284M of binaries for machines this bundle will never run on, so drop the ones the target cannot
-  // use. Pruning after the install is the only thing that works: `npm install --os/--cpu` still
-  // follows the shrinkwrap. See scripts/lib/platformPackages.mjs.
+  // npm installs every platform variant of esbuild and friends when a dependency ships an
+  // npm-shrinkwrap.json (the os/cpu filter does not apply to a shrinkwrap tree). That is 284M of
+  // binaries for machines this bundle will never run on. pi 1.0.1 stopped shipping its shrinkwrap, so
+  // npm now filters by itself and this pass removes nothing in a clean build - it stays as the safety
+  // net for the next dependency that pins a full platform set. See scripts/lib/platformPackages.mjs.
   const platform = targetPlatform ?? resolveTargetPlatform();
   const pruned = prunePlatformPackages({ root: bridgeDir, target: platform });
   if (pruned.removed.length > 0) {

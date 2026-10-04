@@ -41,9 +41,10 @@ import { createProjectCommandRuns } from "./projectCommandRuns.mjs";
 import { buildCommitMessagePrompt, normalizeGeneratedCommitMessage } from "./commitMessage.mjs";
 import { buildConflictPrompt } from "./conflictPrompt.mjs";
 import {
-  DEFAULT_MCP_EXPOSURE,
+  groupMcpToolsByNamespace,
   mcpConfigPath,
   mcpFileScope,
+  mcpNamespaceOf,
   mcpToolExposure,
   mergeMcpServerEntries,
   normalizeMcpServerEntry,
@@ -2761,40 +2762,21 @@ function readMcpRuntimeState(targetRuntime) {
 }
 
 /**
- * 当前会话里 pi 真正注册的 MCP 工具，按 `mcp__<server>` 命名空间分组。
+ * 当前会话里 pi 真正注册的 MCP 工具，按命名空间（`mcp__<server>`）分组。
  * 不额外连一遍服务器——直接读会话状态，和 TUI 看到的是同一份内核事实。
+ * 纯分组与命名空间换算在 `mcpConfig.mjs`，那里可以单测；这里只负责拿到会话的工具列表。
  */
-function mcpToolsByServer(targetRuntime) {
-  const grouped = new Map();
-  for (const tool of targetRuntime.session?.getAllTools?.() ?? []) {
-    const namespace = tool?.namespace?.name;
-    if (typeof namespace !== "string" || !namespace.startsWith("mcp__")) {
-      continue;
-    }
-    const server = namespace.slice("mcp__".length);
-    const name = typeof tool.name === "string" && tool.name.startsWith(`${namespace}__`)
-      ? tool.name.slice(namespace.length + 2)
-      : String(tool.name ?? "");
-    const list = grouped.get(server) ?? [];
-    list.push({
-      name,
-      description: String(tool.description ?? ""),
-      exposure: String(tool.exposure ?? DEFAULT_MCP_EXPOSURE),
-    });
-    grouped.set(server, list);
-  }
-  for (const list of grouped.values()) {
-    list.sort((left, right) => left.name.localeCompare(right.name));
-  }
-  return grouped;
+function mcpToolsByNamespace(targetRuntime) {
+  return groupMcpToolsByNamespace(targetRuntime.session?.getAllTools?.() ?? []);
 }
 
 /** 能力清单的 MCP 条目：文件事实（mcp.json）× 会话事实（已注册工具）× app 元数据。 */
 function mcpCapabilityEntries(targetRuntime) {
   const state = readMcpRuntimeState(targetRuntime);
-  const toolsByServer = mcpToolsByServer(targetRuntime);
+  const toolsByNamespace = mcpToolsByNamespace(targetRuntime);
   const entries = state.servers.map((server) => {
-    const tools = toolsByServer.get(server.name) ?? [];
+    // 服务器名 → 命名空间：带 `-` 的名字在会话里已被 pi 换成 `_`，必须换算后再查。
+    const tools = toolsByNamespace.get(mcpNamespaceOf(server.name)) ?? [];
     return {
       id: `${server.scope}:${server.name}`,
       kind: "mcp",

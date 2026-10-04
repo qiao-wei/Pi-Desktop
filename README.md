@@ -189,12 +189,15 @@ loading depend on build luck. `sidecar:verify` boots the assembled bridge and fa
 capability package did not load, so a broken assembly never reaches the packager.
 
 After that install, `bridge:build` deletes the platform-only packages this bundle can never run
-(`scripts/lib/platformPackages.mjs`). npm's usual `os`/`cpu` filtering does not apply to a tree
-described by an `npm-shrinkwrap.json`, and pi ships one: esbuild - which pi reaches through
-`@earendil-works/chord` - arrives as one package per platform, for every platform, when exactly one
-of them can run here. `npm install --os/--cpu` does not change that; removing the others after the
-install does, using npm's own rule (a package declaring a matching `os`/`cpu` is kept, `any` and `!`
-negations included). The platform comes from `PI_DESKTOP_TARGET_TRIPLE` (set by `scripts/pack.mjs`
+(`scripts/lib/platformPackages.mjs`). esbuild - which pi reaches through `@earendil-works/chord` -
+arrives as one package per platform. pi up to 0.99.1 shipped an `npm-shrinkwrap.json` pinning all 26
+of them, and npm's usual `os`/`cpu` filtering does not apply to a shrinkwrap tree, so the bridge
+carried 284M of binaries for other people's machines; `npm install --os/--cpu` did not change that,
+removing the others after the install did, using npm's own rule (a package declaring a matching
+`os`/`cpu` is kept, `any` and `!` negations included). pi 1.0.1 dropped that shrinkwrap, so npm now
+filters by itself and a clean build has nothing to prune - the pass stays as the safety net for the
+next dependency that pins a full platform set, because losing it is invisible (the bundle just grows).
+The platform comes from `PI_DESKTOP_TARGET_TRIPLE` (set by `scripts/pack.mjs`
 from the target/arch you asked for), falling back to `TAURI_ENV_TARGET_TRIPLE` for a direct
 `tauri build` and to the build machine otherwise - so a Windows build keeps the `win32` packages
 rather than the Mac ones. `node:build` and `python:build` read the same variable, which is why

@@ -1,11 +1,18 @@
 // Platform-only dependency pruning.
 //
 // Why this exists: `npm install` inside the bridge directory resolves `esbuild` through
-// `@earendil-works/chord`, and pi ships an `npm-shrinkwrap.json` that lists esbuild's 26
-// platform packages as optional dependencies. npm installs **all of them** in that case - the
-// usual os/cpu filter does not apply to a shrinkwrap tree - so the bundled bridge carried 284M of
-// binaries for other people's machines (only `@esbuild/darwin-arm64`, 10M, is usable here).
-// `--os`/`--cpu` do not help: npm still follows the shrinkwrap. Pruning after the install does.
+// `@earendil-works/chord`, which arrives as one package per platform. pi up to 0.99.1 shipped an
+// `npm-shrinkwrap.json` listing those 26 platform packages as optional dependencies, and npm
+// installs **all of them** in that case - the usual os/cpu filter does not apply to a shrinkwrap
+// tree - so the bundled bridge carried 284M of binaries for other people's machines (only
+// `@esbuild/darwin-arm64`, 10M, is usable here). `--os`/`--cpu` do not help: npm still follows the
+// shrinkwrap. Pruning after the install does.
+//
+// pi 1.0.1 removed that shrinkwrap (published packages no longer pin transitive dependencies), so
+// npm's own filter now applies and a clean bridge install keeps only the target's platform package
+// (verified 2026-10-04 on 1.0.2: `node_modules/@esbuild/darwin-arm64` alone, nothing to prune).
+// This pass stays as the safety net for whatever a dependency pins next, because losing it silently
+// is invisible: the bundle just grows by a few hundred megabytes.
 //
 // The decision rule is npm's own: a package is platform-only when its manifest declares `os`/`cpu`,
 // and it is kept when those lists match the target (including `any` and `!` negations).

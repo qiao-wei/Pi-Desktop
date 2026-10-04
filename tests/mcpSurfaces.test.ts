@@ -75,9 +75,13 @@ test("MCP writes go through pi's mcp.json, app metadata through capabilities.jso
 });
 
 test("the tool inventory comes from the live session, not a second connection", () => {
-  assert.match(serverSource, /function mcpToolsByServer\(targetRuntime\)/);
+  assert.match(serverSource, /function mcpToolsByNamespace\(targetRuntime\)/);
   assert.match(serverSource, /getAllTools\?\.\(\)/);
-  assert.match(serverSource, /startsWith\("mcp__"\)/);
+  assert.match(serverSource, /groupMcpToolsByNamespace\(targetRuntime\.session/);
+  // 分组键是命名空间（mcp__<server>），不是 mcp.json 里的服务器名：pi 会把命名空间里的 `-` 换成
+  // `_`，拿后缀当服务器名会让带 `-` 的服务器少掉整份工具列表。查表必须经过 mcpNamespaceOf。
+  assert.match(serverSource, /toolsByNamespace\.get\(mcpNamespaceOf\(server\.name\)\)/);
+  assert.doesNotMatch(serverSource, /namespace\.slice\("mcp__"\.length\)/);
   // 旧的 pi-mcp-adapter 代理层必须彻底退场，否则两套 MCP 语义会并存。
   assert.doesNotMatch(serverSource, /pi-mcp-adapter/);
   assert.doesNotMatch(serverSource, /createMcpAdapterStatus/);

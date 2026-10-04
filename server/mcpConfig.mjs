@@ -28,6 +28,52 @@ export const DEFAULT_MCP_EXPOSURE = "codemode";
 /** pi 的服务器名约束：字母、数字、下划线、连字符。 */
 export const MCP_SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 
+/** pi 给 MCP 工具起的命名空间前缀，即 `mcp__<server>`。 */
+export const MCP_NAMESPACE_PREFIX = "mcp__";
+
+/**
+ * 服务器名在会话里的 MCP 命名空间，即 pi 的 `mcpNamespace()`：`mcp__<server>`，并把 `-` 换成 `_`。
+ *
+ * pi 从 0.99.2 起做了这个替换（Codex 同规则，目的是让命名空间同时能当 codemode 的标识符），
+ * 所以 `dev-radius` 注册出来的命名空间是 `mcp__dev_radius`——**命名空间后缀不再等于 mcp.json
+ * 里的服务器名**。会话侧只给命名空间、不给原始服务器名，能力清单要拿服务器名去对工具列表，
+ * 就必须按同一条规则换算，否则带 `-`（本 app 的名字校验允许）的服务器会显示成 0 个工具。
+ */
+export function mcpNamespaceOf(serverName) {
+  return `${MCP_NAMESPACE_PREFIX}${String(serverName ?? "").replace(/-/g, "_")}`;
+}
+
+/**
+ * 把会话里注册的工具按 MCP 命名空间分组，键就是工具自己的 `namespace.name`（如 `mcp__dev_radius`）。
+ *
+ * 非 MCP 工具（没有 `mcp__` 命名空间，如内建的 read/bash）直接略过；分组内按工具名排序，
+ * 让能力页的顺序不受服务器列出工具的顺序影响。要拿 mcp.json 里的服务器名查这张表，用
+ * `mcpNamespaceOf()` 换算，不要自己切前缀。
+ */
+export function groupMcpToolsByNamespace(tools) {
+  const grouped = new Map();
+  for (const tool of Array.isArray(tools) ? tools : []) {
+    const namespace = tool?.namespace?.name;
+    if (typeof namespace !== "string" || !namespace.startsWith(MCP_NAMESPACE_PREFIX)) {
+      continue;
+    }
+    const name = typeof tool.name === "string" && tool.name.startsWith(`${namespace}__`)
+      ? tool.name.slice(namespace.length + 2)
+      : String(tool.name ?? "");
+    const list = grouped.get(namespace) ?? [];
+    list.push({
+      name,
+      description: String(tool.description ?? ""),
+      exposure: String(tool.exposure ?? DEFAULT_MCP_EXPOSURE),
+    });
+    grouped.set(namespace, list);
+  }
+  for (const list of grouped.values()) {
+    list.sort((left, right) => left.name.localeCompare(right.name));
+  }
+  return grouped;
+}
+
 /** 只声明 codemode / tool_search 之外的两种真实传输——SSE 在 pi 里已不支持。 */
 export const MCP_TRANSPORTS = ["stdio", "http"];
 
