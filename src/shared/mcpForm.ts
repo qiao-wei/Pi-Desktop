@@ -28,6 +28,8 @@ export type McpServerFormInput = {
   headers: McpKeyValueRow[];
   /** 单工具 exposure 覆盖；`{}` 表示全部跟随服务器默认。 */
   toolExposure: Record<string, string>;
+  /** 导入带进来的 pi 认识字段（`oauth` ...）；表单不展示，保存时原样写回。 */
+  extras?: Record<string, unknown>;
 };
 
 export function recordToRows(record: Record<string, string> | undefined): McpKeyValueRow[] {
@@ -60,6 +62,9 @@ export function buildMcpServerPayload(input: McpServerFormInput): Record<string,
     description: input.description.trim(),
     toolExposure: pruneToolExposure(input.toolExposure),
   };
+  if (input.extras && Object.keys(input.extras).length) {
+    payload.extras = input.extras;
+  }
   // `exposure` 为空时交给服务端用默认值，别硬写一个可能是错的。
   if (input.exposure) {
     payload.exposure = input.exposure;

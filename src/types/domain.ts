@@ -488,6 +488,35 @@ export interface CapabilityMcpInspection {
   error: string;
 }
 
+/** 导入解析出的一个服务器：给表单回填的字段 + pi 认识但不翻译的 extras。 */
+export interface CapabilityMcpImportServer {
+  name: string;
+  transport: "stdio" | "http";
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd: string;
+  url: string;
+  headers: Record<string, string>;
+  exposure: CapabilityMcpExposure;
+  toolExposure: Record<string, string>;
+  enabled: boolean;
+  timeout?: number;
+  hasOAuth: boolean;
+  description: string;
+  /** 表单不翻译、保存时随 `extras` 写回的原字段（`oauth` / `auth` ...）。 */
+  extras: Record<string, unknown>;
+  warnings: string[];
+}
+
+/** `POST /api/capabilities/mcp/import` 的返回：只解析，不落盘。 */
+export interface CapabilityMcpImportResult {
+  format: string | null;
+  servers: CapabilityMcpImportServer[];
+  errors: string[];
+  warnings: string[];
+}
+
 export interface CapabilitySessionSelection {
   version: number;
   skills: string[];

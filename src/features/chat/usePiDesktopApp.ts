@@ -63,6 +63,7 @@ import type {
   CapabilityCommandArgument,
   CapabilityKind,
   CapabilityMcpDetail,
+  CapabilityMcpImportResult,
   CapabilityMcpInspection,
   CreateProjectResult,
   PersonalizationSettings,
@@ -2738,6 +2739,25 @@ export function usePiDesktopApp() {
     [bootstrap.activeSessionPath, conversation.sessionFile],
   );
 
+  /**
+   * 导入 MCP 配置：`/api/capabilities/mcp/import` 只解析，返回表单字段 + extras。
+   * 真正的落盘仍走 `saveMcpServer`，所以这里不进 updateCapability（没有能力清单要刷新）。
+   */
+  const parseMcpImport = useCallback(
+    async (text: string, defaultName?: string): Promise<CapabilityMcpImportResult> => {
+      const sessionPath = bootstrap.activeSessionPath ?? conversation.sessionFile;
+      const result = await postJson<{ import?: CapabilityMcpImportResult }>(
+        "/api/capabilities/mcp/import",
+        { text, defaultName, sessionPath },
+      );
+      if (!result?.import) {
+        throw new Error("MCP import parse failed");
+      }
+      return result.import;
+    },
+    [bootstrap.activeSessionPath, conversation.sessionFile],
+  );
+
   const importSkill = useCallback(
     (sourcePath: string, scope: "user" | "project" = "project") =>
       updateCapability("/api/capabilities/skills/import", { sourcePath, scope }),
@@ -2817,6 +2837,7 @@ export function usePiDesktopApp() {
     removeMcpServer,
     inspectMcpServer,
     readMcpServerDetail,
+    parseMcpImport,
     importSkill,
     saveToolSettings,
     respondExtensionUi,

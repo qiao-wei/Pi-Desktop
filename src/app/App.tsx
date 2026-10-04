@@ -12,6 +12,7 @@ import {
   DatabaseZap,
   ExternalLink,
   FileText,
+  FileUp,
   Clock3,
   Folder,
   FolderOpen,
@@ -246,6 +247,8 @@ import type {
   CapabilityExtension,
   CapabilityMcpDetail,
   CapabilityMcpExposure,
+  CapabilityMcpImportResult,
+  CapabilityMcpImportServer,
   CapabilityMcpInspection,
   CapabilityMcpServer,
   CapabilitySkill,
@@ -408,6 +411,7 @@ export function App() {
     removeMcpServer,
     inspectMcpServer,
     readMcpServerDetail,
+    parseMcpImport,
     respondExtensionUi,
     dismissError,
     reportError,
@@ -3119,6 +3123,7 @@ export function App() {
               onSaveMcpServer={saveMcpServer}
               onInspectMcpServer={inspectMcpServer}
               onReadMcpServer={readMcpServerDetail}
+              onParseMcpImport={parseMcpImport}
               customUiCancelVersion={customUiCancelVersion}
             />
           </div>
@@ -3239,6 +3244,7 @@ export function App() {
           onSaveMcpServer={saveMcpServer}
           onInspectMcpServer={inspectMcpServer}
           onReadMcpServer={readMcpServerDetail}
+          onParseMcpImport={parseMcpImport}
         />
         </aside>
           </>
@@ -4806,6 +4812,7 @@ function CapabilitiesPage({
   onSaveMcpServer,
   onInspectMcpServer,
   onReadMcpServer,
+  onParseMcpImport,
   customUiCancelVersion,
 }: {
   capabilities: CapabilitiesState;
@@ -4820,6 +4827,8 @@ function CapabilitiesPage({
   onSaveMcpServer: (server: Record<string, unknown>) => Promise<unknown>;
   onInspectMcpServer: (id: string) => Promise<CapabilityMcpInspection>;
   onReadMcpServer: (id: string) => Promise<CapabilityMcpDetail>;
+  /** 从 JSON 配置解析出一个可填进新增表单的服务器（不落盘）。 */
+  onParseMcpImport: (text: string, defaultName?: string) => Promise<CapabilityMcpImportResult>;
   customUiCancelVersion: number;
 }) {
   const t = useT();
@@ -5125,6 +5134,7 @@ function CapabilitiesPage({
           onClose={() => setMcpDialog(null)}
           onSave={onSaveMcpServer}
           onReadMcpServer={onReadMcpServer}
+          onParseImport={onParseMcpImport}
         />
       ) : null}
 
@@ -5595,6 +5605,23 @@ const MCP_EXPOSURE_HINT_KEYS: Record<CapabilityMcpExposure, string> = {
   hidden: "capability.mcp.exposureHint.hidden",
 };
 
+/** 导入识别出的格式代号 → 文案 key。代号由 `server/mcpImport.mjs` 给出。 */
+const MCP_IMPORT_FORMAT_KEYS: Record<string, string> = {
+  "mcp-servers": "capability.mcp.importFormat.mcp-servers",
+  vscode: "capability.mcp.importFormat.vscode",
+  zed: "capability.mcp.importFormat.zed",
+  mcp: "capability.mcp.importFormat.mcp",
+  list: "capability.mcp.importFormat.list",
+  single: "capability.mcp.importFormat.single",
+  map: "capability.mcp.importFormat.map",
+};
+
+function mcpImportFormatKey(format: string | null): string {
+  return format && MCP_IMPORT_FORMAT_KEYS[format]
+    ? MCP_IMPORT_FORMAT_KEYS[format]
+    : "capability.mcp.importFormat.none";
+}
+
 /** MCP 服务器卡片：连接状态用「工具数」表达，transport / exposure / 覆盖关系都是徽章。 */
 function CapabilityMcpCard({
   server,
@@ -5774,6 +5801,7 @@ function McpServerEditor({
   onSave,
   onInspect,
   onRead,
+  onParseImport,
   onSaved,
 }: {
   server?: CapabilityMcpServer;
@@ -5781,6 +5809,8 @@ function McpServerEditor({
   onSave: (server: Record<string, unknown>) => Promise<unknown>;
   onInspect?: (id: string) => Promise<CapabilityMcpInspection>;
   onRead?: (id: string) => Promise<CapabilityMcpDetail>;
+  /** 新增时可用：解析一份别家客户端 JSON 并回填表单；编辑时不显示。 */
+  onParseImport?: (text: string, defaultName?: string) => Promise<CapabilityMcpImportResult>;
   onSaved?: () => void;
 }) {
   const t = useT();
@@ -5802,8 +5832,21 @@ function McpServerEditor({
   const [description, setDescription] = useState(server?.description ?? "");
   const [toolExposure, setToolExposure] = useState<Record<string, string>>({});
   const [hasOAuth, setHasOAuth] = useState(false);
+  /** 导入带进来的 pi 认识字段（`oauth` ...）：表单不展示，保存时原样写回。 */
+  const [extras, setExtras] = useState<Record<string, unknown>>({});
   const [inspection, setInspection] = useState<CapabilityMcpInspection | null>(null);
   const [inspecting, setInspecting] = useState(false);
+  // 「从 JSON 导入」区：新增时的可选快捷入口。
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importDefaultName, setImportDefaultName] = useState("");
+  const [importFileName, setImportFileName] = useState("");
+  const [importPreview, setImportPreview] = useState<CapabilityMcpImportResult | null>(null);
+  const [importParsing, setImportParsing] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [importApplied, setImportApplied] = useState("");
+  const [showImportWarnings, setShowImportWarnings] = useState(false);
 
   useEffect(() => {
     if (!server || !onRead) {
@@ -5842,6 +5885,85 @@ function McpServerEditor({
 
   const canSave = Boolean(name.trim()) && (transport === "http" ? Boolean(url.trim()) : Boolean(command.trim()));
 
+  // 导入文本（文件或粘贴）变化时防抖解析；只回填表单，不碰磁盘。
+  useEffect(() => {
+    if (!importOpen || !onParseImport) {
+      return;
+    }
+    if (!importText.trim()) {
+      setImportPreview(null);
+      setImportParsing(false);
+      return;
+    }
+    let cancelled = false;
+    setImportParsing(true);
+    const timer = setTimeout(() => {
+      onParseImport(importText, importDefaultName || undefined)
+        .then((result) => {
+          if (cancelled) return;
+          setImportPreview(result);
+          setImportError("");
+        })
+        .catch((nextError) => {
+          if (cancelled) return;
+          setImportPreview(null);
+          setImportError(nextError instanceof Error ? nextError.message : String(nextError));
+        })
+        .finally(() => {
+          if (!cancelled) setImportParsing(false);
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [importOpen, importText, importDefaultName, onParseImport]);
+
+  async function handleImportFile(file: File | undefined) {
+    if (!file) return;
+    setImportError("");
+    setImportApplied("");
+    try {
+      const content = await file.text();
+      setImportFileName(file.name);
+      setImportDefaultName(file.name.replace(/\.json$/i, ""));
+      setImportText(content);
+    } catch (nextError) {
+      setImportError(nextError instanceof Error ? nextError.message : String(nextError));
+    }
+  }
+
+  /** 把解析出的一个服务器回填到表单；用户确认后再走 Save。 */
+  function applyImported(imported: CapabilityMcpImportServer) {
+    setError("");
+    setName(imported.name);
+    setTransport(imported.transport);
+    if (imported.transport === "http") {
+      setUrl(imported.url);
+      setHeaderRows(recordToRows(imported.headers));
+      setCommand("");
+      setArgs("");
+      setCwd("");
+      setEnvRows([]);
+    } else {
+      setCommand(imported.command);
+      setArgs(imported.args.join(" "));
+      setCwd(imported.cwd);
+      setEnvRows(recordToRows(imported.env));
+      setUrl("");
+      setHeaderRows([]);
+    }
+    setExposure(imported.exposure);
+    setEnabled(imported.enabled);
+    setDescription(imported.description);
+    setToolExposure(imported.toolExposure ?? {});
+    setHasOAuth(Boolean(imported.hasOAuth));
+    setExtras(imported.extras ?? {});
+    setImportApplied(imported.args.some((arg) => /\s/.test(arg))
+      ? `${t("capability.mcp.importApplied")} ${t("capability.mcp.importArgSpaces")}`
+      : t("capability.mcp.importApplied"));
+  }
+
   async function handleSave() {
     setSaving(true);
     setError("");
@@ -5861,6 +5983,7 @@ function McpServerEditor({
         env: envRows,
         headers: headerRows,
         toolExposure,
+        extras,
       }));
       onSaved?.();
     } catch (nextError) {
@@ -5890,6 +6013,125 @@ function McpServerEditor({
     <div className="grid gap-4">
       {loading ? <p className="text-sm text-muted-foreground">{t("capability.mcp.loading")}</p> : null}
       {error ? <p className="text-sm text-destructive" role="status">{error}</p> : null}
+
+      {/* 新增时的可选快捷入口：从别家客户端的 JSON 解析出一个服务器并回填表单，保存仍走 Save。 */}
+      {!editing && onParseImport ? (
+        <div className="grid gap-2 rounded-md border border-border p-3">
+          <button
+            type="button"
+            className="flex items-center justify-between gap-2 text-left text-sm font-medium"
+            onClick={() => setImportOpen((current) => !current)}
+          >
+            <span className="flex items-center gap-2">
+              <FileUp className="size-4" />
+              {t("capability.mcp.importSection")}
+            </span>
+            {importOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+          </button>
+          {importOpen ? (
+            <div className="grid gap-2">
+              <p className="text-[11px] text-muted-foreground">{t("capability.mcp.importHint")}</p>
+              <input
+                ref={importFileRef}
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                onChange={(event) => {
+                  void handleImportFile(event.target.files?.[0]);
+                  event.target.value = "";
+                }}
+              />
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => importFileRef.current?.click()}>
+                  <FileUp />
+                  {t("capability.mcp.importChooseFile")}
+                </Button>
+                {importFileName ? <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{importFileName}</span> : null}
+              </div>
+              <Textarea
+                className="min-h-[96px] font-mono text-xs"
+                value={importText}
+                placeholder={t("capability.mcp.importPlaceholder")}
+                aria-label={t("capability.mcp.importPasteLabel")}
+                onChange={(event) => {
+                  setImportText(event.target.value);
+                  setImportFileName("");
+                  setImportApplied("");
+                }}
+              />
+              {importParsing ? (
+                <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="size-3.5 animate-spin" />
+                  {t("capability.mcp.loading")}
+                </p>
+              ) : null}
+              {importError ? <p className="text-xs text-destructive" role="status">{importError}</p> : null}
+              {importPreview ? (
+                <div className="grid gap-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <Badge variant="secondary">{t("capability.mcp.importFormat", { format: t(mcpImportFormatKey(importPreview.format)) })}</Badge>
+                    <span className="text-[11px] text-muted-foreground">{t("capability.mcp.importFound", { count: importPreview.servers.length })}</span>
+                  </div>
+                  {importPreview.errors.length ? (
+                    <div className="grid gap-1 rounded-md bg-destructive/10 px-2.5 py-1.5">
+                      <span className="text-[11px] font-semibold text-destructive">{t("capability.mcp.importErrorsTitle")}</span>
+                      {importPreview.errors.map((entry, index) => (
+                        <span key={index} className="font-mono text-[11px] break-words text-destructive">{entry}</span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {importPreview.warnings.length ? (
+                    <div className="grid gap-1 rounded-md bg-muted px-2.5 py-1.5">
+                      <button
+                        type="button"
+                        className="flex items-center justify-between gap-2 text-left text-[11px] font-semibold"
+                        onClick={() => setShowImportWarnings((current) => !current)}
+                      >
+                        {t("capability.mcp.importWarningsTitle")} · {importPreview.warnings.length}
+                        {showImportWarnings ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                      </button>
+                      {showImportWarnings ? importPreview.warnings.map((entry, index) => (
+                        <span key={index} className="font-mono text-[11px] break-words text-muted-foreground">{entry}</span>
+                      )) : null}
+                    </div>
+                  ) : null}
+                  {importPreview.servers.length ? (
+                    <div className="grid gap-1.5">
+                      <span className="text-[11px] text-muted-foreground">{t("capability.mcp.importPick")}</span>
+                      {importPreview.servers.map((imported) => {
+                        const summary = imported.transport === "stdio"
+                          ? [imported.command, ...imported.args].join(" ")
+                          : imported.url;
+                        return (
+                          <button
+                            key={imported.name}
+                            type="button"
+                            className="grid min-w-0 cursor-pointer gap-1 rounded-md bg-muted px-2.5 py-1.5 text-left hover:bg-accent"
+                            onClick={() => applyImported(imported)}
+                          >
+                            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                              <span className="truncate font-mono text-xs font-semibold">{imported.name}</span>
+                              <Badge variant="outline">
+                                {imported.transport === "http" ? t("capability.mcp.transport.http") : t("capability.mcp.transport.stdio")}
+                              </Badge>
+                              {imported.hasOAuth ? <Badge variant="outline">{t("capability.mcp.importOauth")}</Badge> : null}
+                            </span>
+                            <span className="truncate font-mono text-[11px] text-muted-foreground" title={summary}>{summary}</span>
+                            {imported.warnings.length ? (
+                              <span className="text-[11px] break-words text-muted-foreground">{imported.warnings.join(" · ")}</span>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  {importApplied ? <p className="text-xs text-muted-foreground" role="status">{importApplied}</p> : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3">
         <div className="grid gap-1.5">
@@ -6085,12 +6327,14 @@ function McpServerDialog({
   onClose,
   onSave,
   onReadMcpServer,
+  onParseImport,
 }: {
   server?: CapabilityMcpServer;
   defaultScope: "user" | "project";
   onClose: () => void;
   onSave: (server: Record<string, unknown>) => Promise<unknown>;
   onReadMcpServer: (id: string) => Promise<CapabilityMcpDetail>;
+  onParseImport?: (text: string, defaultName?: string) => Promise<CapabilityMcpImportResult>;
 }) {
   const t = useT();
   return (
@@ -6106,6 +6350,7 @@ function McpServerDialog({
             defaultScope={defaultScope}
             onSave={onSave}
             onRead={onReadMcpServer}
+            onParseImport={onParseImport}
             onSaved={onClose}
           />
         </div>
@@ -6196,6 +6441,7 @@ function ProjectCapabilitiesPanel({
   onSaveMcpServer,
   onInspectMcpServer,
   onReadMcpServer,
+  onParseMcpImport,
 }: {
   capabilities: CapabilitiesState;
   /** 面板只列项目级能力，标题里却全是 Skills / Packages —— 用项目名把归属说清楚。 */
@@ -6211,6 +6457,7 @@ function ProjectCapabilitiesPanel({
   onSaveMcpServer: (server: Record<string, unknown>) => Promise<unknown>;
   onInspectMcpServer: (id: string) => Promise<CapabilityMcpInspection>;
   onReadMcpServer: (id: string) => Promise<CapabilityMcpDetail>;
+  onParseMcpImport: (text: string, defaultName?: string) => Promise<CapabilityMcpImportResult>;
 }) {
   const t = useT();
   const [busy, setBusy] = useState("");
@@ -6497,6 +6744,7 @@ function ProjectCapabilitiesPanel({
           onClose={() => setMcpDialogOpen(false)}
           onSave={onSaveMcpServer}
           onReadMcpServer={onReadMcpServer}
+          onParseImport={onParseMcpImport}
         />
       ) : null}
       <PackageResourcesDialog request={resourceRequest} onClose={() => setResourceRequest(null)} />

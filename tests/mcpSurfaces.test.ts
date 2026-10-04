@@ -132,17 +132,66 @@ test("both surfaces share one removal path and one confirm dialog", () => {
 
 /* ------------------------------ 前端 action ------------------------------- */
 
-test("the chat hook exposes MCP actions against the four endpoints", () => {
+test("the chat hook exposes MCP actions against the five endpoints", () => {
   for (const endpoint of [
     "/api/capabilities/mcp/save",
     "/api/capabilities/mcp/remove",
     "/api/capabilities/mcp/inspect",
     "/api/capabilities/mcp/read",
+    "/api/capabilities/mcp/import",
   ]) {
     assert.ok(hookSource.includes(endpoint), `hook 没打到 ${endpoint}`);
   }
-  for (const name of ["saveMcpServer", "removeMcpServer", "inspectMcpServer", "readMcpServerDetail"]) {
+  for (const name of ["saveMcpServer", "removeMcpServer", "inspectMcpServer", "readMcpServerDetail", "parseMcpImport"]) {
     assert.match(hookSource, new RegExp(`\\b${name},`), `hook 没导出 ${name}`);
+  }
+});
+
+/* -------------------------------- 导入配置 -------------------------------- */
+
+test("the server exposes a parse-only import endpoint", () => {
+  assert.match(serverSource, /\/api\/capabilities\/mcp\/import/);
+  assert.match(serverSource, /function parseMcpImportRequest\(body\)/);
+  assert.match(serverSource, /parseMcpImportText\(body\?\.text/);
+  // 只解析：不落盘。真正的保存仍走 /mcp/save，所以不能出现导入专用的写路径。
+  assert.doesNotMatch(serverSource, /mergeImportedServers/);
+  assert.doesNotMatch(serverSource, /function importMcpServersCapability\(/);
+});
+
+test("import lives inside the add-server editor and fills the form", () => {
+  // 不再是独立弹窗。
+  assert.doesNotMatch(appSource, /function McpImportDialog\(/);
+  assert.match(appSource, /function McpServerEditor\(/);
+  // 导入区只在新增（无 server）时出现，且解析回调是从 McpServerDialog 透传的。
+  assert.match(appSource, /!editing && onParseImport/);
+  assert.match(appSource, /onParseImport\?: \(text: string, defaultName\?: string\)/);
+  assert.match(appSource, /<McpServerDialog[\s\S]*?onParseImport=/);
+  // 文件 + 粘贴两种输入，自动识别后点条目回填。
+  assert.match(appSource, /capability\.mcp\.importChooseFile/);
+  assert.match(appSource, /capability\.mcp\.importPasteLabel/);
+  assert.match(appSource, /accept="\.json,application\/json"/);
+  assert.match(appSource, /function applyImported\(imported: CapabilityMcpImportServer\)/);
+  assert.match(appSource, /capability\.mcp\.importPick/);
+  assert.match(appSource, /mcpImportFormatKey/);
+  // 导入的 oauth 等字段随表单保存（extras），不能丢。
+  assert.match(appSource, /extras,/);
+  assert.match(appSource, /onParseMcpImport/);
+});
+
+test("every detected import format has copy in both packs", () => {
+  // 这些 key 通过 `mcpImportFormatKey()` 拼出来，`.test.ts` 的 t() 字面量扫描抓不到，单独钉。
+  for (const key of [
+    "capability.mcp.importFormat.none",
+    "capability.mcp.importFormat.mcp-servers",
+    "capability.mcp.importFormat.vscode",
+    "capability.mcp.importFormat.zed",
+    "capability.mcp.importFormat.mcp",
+    "capability.mcp.importFormat.list",
+    "capability.mcp.importFormat.single",
+    "capability.mcp.importFormat.map",
+  ]) {
+    assert.ok(key in zh, `中文包缺 key: ${key}`);
+    assert.ok(key in en, `英文包缺 key: ${key}`);
   }
 });
 
@@ -155,6 +204,27 @@ test("both language packs carry the MCP copy", () => {
     assert.ok(key in en, `英文包缺 key: ${key}`);
   }
   for (const key of ["capability.section.mcp", "capability.context.noMcp", "capability.delete.mcpTitle"]) {
+    assert.ok(key in zh, `中文包缺 key: ${key}`);
+    assert.ok(key in en, `英文包缺 key: ${key}`);
+  }
+});
+
+test("MCP import copy is present in both language packs", () => {
+  for (const key of [
+    "capability.mcp.importSection",
+    "capability.mcp.importHint",
+    "capability.mcp.importChooseFile",
+    "capability.mcp.importPasteLabel",
+    "capability.mcp.importPlaceholder",
+    "capability.mcp.importFormat",
+    "capability.mcp.importFound",
+    "capability.mcp.importPick",
+    "capability.mcp.importApplied",
+    "capability.mcp.importArgSpaces",
+    "capability.mcp.importOauth",
+    "capability.mcp.importWarningsTitle",
+    "capability.mcp.importErrorsTitle",
+  ]) {
     assert.ok(key in zh, `中文包缺 key: ${key}`);
     assert.ok(key in en, `英文包缺 key: ${key}`);
   }

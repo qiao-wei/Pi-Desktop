@@ -55,6 +55,7 @@ import {
   upsertMcpServer,
   writeMcpConfigPath,
 } from "./mcpConfig.mjs";
+import { parseMcpImportText } from "./mcpImport.mjs";
 import {
   MANAGED_TOOL_NAME,
   applyToolToggle,
@@ -1378,6 +1379,14 @@ undefined
     if (req.method === "POST" && url.pathname === "/api/capabilities/mcp/read") {
       const body = await readJson(req);
       sendJson(res, 200, readMcpServerCapability(body));
+      return;
+    }
+
+    // 导入：把别家客户端的 JSON 形状（mcpServers / VS Code servers / Zed context_servers ...）
+    // 翻译成表单字段回给前端，用户确认后走 /mcp/save 落盘。这里只解析，不写文件。
+    if (req.method === "POST" && url.pathname === "/api/capabilities/mcp/import") {
+      const body = await readJson(req);
+      sendJson(res, 200, parseMcpImportRequest(body));
       return;
     }
 
@@ -3050,9 +3059,13 @@ async function inspectMcpServer(targetRuntime, id) {
 function mcpRawConfigFromBody(body) {
   const source = body && typeof body === "object" ? body : {};
   const transport = source.transport === "http" ? "http" : "stdio";
+  // `extras` 是表单不翻译但 pi 认识的字段（导入时从 oauth / auth 等带过来），
+  // 先铺在底层，再让下面的已知字段覆盖同名键（已知字段始终以表单为准）。
+  const extras = source.extras && typeof source.extras === "object" && !Array.isArray(source.extras) ? source.extras : {};
   const raw = transport === "http"
-    ? { url: String(source.url ?? "").trim(), headers: normalizeStringMap(source.headers) }
+    ? { ...extras, url: String(source.url ?? "").trim(), headers: normalizeStringMap(source.headers) }
     : {
+      ...extras,
       command: String(source.command ?? "").trim(),
       args: splitArgs(source.args),
       env: normalizeStringMap(source.env),
@@ -3186,6 +3199,25 @@ async function removeMcpServer(body) {
 async function inspectMcpServerCapability(body) {
   const targetRuntime = getRuntimeForRequest(body);
   return { inspection: await inspectMcpServer(targetRuntime, String(body?.id ?? "")) };
+}
+
+/**
+ * 导入 MCP 配置的解析接口：只把文本翻成表单字段 / `extras` 回给前端，不写任何文件。
+ * 前端用返回值自动填进 McpServerEditor 表单，用户确认后走原有的 `/mcp/save` 落盘。
+ */
+function parseMcpImportRequest(body) {
+  const parsed = parseMcpImportText(body?.text, { defaultName: body?.defaultName });
+  if (!parsed.ok) {
+    throw new Error(parsed.errors[0] ?? "Failed to parse the MCP config.");
+  }
+  return {
+    import: {
+      format: parsed.format,
+      servers: parsed.servers.map((item) => ({ ...item.server, extras: item.extras, warnings: item.warnings })),
+      errors: parsed.errors,
+      warnings: parsed.warnings,
+    },
+  };
 }
 
 function createEmptyCapabilitiesConfig() {
