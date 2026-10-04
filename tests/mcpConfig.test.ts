@@ -165,6 +165,32 @@ test("upsertMcpServer：编辑 stdio→http 会清掉 stdio 字段，保留 oaut
   assert.deepEqual(config.mcpServers.a, { oauth: { clientId: "c" }, url: "https://x/mcp" });
 });
 
+test("upsertMcpServer：新建条目会带上 definition.extras（导入的 oauth 等）", () => {
+  const config = upsertMcpServer({ mcpServers: {} }, "authy", {
+    transport: "http",
+    url: "https://authy/mcp",
+    exposure: DEFAULT_MCP_EXPOSURE,
+    extras: { oauth: { clientId: "c" }, auth: { provider: "gitlab" } },
+  });
+  assert.deepEqual(config.mcpServers.authy, {
+    oauth: { clientId: "c" },
+    auth: { provider: "gitlab" },
+    url: "https://authy/mcp",
+  });
+});
+
+test("upsertMcpServer：编辑已有条目时以磁盘上的 unknown 字段为准，不被 extras 改写", () => {
+  const base = { mcpServers: { authy: { url: "https://old/mcp", oauth: { clientId: "disk" } } } };
+  const config = upsertMcpServer(base, "authy", {
+    transport: "http",
+    url: "https://new/mcp",
+    exposure: DEFAULT_MCP_EXPOSURE,
+    extras: { oauth: { clientId: "form" } },
+  });
+  assert.deepEqual(config.mcpServers.authy.oauth, { clientId: "disk" });
+  assert.equal(config.mcpServers.authy.url, "https://new/mcp");
+});
+
 test("upsertMcpServer：非法名字直接抛", () => {
   assert.throws(() => upsertMcpServer({ mcpServers: {} }, "bad name", { transport: "stdio", command: "node" }), /Invalid MCP server name/);
 });

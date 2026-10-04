@@ -121,6 +121,12 @@ function stringArray(value) {
   return Array.isArray(value) ? value.map((item) => String(item)) : [];
 }
 
+/** `mcpServers` 条目里 pi 认识、会由表单专门写的键；其余都是原样保留的 `extras`（`oauth` ...）。 */
+const MCP_ENTRY_KNOWN_KEYS = new Set([
+  "command", "args", "env", "cwd", "url", "headers", "type",
+  "exposure", "toolExposure", "enabled", "timeout", "description",
+]);
+
 /**
  * 一个 `mcpServers` 条目的归一化视图。`transport` 按 pi 的规则推导：有 `command` 就是
  * stdio，有 `url` 就是 streamable HTTP；显式 `type` 只用来校验，不参与推导。
@@ -188,6 +194,8 @@ export function normalizeMcpServerEntry(name, value) {
         : {},
       enabled: value.enabled !== false,
       timeout: typeof value.timeout === "number" ? value.timeout : undefined,
+      // 表单不翻译但 pi 认识的字段（`oauth` / `auth` ...）：保存时要原样写回，不能编辑一次就丢。
+      extras: Object.fromEntries(Object.entries(value).filter(([key]) => !MCP_ENTRY_KNOWN_KEYS.has(key))),
     },
   };
 }
@@ -267,6 +275,9 @@ export function writeMcpConfigPath(path, config) {
 /**
  * 新增/覆盖一个服务器条目。只改 pi 认识的已知字段，保留条目里其它手写内容
  * （`oauth`、将来 pi 新增的字段）。设成默认值的字段会被删掉，让文件保持干净。
+ *
+ * `definition.extras` 是导入 / 表单不翻译但 pi 认识的字段；新建条目时会带进去。
+ * 编辑已有条目时以文件里现有的值为准（`existing` 覆盖 `extras`），避免 UI 把磁盘上的内容改走。
  */
 export function upsertMcpServer(config, name, definition) {
   const serverName = normalizeMcpServerName(name);
@@ -274,7 +285,8 @@ export function upsertMcpServer(config, name, definition) {
     throw new Error(`Invalid MCP server name "${String(name)}".`);
   }
   const existing = isRecord(config?.mcpServers?.[serverName]) ? { ...config.mcpServers[serverName] } : {};
-  const entry = { ...existing };
+  const extras = isRecord(definition?.extras) ? definition.extras : {};
+  const entry = { ...extras, ...existing };
 
   for (const key of ["command", "args", "env", "cwd", "url", "headers", "type"]) {
     delete entry[key];

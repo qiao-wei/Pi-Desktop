@@ -103,6 +103,14 @@ test("switching to http drops the stdio fields that were still in the form", () 
   }
 });
 
+test("extras from an imported config are forwarded so oauth survives the form", () => {
+  const withExtras = buildMcpServerPayload(form({ extras: { oauth: { clientId: "c" } } }));
+  assert.deepEqual(withExtras.extras, { oauth: { clientId: "c" } });
+  // 空 extras 不往载荷里塞多余键。
+  assert.ok(!("extras" in buildMcpServerPayload(form({ extras: {} }))));
+  assert.ok(!("extras" in buildMcpServerPayload(form())));
+});
+
 test("editing keeps the original id so the server can drop the old entry on rename", () => {
   const payload = buildMcpServerPayload(form({ originalId: "project:old-name", name: "new-name", scope: "project" }));
   assert.equal(payload.originalId, "project:old-name");
