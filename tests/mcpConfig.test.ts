@@ -15,7 +15,11 @@ import test from "node:test";
 
 import {
   DEFAULT_MCP_EXPOSURE,
+  MCP_NAMESPACE_PREFIX,
+  MCP_SERVER_NAME_PATTERN,
+  groupMcpToolsByNamespace,
   mcpConfigPath,
+  mcpNamespaceOf,
   mcpToolExposure,
   mergeMcpServerEntries,
   normalizeMcpServerName,
@@ -233,6 +237,56 @@ test("read/write 往返：真文件、2 空格缩进、保留未知字段、不�
     rmSync(dir, { recursive: true, force: true });
   }
 });
+test("mcpNamespaceOf：服务器名进会话后被 pi 换成 `mcp__` + `-`→`_`，查工具列表必须按同一条规则", () => {
+  // pi ≥0.99.2 的 `mcpNamespace()`：`mcp__${server.replace(/-/g, "_")}`。会话只给命名空间，
+  // 所以带 `-` 的服务器（本 app 的名字校验允许）不能拿命名空间后缀当服务器名去查。
+  assert.equal(mcpNamespaceOf("fs"), "mcp__fs");
+  assert.equal(mcpNamespaceOf("dev-radius"), "mcp__dev_radius");
+  assert.equal(mcpNamespaceOf("a-b-c"), "mcp__a_b_c");
+  assert.equal(mcpNamespaceOf("already_snake"), "mcp__already_snake", "下划线本来就会被 pi 保留");
+  assert.equal(mcpNamespaceOf("mcp2-tools"), "mcp__mcp2_tools");
+  // 只换 `-`，不动其它字符：pi 用的是 /-/g 而不是 `[^A-Za-z0-9_]`。
+  assert.equal(mcpNamespaceOf("a_b"), "mcp__a_b");
+  assert.equal(mcpNamespaceOf(undefined), "mcp__");
+  // 名字校验放行的字符，换算后仍落在 pi 的命名空间规律里（`-` 全部消失）。
+  for (const name of ["fs", "dev-radius", "a-b_c-1"]) {
+    assert.ok(MCP_SERVER_NAME_PATTERN.test(name));
+    assert.doesNotMatch(mcpNamespaceOf(name).slice("mcp__".length), /-/);
+  }
+});
+
+test("groupMcpToolsByNamespace × mcpNamespaceOf：带 `-` 的服务器名也能查到自己那组工具", () => {
+  // 真实形状：pi 注册的 MCP 工具带着 `namespace.name` 与 `<命名空间>__<工具>` 的名字。
+  const tools = [
+    { name: "mcp__dev_radius__get_issue", namespace: { name: "mcp__dev_radius" }, description: "取 issue", exposure: "codemode" },
+    { name: "mcp__dev_radius__delete_all", namespace: { name: "mcp__dev_radius" }, description: "危险", exposure: "hidden" },
+    { name: "mcp__fs__read_file", namespace: { name: "mcp__fs" }, description: "读文件", exposure: "direct" },
+    // 非 MCP 工具（没命名空间 / 不是 mcp__ 前缀）不入表。
+    { name: "bash", description: "不相关" },
+    { name: "read", namespace: { name: "builtin:read" } },
+  ];
+  const grouped = groupMcpToolsByNamespace(tools);
+
+  assert.deepEqual([...grouped.keys()].sort(), ["mcp__dev_radius", "mcp__fs"]);
+  assert.equal(grouped.has("mcp__dev-radius"), false, "命名空间里不会有连字符");
+
+  // 关键：拿 mcp.json 里的真名查表。这就是旧实现（切前缀当服务器名）会算成 0 个工具的那步。
+  const radius = grouped.get(mcpNamespaceOf("dev-radius")) ?? [];
+  assert.deepEqual(radius.map((tool) => tool.name), ["delete_all", "get_issue"], "组内按工具名排序");
+  assert.equal(radius[1].description, "取 issue");
+  assert.equal(radius[0].exposure, "hidden", "per-tool exposure 原样带出，供 UI 展示");
+  assert.equal(grouped.get(mcpNamespaceOf("fs"))?.length, 1, "无连字符的名字照旧能用");
+  assert.equal(grouped.get(mcpNamespaceOf("missing-server")), undefined);
+
+  // 空/脏输入不能抛：能力页会在会话还没起时调到这里。
+  assert.equal(groupMcpToolsByNamespace([]).size, 0);
+  assert.equal(groupMcpToolsByNamespace(undefined).size, 0);
+  assert.equal(groupMcpToolsByNamespace([{}, { namespace: {} }, { namespace: { name: 7 } }]).size, 0);
+
+  // 命名空间前缀是 pi 的常量，别在别处写死字串。
+  assert.equal(mcpNamespaceOf("x"), `${MCP_NAMESPACE_PREFIX}x`);
+});
+
 test("mcpToolExposure：精确名优先于模式，模式按对象顺序取首个命中，回退服务器默认", () => {
   const server = { exposure: "codemode", toolExposure: { "get_*": "direct", search_code: "deferred", "delete_*": "hidden" } };
   assert.equal(mcpToolExposure(server, "search_code"), "deferred");

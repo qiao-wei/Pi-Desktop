@@ -536,6 +536,46 @@ test("写内置模型必须整条抄目录：cost / compat / thinkingLevelMap �
   });
 });
 
+test("pi 1.0.2 的 samplingParamsByThinkingLevel 不能被编辑器吃掉（它和 cost/compat 一样只在文件里）", () => {
+  // pi 1.0.2 起 models.json 的模型行认 `samplingParamsByThinkingLevel`（按 off..max 覆盖
+  // temperature/top_p/top_k，仅 OpenAI 兼容 API）。目录里不会有这个字段，全靠用户手写，
+  // 所以它必须列进 CATALOG_ONLY_FIELDS：否则在 app 里改一下这个模型，整张表就没了。
+  const byLevel = { off: { temperature: 0.7, top_p: 0.8 }, high: { top_k: 20 } };
+  const seed = catalogSeedFromModel({
+    id: "qwen-thinking-model",
+    api: "openai-completions",
+    baseUrl: "https://seed.dev/v1",
+    reasoning: true,
+    samplingParams: { temperature: 1.0, top_p: 0.95 },
+    samplingParamsByThinkingLevel: byLevel,
+    contextWindow: 128000,
+    maxTokens: 8192,
+  });
+  assert.deepEqual(seed?.samplingParamsByThinkingLevel, byLevel);
+  assert.deepEqual(seed?.samplingParams, { temperature: 1.0, top_p: 0.95 });
+
+  const [entry] = normalizeCustomModelInputs({
+    providerName: "Seed", baseUrl: "https://seed.dev/v1", providerMode: "builtin",
+    models: [{ model: { id: "qwen-thinking-model" } }],
+  }, { requireApiKey: false });
+  const written = upsertCustomModels(emptyModelsConfig(), [entry], { seeds: { "qwen-thinking-model": seed } })
+    .config.providers.seed.models[0];
+  assert.deepEqual(written.samplingParamsByThinkingLevel, byLevel, "目录→文件那一步不能漏字段");
+
+  // 第二次编辑只改名字：文件里已有的那张表优先于目录，且不能被重建掉。
+  const renamed = normalizeCustomModelInputs({
+    providerName: "Seed", baseUrl: "https://seed.dev/v1", providerMode: "builtin",
+    models: [{ model: { id: "qwen-thinking-model", name: "我改的名" } }],
+  }, { requireApiKey: false });
+  const again = upsertCustomModels(
+    upsertCustomModels(emptyModelsConfig(), [entry], { seeds: { "qwen-thinking-model": seed } }).config,
+    renamed,
+    { seeds: { "qwen-thinking-model": seed } },
+  ).config.providers.seed.models[0];
+  assert.equal(again.name, "我改的名");
+  assert.deepEqual(again.samplingParamsByThinkingLevel, byLevel, "改一次名字就把按档采样表冲掉 = 用户配置静默丢失");
+});
+
 test("用户显式给的字段盖在目录之上，没给的沿用目录", () => {
   const seed = catalogSeedFromModel({
     id: "m", name: "目录名", api: "openai-completions", baseUrl: "https://seed.dev/v1",

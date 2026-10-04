@@ -797,7 +797,10 @@ export function upsertCustomModel(config, entry, { target, seed } = {}) {
 // models.json 的模型行是最高一层：pi 只会从目录里补 api/baseUrl，其余字段一律用文件里的值，
 // 文件没写就用硬编码兜底（cost 0、contextWindow 128000、compat/thinkingLevelMap 直接没了）。
 // 所以往内置供应商里写模型时，必须把目录里的整条抄下来，否则 Claude 变成免费、思考等级映射丢失。
-const CATALOG_ONLY_FIELDS = ["cost", "compat", "thinkingLevelMap", "samplingParams"];
+// pi 1.0.2 起 models.json 还认 `samplingParamsByThinkingLevel`（按 off..max 覆盖 temperature/top_p 等，
+// 仅 OpenAI 兼容 API）。它和 cost / compat 同类：目录里不会有、只有用户手写，所以必须列进来，
+// 否则用户每在 app 里编辑一次这个模型，这张表就被吃掉。
+const CATALOG_ONLY_FIELDS = ["cost", "compat", "thinkingLevelMap", "samplingParams", "samplingParamsByThinkingLevel"];
 const MERGED_MODEL_FIELDS = ["name", "api", "baseUrl", "reasoning", "input", "contextWindow", "maxTokens"];
 
 /**

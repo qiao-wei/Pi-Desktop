@@ -1,8 +1,9 @@
 // 平台专属依赖的裁剪（scripts/lib/platformPackages.mjs）。
 //
-// 背景：pi 自带的 npm-shrinkwrap.json 让 `npm install` 把 esbuild 的 26 个平台包全装进来
-// （284M），只有一个是本机用得上的。这里锁的是决策规则本身：什么算"平台专属"、什么算"匹配"、
-// 走多深、什么时候必须什么都不删。
+// 背景：pi 0.99.1 及以前自带 npm-shrinkwrap.json，让 `npm install` 把 esbuild 的 26 个平台包全装进来
+// （284M），只有一个是本机用得上的。pi 1.0.1 拿掉了那份 shrinkwrap，现在 npm 自己按 os/cpu 过滤，
+// 这层退化成兜底。这里锁的是决策规则本身：什么算"平台专属"、什么算"匹配"、走多深、什么时候必须什么都不删。
+// 规则本身与 shrinkwrap 无关，所以不跟着 pi 的打包方式变。
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
