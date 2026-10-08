@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { AlertTriangle, Check, ChevronDown, Loader2, Pencil, Plus, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Loader2, LogIn, Pencil, Plus, RefreshCw, Search, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -18,7 +18,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import { useT } from "../../i18n/react";
 
-import { formatTokenCount, summaryLabel } from "./customModelForm";
+import { formatTokenCount, summaryLabel, defaultLoginAuthType, loginAuthTypes } from "./customModelForm";
+import type { LoginAuthType } from "./customModelForm";
 import {
   addCustomModels,
   catalogModelPayload,
@@ -30,6 +31,7 @@ import {
 } from "./customModelsApi";
 import type { CustomModelEntry, CustomModelsResponse, ModelProviderRow, ProviderModelOption } from "./customModelsApi";
 import { ApiKeyField } from "./ApiKeyField";
+import { ModelLoginDialog } from "./ModelLoginDialog";
 
 /**
  * 「添加模型」弹窗：往一家已有的供应商里挑模型。
@@ -89,6 +91,9 @@ export function AddModelsDialog({
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [keyVerifyResult, setKeyVerifyResult] = useState<{ ok: boolean; message: string } | null>(null);
+  /** 这家用「账号登录」还是「填 key」；只有 provider 两种都支持时才需要选。 */
+  const [authType, setAuthType] = useState<LoginAuthType>("api_key");
+  const [loginOpen, setLoginOpen] = useState(false);
   const providerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const providerSearchRef = useRef<HTMLInputElement | null>(null);
   const providerListRef = useRef<HTMLDivElement | null>(null);
@@ -136,6 +141,10 @@ export function AddModelsDialog({
   const canVerifyKey = Boolean(providerId);
   /** 只有用户自己登记在 models.json 里的供应商能改；内置的那是 pi 管的。 */
   const canEditProvider = Boolean(provider && !provider.builtin && provider.registered);
+  /** 这家的登录入口（和 TUI 的 /login 同一套判据，不写死供应商）。 */
+  const authTypes = loginAuthTypes(provider ?? {});
+  const accountLabel = provider?.oauth?.label || provider?.oauth?.name || t("models.add.authAccount");
+  const oauthSignedIn = Boolean(provider?.authConfigured && provider?.authKind === "oauth");
 
   // 底下压着 provider 弹窗（open=false）时**不重置**：那是去隔壁加了一家公司，回来不该把
   // 刚选好的供应商、勾好的模型全丢。重新露出来时只把 provider 目录刷一遍，新加的那家要在列表里。
@@ -153,6 +162,9 @@ export function AddModelsDialog({
       setNotice("");
       setError("");
       setKeyVerifyResult(null);
+      setLoginOpen(false);
+      setAuthType("api_key");
+      authDefaultForRef.current = "";
       return;
     }
     let cancelled = false;
@@ -237,11 +249,30 @@ export function AddModelsDialog({
     setKeyVerifyResult(null);
     setNotice("");
     setError("");
+    setLoginOpen(false);
     if (providerId) {
       void loadConfiguredModels(providerId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, providerId]);
+
+  /**
+   * 默认登录方式要等这一家的 provider 行到齐了再定：带着 initialProviderId 打开时
+   * providerId 会在 providers 还没加载完就先落地，那时判不出它是 key 还是 OAuth。
+   * 记在 ref 里保证「每家只定一次」，后续列表刷新（比如登录后重拉）不会覆盖用户手选的那一档。
+   */
+  const authDefaultForRef = useRef("");
+  useEffect(() => {
+    if (!open || !providerId || !provider) {
+      return;
+    }
+    if (authDefaultForRef.current === providerId) {
+      return;
+    }
+    authDefaultForRef.current = providerId;
+    setAuthType(defaultLoginAuthType(provider));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, providerId, provider]);
 
   /** 配置里已有的模型列表（桥只读 models.json / runtime 目录，不打网络）。 */
   async function loadConfiguredModels(id: string) {
@@ -365,6 +396,33 @@ export function AddModelsDialog({
     }
   }
 
+  /**
+   * 登录成功后：先重拉供应商列表（authConfigured / authKind 变了），
+   * 再联网拉一次模型目录 —— 订阅可用的模型往往只有登录后才看得到。
+   */
+  async function refreshAfterLogin(id: string) {
+    setLoginOpen(false);
+    try {
+      const response = await fetchModelProviders();
+      setProviders(response.providers ?? []);
+    } catch {
+      // 列表刷新失败不影响“已经登录了”这件事，下面的取数还会再试一次。
+    }
+    setStatus("discovering");
+    setError("");
+    try {
+      const result = await discoverProviderModels({ providerId: id });
+      const list = result.models ?? [];
+      setModels(list);
+      syncSelection(list);
+      setNotice(t("models.add.signedInFetched", { count: list.length }));
+    } catch (discoverError) {
+      setError(readableError(discoverError));
+    } finally {
+      setStatus("idle");
+    }
+  }
+
   /** 验证 API key 是否有效（留空 = 验已存的那份）。 */
   async function handleVerifyKey() {
     if (!providerId) {
@@ -410,7 +468,8 @@ export function AddModelsDialog({
           providerName: name,
           baseUrl: baseUrl.trim(),
           providerId,
-          apiKey: apiKey.trim() || undefined,
+          // 账号登录不往 models.json 里带 key；auth.json 里的 OAuth 凭证是 pi 写的。
+          apiKey: authType === "api_key" ? apiKey.trim() || undefined : undefined,
           models: toAdd.map((model) => ({ model: catalogModelPayload(model) })),
         });
       }
@@ -429,6 +488,7 @@ export function AddModelsDialog({
   }
 
   return (
+    <>
     <Dialog
       open={open || overlayOpen}
       onOpenChange={(next) => {
@@ -567,51 +627,97 @@ export function AddModelsDialog({
                 <span className="provider-picker-url">{provider.baseUrl || t("models.builtInEndpoint")}</span>
               </p>
             ) : null}
-            {provider && !provider.authConfigured && !(provider.authMethods ?? []).includes("apiKey") ? (
-              <p className="text-xs text-muted-foreground">
-                {t("models.add.authSignInHint")}
-              </p>
-            ) : null}
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="add-model-key">{t("models.field.apiKey")}</Label>
-            <div className="flex items-start gap-2">
-              <ApiKeyField
-                id="add-model-key"
-                value={apiKey}
-                onChange={(next) => {
-                  setApiKey(next);
-                  setKeyVerifyResult(null);
-                }}
-                savedConfigured={Boolean(provider?.authConfigured)}
-                placeholder={t("models.placeholder.keyReplace")}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-9 flex-none"
-                disabled={busy || !canVerifyKey}
-                onClick={() => void handleVerifyKey()}
-              >
-                {status === "verifying" ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
-                {t("models.add.verifyKey")}
-              </Button>
+          {/* 两种登录方式都支持时才给选择；只支持一种就直接用那一种（和 TUI 的
+              /login 一样：只有一个选项就不多问一步）。 */}
+          {provider && authTypes.length > 1 ? (
+            <div className="grid gap-2">
+              <Label>{t("models.add.authMethod")}</Label>
+              <div className="flex flex-wrap gap-2">
+                {authTypes.includes("api_key") ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={authType === "api_key" ? "default" : "outline"}
+                    aria-pressed={authType === "api_key"}
+                    onClick={() => setAuthType("api_key")}
+                  >
+                    {t("models.field.apiKey")}
+                  </Button>
+                ) : null}
+                {authTypes.includes("oauth") ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={authType === "oauth" ? "default" : "outline"}
+                    aria-pressed={authType === "oauth"}
+                    onClick={() => setAuthType("oauth")}
+                  >
+                    <LogIn size={14} />
+                    {accountLabel}
+                  </Button>
+                ) : null}
+              </div>
             </div>
-            {keyVerifyResult ? (
-              <p className={cn("text-xs", keyVerifyResult.ok ? "text-emerald-700 dark:text-emerald-400" : "text-destructive")}>
-                {keyVerifyResult.message}
+          ) : null}
+
+          {provider && authType === "oauth" && authTypes.includes("oauth") ? (
+            <div className="grid gap-2">
+              <Label>{t("models.add.authAccount")}</Label>
+              <p className="text-xs text-muted-foreground">
+                {oauthSignedIn
+                  ? t("models.add.signedInVia", { name: provider.oauth?.name || provider.name })
+                  : t("models.add.authOauthHint", { name: provider.oauth?.name || provider.name })}
               </p>
-            ) : null}
-            {notice ? <p className="text-xs text-muted-foreground">{notice}</p> : null}
-            {error ? (
-              <p className="settings-card-error" role="alert">
-                <AlertTriangle size={14} className="flex-none" />
-                <span className="min-w-0 break-words">{error}</span>
-              </p>
-            ) : null}
-          </div>
+              <div>
+                <Button type="button" size="sm" onClick={() => setLoginOpen(true)}>
+                  <LogIn size={14} />
+                  {oauthSignedIn ? t("models.add.signInAgain") : t("models.add.signIn")}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              <Label htmlFor="add-model-key">{t("models.field.apiKey")}</Label>
+              <div className="flex items-start gap-2">
+                <ApiKeyField
+                  id="add-model-key"
+                  value={apiKey}
+                  onChange={(next) => {
+                    setApiKey(next);
+                    setKeyVerifyResult(null);
+                  }}
+                  savedConfigured={Boolean(provider?.authConfigured)}
+                  placeholder={t("models.placeholder.keyReplace")}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 flex-none"
+                  disabled={busy || !canVerifyKey}
+                  onClick={() => void handleVerifyKey()}
+                >
+                  {status === "verifying" ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
+                  {t("models.add.verifyKey")}
+                </Button>
+              </div>
+              {keyVerifyResult ? (
+                <p className={cn("text-xs", keyVerifyResult.ok ? "text-emerald-700 dark:text-emerald-400" : "text-destructive")}>
+                  {keyVerifyResult.message}
+                </p>
+              ) : null}
+            </div>
+          )}
+
+          {notice ? <p className="text-xs text-muted-foreground">{notice}</p> : null}
+          {error ? (
+            <p className="settings-card-error" role="alert">
+              <AlertTriangle size={14} className="flex-none" />
+              <span className="min-w-0 break-words">{error}</span>
+            </p>
+          ) : null}
 
           {models.length || status === "discovering" || status === "loadingModels" ? (
             <div className="grid gap-2">
@@ -708,6 +814,17 @@ export function AddModelsDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {provider ? (
+      <ModelLoginDialog
+        open={loginOpen}
+        providerId={provider.id}
+        providerName={provider.name}
+        authType={authType}
+        onClose={() => setLoginOpen(false)}
+        onSuccess={() => void refreshAfterLogin(provider.id)}
+      />
+    ) : null}
+    </>
   );
 }
 

@@ -8,6 +8,7 @@ import type {
   CustomModelEntry,
   ModelCostConfig,
   ModelCostRates,
+  ModelProviderRow,
 } from "./customModelsApi";
 
 /**
@@ -669,4 +670,46 @@ export function priceSummary(cost?: ModelCostConfig): string {
     parts.push(t(cost.tiers.length > 1 ? "models.priceSummary.tiers.other" : "models.priceSummary.tiers.one", { count: cost.tiers.length }));
   }
   return parts.join(t("common.dotSeparator"));
+}
+
+/** 「用账号登录 / 填 API key」两种登录方式之一。 */
+export type LoginAuthType = "api_key" | "oauth";
+
+/** 判定登录入口只读这几个字段；写成可选，调用方传部分行也能用。 */
+export interface LoginMethodRow {
+  authMethods?: string[];
+  oauth?: ModelProviderRow["oauth"];
+  apiKeyLogin?: boolean;
+  authKind?: string;
+}
+
+/**
+ * 一家供应商提供了哪几种登录入口。
+ *
+ * 判据和 TUI 的 `/login` 选择器一致：`authMethods`（来自 pi 的 `provider.auth` 键）
+ * 说有 OAuth 就有账号登录，说有 apiKey 且实现了 `login()` 才配填 key。名单是 pi
+ * 目录给的，前端不维护任何供应商白名单。
+ */
+export function loginAuthTypes(row: LoginMethodRow = {}): LoginAuthType[] {
+  const methods = new Set((row.authMethods ?? []).map(String));
+  const types: LoginAuthType[] = [];
+  if (methods.has("apiKey") && row.apiKeyLogin !== false) {
+    types.push("api_key");
+  }
+  if (methods.has("oauth") || row.oauth) {
+    types.push("oauth");
+  }
+  return types;
+}
+
+/**
+ * 打开弹窗时默认站在哪一档：已用账号登录的供应商默认继续账号登录，
+ * 其余能用 key 的默认 key（保持老用户的习惯），只支持 OAuth 的就只有账号登录。
+ */
+export function defaultLoginAuthType(row: LoginMethodRow = {}): LoginAuthType {
+  const types = loginAuthTypes(row);
+  if (row.authKind === "oauth" && types.includes("oauth")) {
+    return "oauth";
+  }
+  return types.includes("api_key") ? "api_key" : "oauth";
 }

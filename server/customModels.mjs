@@ -732,8 +732,13 @@ export function resolveProviderTarget(config, entry, target) {
   // 所以第二条只能按 id 认，否则批量添加会给自己造出一个 anthropic-2。
   const matches = Boolean(found) && (target?.providerId || entry.providerMode === "builtin" || sameEndpoint);
   const existing = matches ? found : undefined;
+  // 内置供应商的 id 是 pi 目录里的真 id，不能按名字重算：name 与 id 不一致的那些
+  // （Kimi For Coding → kimi-coding、OpenAI Codex (legacy) → openai-codex、Z.AI → zai…）
+  // 重算出来是个不存在的 id，落盘后 auth.json 里的凭证（按真 id 存的）对不上，
+  // 还会被下游判成“这家没存过 key”，于是往内置供应商加模型被一句 API key is required 打死。
+  const builtinId = entry.providerMode === "builtin" ? requestedId : "";
   return {
-    providerId: existing?.providerId ?? providerIdFromName(entry.providerName || entry.providerId, Object.keys(providers)),
+    providerId: existing?.providerId || builtinId || providerIdFromName(entry.providerName || entry.providerId, Object.keys(providers)),
     existing,
   };
 }
@@ -1362,6 +1367,12 @@ export function normalizeProviderCatalog(providers, { withModels = false } = {})
       registered: Boolean(provider.registered),
       builtin: Boolean(provider.builtin),
       authMethods: Array.isArray(provider.authMethods) ? provider.authMethods.map(String) : [],
+      // 登录方式的元数据整体来自 pi 的 provider.auth（不写死名单）：TUI 的 /login
+      // 读什么，设置页就读什么，pi 目录新增一家支持 OAuth 的供应商这里自动跟上。
+      oauth: normalizeOauthMethod(provider.oauth),
+      // apiKey 缺席 `login()` 的供应商（Bedrock / Vertex 这类 ambient-only）不该在
+      // 设置页假装能填 key；缺省为 true 是为了让 models.json 自定义 provider 保持原样。
+      apiKeyLogin: provider.apiKeyLogin === undefined ? true : Boolean(provider.apiKeyLogin),
       // withModels=false 时没展开列表，数量听调用方的（runtime 目录里数出来的）。
       modelCount: withModels ? models.length : nonNegativeInt(provider.modelCount, models.length),
       ...(withModels ? { models } : {}),
@@ -1369,6 +1380,18 @@ export function normalizeProviderCatalog(providers, { withModels = false } = {})
   }
 
   return list.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+}
+
+function normalizeOauthMethod(oauth) {
+  if (typeof oauth !== "object" || oauth === null || Array.isArray(oauth)) {
+    return null;
+  }
+  const name = String(oauth.name ?? "").trim();
+  const label = String(oauth.label ?? "").trim();
+  if (!name && !label) {
+    return null;
+  }
+  return { name, label, subscription: Boolean(oauth.subscription) };
 }
 
 function nonNegativeInt(value, fallback) {

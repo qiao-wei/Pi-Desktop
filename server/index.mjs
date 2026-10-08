@@ -18,6 +18,7 @@ import { PI_DESKTOP_BUILTIN_COMMANDS, planBuiltinCommand } from "./builtinComman
 import { absolutizeInstalledUserPackage, installTargetPath, packageSourceForPi } from "./capabilityPackageSource.mjs";
 import { emptyPackageResources, findPackageResourceEntry, MAX_RESOURCE_PREVIEW_BYTES, packageProgressEvent, packageResourceDetails, resourcePreview, summarizePackageResources } from "./capabilityPackageResources.mjs";
 import { extensionWidgetRequest } from "./extensionUiRequests.mjs";
+import { createModelLoginBroker, normalizeLoginAuthType, providerLoginMethods } from "./modelLogin.mjs";
 import { openSqliteDatabase } from "./sqlite.mjs";
 import { ensureSessionArchiveColumn, listArchivedSessionRows, listProjectSessionRows } from "./sessionArchive.mjs";
 import { revealFolder } from "./revealFolder.mjs";
@@ -1150,6 +1151,10 @@ const modelRuntime = await ModelRuntime.create({
   allowModelNetwork: false,
 });
 
+// 供应商登录（OAuth / 交互式 API key）：一个会话一条 NDJSON 流，答复走 POST。
+// 名单不在这里，全部读 provider.auth —— 见 server/modelLogin.mjs。
+const modelLoginBroker = createModelLoginBroker();
+
 let personalization = loadPersonalization();
 let projects = loadProjects();
 let activeProjectId = readActiveProjectId(projects);
@@ -1521,6 +1526,46 @@ undefined
       const body = await readJson(req);
       sendJson(res, 200, await updateProvider(body));
       return;
+    }
+
+    // POST /api/model-providers/:id/login → 跑一次 pi 的登录流程（NDJSON 流）。
+    // 前端不传供应商名单：:id 支持什么由 provider.auth 决定，和 TUI 的 /login 同一套。
+    // 形如 /api/model-providers/login/respond 的固定路由要排在前面，别被这里吞掉。
+    if (req.method === "POST" && url.pathname === "/api/model-providers/login/respond") {
+      const body = await readJson(req);
+      const ok = modelLoginBroker.respond(body?.promptId, body?.value, { cancelled: Boolean(body?.cancelled) });
+      sendJson(res, 200, { ok });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/model-providers/login/cancel") {
+      const body = await readJson(req);
+      sendJson(res, 200, { ok: modelLoginBroker.cancel(body?.sessionId) });
+      return;
+    }
+
+    // POST /api/model-providers/:id/logout → 删掉 auth.json 里这家存的那条凭证。
+    if (req.method === "POST" && url.pathname.endsWith("/logout")) {
+      const pathParts = url.pathname.split("/").filter(Boolean);
+      if (pathParts.length === 4 && pathParts[1] === "model-providers" && pathParts[3] === "logout") {
+        const providerId = decodeURIComponent(pathParts[2]);
+        if (!modelRuntime.getProvider(providerId)) {
+          sendJson(res, 200, { ok: false, error: "Unknown provider." });
+          return;
+        }
+        await modelRuntime.logout(providerId, { signal: AbortSignal.timeout(15_000) });
+        sendJson(res, 200, { ok: true, providers: modelProviderCatalog() });
+        return;
+      }
+    }
+
+    if (req.method === "POST" && url.pathname.endsWith("/login")) {
+      const pathParts = url.pathname.split("/").filter(Boolean);
+      if (pathParts.length === 4 && pathParts[1] === "model-providers" && pathParts[3] === "login") {
+        const providerId = decodeURIComponent(pathParts[2]);
+        await streamModelLogin(req, res, providerId, requestId);
+        return;
+      }
     }
 
     if (req.method === "POST" && url.pathname === "/api/custom-models/key") {
@@ -5486,10 +5531,28 @@ function providerRows({ withModelsFor = "" } = {}) {
       authConfigured,
       authKind: modelRuntime.isUsingOAuth(provider.id) ? "oauth" : authConfigured ? "api_key" : "none",
       authMethods: Object.keys(provider.auth ?? {}),
+      // 登录方式的元数据（名单来自 pi 的 provider.auth，不是这里写死的）：设置页靠它
+      // 决定显示哪几个登录入口、入口叫什么，和 TUI 的 /login 选择器同一套依据。
+      oauth: loginOauthMetadata(provider),
+      apiKeyLogin: typeof provider.auth?.apiKey?.login === "function",
       registered: inModelsJson.has(provider.id),
       builtin: builtins.has(provider.id),
     };
   });
+}
+
+/** 一家供应商 OAuth 的显示信息；没有 OAuth 就是 null。字段名对齐 `normalizeProviderCatalog`。 */
+function loginOauthMetadata(provider) {
+  const oauth = provider?.auth?.oauth;
+  if (!oauth || typeof oauth !== "object") {
+    return null;
+  }
+  const name = String(oauth.name ?? "").trim();
+  const label = String(oauth.loginLabel ?? "").trim();
+  if (!name && !label) {
+    return null;
+  }
+  return { name, label, subscription: oauth.isSubscription === true };
 }
 
 /**
@@ -5582,6 +5645,54 @@ async function discoverProviderModels(body) {
     refreshed,
     warning,
   };
+}
+
+/**
+ * 跑一次 pi 的登录流程，把交互事件转成 NDJSON 写给设置页。
+ *
+ * 支持什么登录方式由 `provider.auth` 决定（`oauth` / `apiKey`），不写死任何供应商；
+ * 用户中途关弹窗 = 客户端断开 → 这里 abort 掉正在跑的登录，别把回调端口和轮询留在后台。
+ */
+async function streamModelLogin(req, res, providerId, requestId) {
+  const body = await readJson(req);
+  const authType = normalizeLoginAuthType(body?.authType);
+  const provider = modelRuntime.getProvider(providerId);
+  if (!provider) {
+    throw new Error("Unknown provider. Pick it again.");
+  }
+  const methods = providerLoginMethods(provider);
+  if (authType === "oauth" ? !methods.oauth : !methods.apiKey) {
+    throw new Error(`${provider.name ?? providerId} does not support ${authType === "oauth" ? "account sign-in" : "an API key"}.`);
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    ...corsHeaders(),
+  });
+  diagnosticLog("model.login.start", { requestId, providerId, authType });
+  const { sessionId, done } = modelLoginBroker.start({
+    providerId,
+    authType,
+    onEvent: (payload) => {
+      if (!res.destroyed) {
+        res.write(`${JSON.stringify(payload)}\n`);
+      }
+    },
+    login: (interaction) => modelRuntime.login(providerId, authType, interaction, {
+      // OpenAI 的订阅登录靠这个稳定 UUID 认「这台安装」；写的是 pi 自己的
+      // settings.json（`deviceId`），所以和终端 TUI 共用同一个值。
+      getDeviceId: () => runtime.settingsManager.getOrCreateDeviceId(),
+    }),
+  });
+  // 弹窗关了 / 网络断了：这次登录已经没人看，取消它。
+  res.on("close", () => modelLoginBroker.cancel(sessionId));
+  await done;
+  if (!res.destroyed) {
+    res.end();
+  }
+  diagnosticLog("model.login.end", { requestId, providerId, authType, sessionId });
 }
 
 /** runtime 会不会替这家供应商联网拉列表（内置 provider 有 `refreshModels`，models.json 里没有）。 */
