@@ -389,6 +389,44 @@ test("resolveProviderTarget 与 upsert 落在同一个 provider 上（决定要�
   assert.equal(upsertCustomModel(handWritten, other).providerId, resolved.providerId);
 });
 
+/*
+ * 内置供应商的 id 是 pi 目录里的真 id，不是名字 slug。
+ *
+ * 回归：Kimi For Coding 的 id 是 kimi-coding，按名字重算得 kimi-for-coding ——
+ * 于是桥把这行当成一家“没存过 key 的自定义供应商”，往内置供应商加模型被
+ * “API key is required.” 打死（OAuth 登录了也没用）。同类还有 10 家，见 providerIds 表。
+ */
+test("内置供应商按真 id 落盘：名字和 id 不一致时不能被重算成另一个 id", () => {
+  const builtinDraft = (providerId, providerName) => normalizeCustomModelInput(
+    { providerId, providerName, providerMode: "builtin", baseUrl: "", model: "m1" },
+    { requireApiKey: false },
+  );
+
+  for (const [providerId, providerName] of [
+    ["kimi-coding", "Kimi For Coding"],
+    ["openai-codex", "OpenAI Codex (legacy)"],
+    ["zai", "Z.AI"],
+    ["google-vertex", "Google Vertex AI"],
+  ]) {
+    const entry = builtinDraft(providerId, providerName);
+    assert.equal(entry.providerMode, "builtin");
+    assert.equal(resolveProviderTarget({ providers: {} }, entry, undefined).providerId, providerId);
+    // upsert 必须落在同一个 id 上，否则 auth.json 里的凭证就成了孤儿。
+    assert.equal(upsertCustomModel({ providers: {} }, entry).providerId, providerId);
+  }
+});
+
+test("自定义供应商仍然按名字生成 id、并避开已占用的 id（这条不能被上面的修复带偏）", () => {
+  const custom = normalizeCustomModelInput(
+    { providerName: "My Gateway", baseUrl: "https://gateway.example.com/v1", apiKey: "sk-test-123", model: "m1" },
+    { requireApiKey: true },
+  );
+  assert.equal(resolveProviderTarget({ providers: {} }, custom, undefined).providerId, "my-gateway");
+  // 名字 slug 已被另一家占用（地址不同）= 新的一家，加后缀而不是盖上去。
+  const withExisting = { providers: { "my-gateway": { name: "Other", baseUrl: "https://other.dev/v1", models: [] } } };
+  assert.equal(resolveProviderTarget(withExisting, custom, undefined).providerId, "my-gateway-2");
+});
+
 /* ------------------------------------------------------------- 连接探测 */
 
 test("OpenAI 兼容端点的两个地址", () => {
@@ -703,6 +741,26 @@ test("供应商目录归一化不透出 key：列表口再怎么改都带不出�
   const row = normalizeProviderCatalog([{ id: "alpha", name: "Alpha", apiKey: "sk-secret", authConfigured: true }])[0];
   assert.equal(row.apiKey, undefined);
   assert.equal("apiKey" in row, false);
+});
+
+/* 登录方式的元数据靠 provider.auth 透传（名单在 pi 目录里，不在设置页）：
+   桥只负责把 oauth / apiKeyLogin 两个字段原样归一化，前端据此决定显示哪些入口。 */
+test("供应商目录：OAuth 元数据原样透传，缺省时 apiKeyLogin 保持 true", () => {
+  const [withOauth, noOauth] = normalizeProviderCatalog([
+    {
+      id: "anthropic",
+      name: "Anthropic",
+      authMethods: ["apiKey", "oauth"],
+      oauth: { name: "Anthropic (Claude Pro/Max)", label: "", subscription: true },
+      apiKeyLogin: true,
+    },
+    { id: "plain", name: "Plain", authMethods: ["apiKey"] },
+  ]);
+  assert.deepEqual(withOauth.oauth, { name: "Anthropic (Claude Pro/Max)", label: "", subscription: true });
+  assert.equal(withOauth.apiKeyLogin, true);
+  // 没给 apiKeyLogin 的行（models.json 自定义 provider）不能因此被判成“不能填 key”。
+  assert.equal(noOauth.oauth, null);
+  assert.equal(noOauth.apiKeyLogin, true);
 });
 
   const detailed = normalizeProviderCatalog(

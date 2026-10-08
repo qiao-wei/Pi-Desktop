@@ -1,5 +1,5 @@
 import type { ModelSummary } from "../../types";
-import { fetchJson, postJson } from "../../lib/api";
+import { fetchJson, postJson, streamNdjson } from "../../lib/api";
 import { buildCostPayload, buildThinkingLevelMap } from "./customModelForm";
 import type { ThinkingLevelDraftMap } from "./customModelForm";
 
@@ -170,6 +170,16 @@ export function testCustomModelConnection(input: {
   return postJson<ConnectionTestResult>("/api/custom-models/test", input);
 }
 
+/** OAuth 登录入口的显示信息（来自 pi 的 provider.auth.oauth）。 */
+export interface ModelOauthMethod {
+  /** 登录方式名，如 "Anthropic (Claude Pro/Max)"。 */
+  name: string;
+  /** pi 给的按钮文案，如 "Sign in with ChatGPT"；可能为空。 */
+  label: string;
+  /** 是否订阅制（TUI 也是靠它区分“账号登录”和普通 OAuth）。 */
+  subscription: boolean;
+}
+
 /** 「选择已有供应商」里的一行。 */
 export interface ModelProviderRow {
   id: string;
@@ -183,6 +193,10 @@ export interface ModelProviderRow {
   authKind: string;
   /** pi 侧支持的登录方式，如 ["apiKey"] / ["apiKey","oauth"]。 */
   authMethods?: string[];
+  /** OAuth 的显示信息（来自 pi 的 provider.auth.oauth）；没有 OAuth 就是 null。 */
+  oauth?: ModelOauthMethod | null;
+  /** apiKey 这一档是否真的能交互填 key（Bedrock / Vertex 这类 ambient-only 是 false）。 */
+  apiKeyLogin?: boolean;
   /** 该 provider 已经在 models.json 里了。 */
   registered?: boolean;
   /**
@@ -194,8 +208,7 @@ export interface ModelProviderRow {
   builtin?: boolean;
 }
 
-/** 某个供应商的一个可选模型（来自 pi 目录或端点实时列表）。 */
-export interface ProviderModelOption {
+/** 某个供应商的一个可选模型（来自 pi 目录或端点实时列表）。 */export interface ProviderModelOption {
   id: string;
   name: string;
   api: string;
@@ -305,4 +318,84 @@ export function catalogModelPayload(model: ProviderModelOption): Record<string, 
     reasoning: model.reasoning,
     input: model.supportsImages ? ["text", "image"] : ["text"],
   };
+}
+
+/* ---------------------------------------------------------------- 登录（OAuth / API key）
+ *
+ * 桥把 pi 的登录交互翻成一条 NDJSON 流：`event` 是进度/网址/设备码，`prompt`
+ * 是要用户回一句（答复走 POST），最后以 `done` / `error` 收尾。事件和提问的形状
+ * 直接沿用 pi 的 AuthEvent / AuthPrompt，不在这里另立一套词汇。
+ */
+
+/** pi 的 AuthEvent（`auth_url` / `device_code` / `info` / `progress`）。未知类型也只透传。 */
+export interface ModelLoginEvent {
+  type: string;
+  message?: string;
+  url?: string;
+  instructions?: string;
+  links?: Array<{ url: string; label?: string }>;
+  userCode?: string;
+  verificationUri?: string;
+  intervalSeconds?: number;
+  expiresInSeconds?: number;
+  [key: string]: unknown;
+}
+
+/** pi 的 AuthPrompt 选项。 */
+export interface ModelLoginOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+/** pi 的 AuthPrompt（`text` / `secret` / `select` / `manual_code`）。 */
+export interface ModelLoginPrompt {
+  type: string;
+  message: string;
+  placeholder?: string;
+  options?: ModelLoginOption[];
+  [key: string]: unknown;
+}
+
+export type ModelLoginStreamEvent =
+  | { type: "session"; sessionId: string }
+  | { type: "event"; event: ModelLoginEvent }
+  | { type: "prompt"; id: string; prompt: ModelLoginPrompt }
+  | { type: "done" }
+  | { type: "error"; message: string };
+
+/** 「用账号登录」还是「填 API key」；和 pi 的 AuthType 一致。 */
+export type ModelLoginAuthType = "oauth" | "api_key";
+
+/**
+ * 跑一次供应商登录。流一直开到 `done` / `error`；调用方 abort 即取消。
+ * `providerId` 支持什么由桥读 provider.auth 判断，前端不维护名单。
+ */
+export function startModelLogin(
+  providerId: string,
+  authType: ModelLoginAuthType,
+  onEvent: (event: ModelLoginStreamEvent) => void,
+  options: { signal?: AbortSignal } = {},
+): Promise<void> {
+  return streamNdjson<ModelLoginStreamEvent>(
+    `/api/model-providers/${encodeURIComponent(providerId)}/login`,
+    { authType },
+    onEvent,
+    options,
+  );
+}
+
+/** 答复一个 `prompt`；值是字符串（select 传 option id）。 */
+export function respondModelLogin(promptId: string, value: string): Promise<{ ok: boolean }> {
+  return postJson<{ ok: boolean }>("/api/model-providers/login/respond", { promptId, value });
+}
+
+/** 取消正在跑的登录（弹窗关了 / 用户按了取消）。 */
+export function cancelModelLogin(sessionId: string): Promise<{ ok: boolean }> {
+  return postJson<{ ok: boolean }>("/api/model-providers/login/cancel", { sessionId });
+}
+
+/** 删掉 auth.json 里这家存的那条凭证（环境变量、models.json 都不动，和 /logout 一致）。 */
+export function logoutModelProvider(providerId: string): Promise<{ ok: boolean; providers?: ModelProviderRow[]; error?: string }> {
+  return postJson(`/api/model-providers/${encodeURIComponent(providerId)}/logout`, {});
 }

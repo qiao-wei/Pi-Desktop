@@ -560,10 +560,10 @@ export async function postExtensionUiResponse<T>(body: ExtensionUiResponse): Pro
   return postJson<T>("/api/extension-ui/response", body);
 }
 
-export async function streamNdjson(
+export async function streamNdjson<T = PromptStreamEvent>(
   path: string,
   body: unknown,
-  onEvent: (event: PromptStreamEvent) => void,
+  onEvent: (event: T) => void,
   options: { signal?: AbortSignal } = {},
 ): Promise<void> {
   const response = await fetch(`${getApiBase()}${path}`, {
@@ -602,9 +602,9 @@ export async function streamNdjson(
       }
 
       try {
-        onEvent(JSON.parse(line) as PromptStreamEvent);
+        onEvent(JSON.parse(line) as T);
       } catch {
-        onEvent({ type: "error", message: line });
+        onEvent({ type: "error", message: line } as T);
       }
     }
   }
@@ -612,9 +612,9 @@ export async function streamNdjson(
   const tail = buffer.trim();
   if (tail) {
     try {
-      onEvent(JSON.parse(tail) as PromptStreamEvent);
+      onEvent(JSON.parse(tail) as T);
     } catch {
-      onEvent({ type: "error", message: tail });
+      onEvent({ type: "error", message: tail } as T);
     }
   }
 }
