@@ -117,8 +117,8 @@ test("sidebar row action clusters stay compact", () => {
   const projectRow = topLevelFunctionSource("ProjectSidebar");
   assert.equal(
     [...projectRow.matchAll(/className=\{cn\("size-6", sidebarLock\.lockClass\)\}/g)].length,
-    2,
-    "the project menu + new-session buttons must share the compact 24px size",
+    4,
+    "the files / skills / … / new-session buttons must share the compact 24px size",
   );
   assert.doesNotMatch(
     projectRow,

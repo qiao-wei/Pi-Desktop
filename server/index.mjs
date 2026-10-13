@@ -35,6 +35,8 @@ import {
   worktreeRootFor,
 } from "./gitWorktree.mjs";
 import { resolveSessionWorkspaceCwd } from "./sessionWorkspace.mjs";
+import { readFileDiff, listSourceFiles } from "./workspaceDiff.mjs";
+import { listWorkspaceDirectory, readWorkspaceFile } from "./workspaceFiles.mjs";
 import { openGitFileDiff, openGitFileInIde } from "./openDiff.mjs";
 import { createProjectProbe, detectProjectCommands } from "./projectCommandDetect.mjs";
 import { detectTerminalApps, revealRunLog, runProjectCommand } from "./runProjectCommand.mjs";
@@ -1664,6 +1666,72 @@ undefined
       const project = findProject(String(url.searchParams.get("projectId") ?? ""));
       const sessionPath = String(url.searchParams.get("sessionPath") ?? "").trim();
       sendJson(res, 200, await readGitInfo(requestWorkspaceCwd(project, { sessionPath })));
+      return;
+    }
+
+    // 右面板 Files 视图：列一层目录（懒加载，不递归）。只读，路径必须落在项目根内。
+    if (req.method === "GET" && url.pathname === "/api/projects/files") {
+      const project = findProject(String(url.searchParams.get("projectId") ?? ""));
+      const sessionPath = String(url.searchParams.get("sessionPath") ?? "").trim();
+      const listing = listWorkspaceDirectory({
+        cwd: requestWorkspaceCwd(project, { sessionPath }),
+        dir: String(url.searchParams.get("dir") ?? ""),
+      });
+      sendJson(res, listing.ok ? 200 : 400, listing.ok ? listing : { error: listing.status });
+      return;
+    }
+
+    // 右面板内置的文件内容预览（同样是只读 + 有界）。
+    if (req.method === "GET" && url.pathname === "/api/projects/file") {
+      const project = findProject(String(url.searchParams.get("projectId") ?? ""));
+      const sessionPath = String(url.searchParams.get("sessionPath") ?? "").trim();
+      sendJson(
+        res,
+        200,
+        readWorkspaceFile({
+          cwd: requestWorkspaceCwd(project, { sessionPath }),
+          path: String(url.searchParams.get("path") ?? ""),
+        }),
+      );
+      return;
+    }
+
+    // 「改动」面板切到「对比分支」时那一列文件（底座是 merge-base，和读单个文件 diff 同源）。
+    // 未暂存/已暂存不需要这条路由：那两份清单本来就在 /api/projects/git 的 porcelain 里。
+    if (req.method === "GET" && url.pathname === "/api/projects/git/files") {
+      const project = findProject(String(url.searchParams.get("projectId") ?? ""));
+      const sessionPath = String(url.searchParams.get("sessionPath") ?? "").trim();
+      sendJson(
+        res,
+        200,
+        await listSourceFiles({
+          cwd: requestWorkspaceCwd(project, { sessionPath }),
+          source: url.searchParams.get("source") ?? undefined,
+          base: url.searchParams.get("base") ?? undefined,
+        }),
+      );
+      return;
+    }
+
+    // 右面板里点开某个文件看改动（纯读：不写工作区、不弹 IDE）。
+    //
+    // 为什么不复用 `open-diff`：那条路是「交给外部 IDE」的动作，这条要把补丁要回来自己渲染。
+    // `source`（unstaged / staged / branch）与 `base` 交给 `readFileDiff` 自己归一化 —— 它还会
+    // 校验路径落在项目根内，越界时在跑 git 之前就报错。cwd 走会话自己的工作区，worktree 会话
+    // 看到的才是 worktree 里的改动。
+    if (req.method === "GET" && url.pathname === "/api/projects/git/diff") {
+      const project = findProject(String(url.searchParams.get("projectId") ?? ""));
+      const sessionPath = String(url.searchParams.get("sessionPath") ?? "").trim();
+      sendJson(
+        res,
+        200,
+        await readFileDiff({
+          cwd: requestWorkspaceCwd(project, { sessionPath }),
+          path: String(url.searchParams.get("path") ?? ""),
+          source: url.searchParams.get("source") ?? undefined,
+          base: url.searchParams.get("base") ?? undefined,
+        }),
+      );
       return;
     }
 

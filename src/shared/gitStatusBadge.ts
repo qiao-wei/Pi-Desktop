@@ -13,6 +13,20 @@
 
 export type GitFileStatus = "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted";
 
+/** 全部状态值（归一化时用来判断「这个字符串是我认识的状态吗」）。 */
+export const GIT_FILE_STATUSES = [
+  "modified",
+  "added",
+  "deleted",
+  "renamed",
+  "untracked",
+  "conflicted",
+] as const satisfies readonly GitFileStatus[];
+
+export function isGitFileStatus(value: unknown): value is GitFileStatus {
+  return GIT_FILE_STATUSES.includes(value as GitFileStatus);
+}
+
 export interface GitFileChange {
   path: string;
   /** 重命名前的路径，非重命名为空串。 */
@@ -105,6 +119,27 @@ export function gitStatusLetter(status: GitFileStatus): string {
 /** 文件状态 → i18n key 后缀（`git.file.<status>`）。 */
 export function gitStatusLabelKey(status: GitFileStatus): string {
   return `git.file.${status}`;
+}
+
+/**
+ * 状态字母的颜色。绿/红之外还带字母本身，颜色不是唯一信息载体。
+ *
+ * 放在 shared 里是因为树（`FilesPane`）和「改动」列表（`GitPane`）都要给同一份
+ * `GitFileStatus` 上色 —— 三处各写一份就会有一处慢慢跑偏。
+ */
+export function gitStatusLetterClass(status: GitFileStatus): string {
+  switch (status) {
+    case "added":
+      return "text-emerald-600 dark:text-emerald-400";
+    case "deleted":
+      return "text-rose-600 dark:text-rose-400";
+    case "untracked":
+      return "text-muted-foreground";
+    case "conflicted":
+      return "text-amber-600 dark:text-amber-400";
+    default:
+      return "text-sky-600 dark:text-sky-400";
+  }
 }
 
 export interface GroupedGitFiles {

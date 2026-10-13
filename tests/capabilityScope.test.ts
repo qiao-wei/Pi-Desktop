@@ -372,9 +372,14 @@ test("the context panel labels its scope above the search box", () => {
 });
 
 test("the panel's scope line names the project it belongs to", () => {
+  // 2026-10-12：项目条目上的「技能/包」图标把它从右面板的 tab 变成了弹窗，弹窗里必须写出
+  // 是**哪个项目**的技能/包（入口在项目行上，用户可能同时开着好几个项目）。
+  const callSite = appSource.slice(appSource.indexOf("<ProjectCapabilitiesPanel"));
+  assert.match(callSite.slice(0, 600), /capabilities=\{capabilities\}/);
   assert.match(
-    appSource,
-    /<ProjectCapabilitiesPanel\n\s+capabilities=\{capabilities\}\n\s+projectName=\{activeProject\.name\}/,
+    callSite.slice(0, 600),
+    /projectName=\{projects\.find\(\(project\) => project\.id === capabilitiesDialogProjectId\)\?\.name \?\? activeProject\.name\}/,
+    "弹窗里的面板要写清是哪个项目的技能/包",
   );
 });
 

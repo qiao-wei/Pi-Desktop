@@ -1,11 +1,13 @@
 import {
   Activity,
+  Blocks,
   AlertTriangle,
   Archive,
   Bell,
   BookOpen,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronUp,
   ClipboardCopy,
@@ -15,6 +17,7 @@ import {
   FileUp,
   Clock3,
   Folder,
+  FolderTree,
   FolderOpen,
   Mic,
   Moon,
@@ -205,6 +208,17 @@ import { ComposerModelSelect } from "../features/models/ComposerModelSelect";
 import { CustomModelsSettings } from "../features/models/CustomModelsSettings";
 import { ArchivedChatsSettings } from "../features/settings/ArchivedChatsSettings";
 import { NotificationSettings } from "../features/settings/NotificationSettings";
+import { FilesPane } from "../features/workspace/FilesPane";
+import { GitPane } from "../features/workspace/GitPane";
+import { PreviewPane } from "../features/workspace/PreviewPane";
+import { RightPanel } from "../features/workspace/RightPanel";
+import { normalizeRightPanelTab } from "../features/workspace/rightPanelTabs";
+import { LauncherPane } from "../features/workspace/LauncherPane";
+import { EMPTY_RIGHT_PANEL_VIEW_ID } from "../features/workspace/RightPanel";
+import { useWorkspaceFiles } from "../features/workspace/useWorkspaceFiles";
+import { useWorkspacePanelTabs } from "../features/workspace/useWorkspacePanelTabs";
+import { contentSubject, diffSubject } from "../shared/workspacePreview";
+import type { WorkspaceDiffSource } from "../shared/workspaceDiff";
 import { buildComposerModelOptions, modelKey } from "../features/models/customModelForm";
 import { useCustomModels } from "../features/models/useCustomModels";
 import type { CustomModelsController } from "../features/models/useCustomModels";
@@ -473,6 +487,13 @@ export function App() {
   const [rightPanelWidth, setRightPanelWidth] = useState(() => loadUiPreferences().rightPanelWidth);
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(() => loadUiPreferences().leftSidebarCollapsed);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(() => loadUiPreferences().rightPanelCollapsed);
+  // 面板上次停留的视图（只记「工具」那几张：文件 tab 是会话级的，路径相对工作区，
+  // 跨项目恢复出来只会指到别的文件）。读的时候过 `normalizeRightPanelTab` 校对，
+  // 这样改视图名或手改过偏好都不会让右侧面板整块空着。
+  const [initialRightPanelTab] = useState(() => normalizeRightPanelTab(loadUiPreferences().rightPanelTab));
+  // 项目条目上的两个图标（ZCode 的布局）：文件树在**左侧栏**打开，技能/包在**弹窗**里。
+  const [sidebarFileTreeProjectId, setSidebarFileTreeProjectId] = useState("");
+  const [capabilitiesDialogProjectId, setCapabilitiesDialogProjectId] = useState("");
   /** 全局搜索面板（⌘K / 标题栏搜索图标）。 */
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   type InTaskSearchState = { open: boolean; query: string; activeIndex: number };
@@ -684,6 +705,56 @@ export function App() {
     onError: reportError,
   });
 
+  // 右面板的标签页（一个文件一个 tab）+ 每张文件 tab 的改动 / 正文数据。
+  // 入口：文件树单击、改动列表单击、git 徽标的文件行、每轮「N 个文件已更改」。
+  const panelTabs = useWorkspacePanelTabs({
+    projectId: bootstrap.activeProjectId,
+    sessionPath: visibleSessionPath,
+    isStreaming: state.isStreaming,
+    initialToolTabId: initialRightPanelTab,
+  });
+
+  // 右面板的文件树（Codex 风格：文件在右边）。入口是「文件」tab。
+  const workspaceFiles = useWorkspaceFiles({
+    projectId: bootstrap.activeProjectId,
+    sessionPath: visibleSessionPath,
+    isStreaming: state.isStreaming,
+  });
+
+  /**
+   * 在右面板里看某个文件的改动。
+   *
+   * 面板此刻可能是收起的、或者窄屏下抽屉是关着的 —— 那样点一行看起来就像没反应，
+   * 所以这里要随手把面板打开（和标题栏那个开关同一套窄屏判断）。
+   */
+  function openWorkspacePreview(path: string, source: WorkspaceDiffSource) {
+    if (window.innerWidth <= 920) {
+      setShowPanel(true);
+    } else {
+      setRightPanelCollapsed(false);
+    }
+    panelTabs.openDiff({ path, source });
+  }
+
+  /** 在右面板里看某个文件的正文（文件树单击、右键「查看文件内容」）。 */
+  function openWorkspaceContent(path: string) {
+    if (window.innerWidth <= 920) {
+      setShowPanel(true);
+    } else {
+      setRightPanelCollapsed(false);
+    }
+    panelTabs.openContent(path);
+  }
+
+  /** 文件树 / 改动列表要选中的那一行（上一个打开的文件 tab）；没有打开过文件时是空串。 */
+  const activeFileTabPath = panelTabs.activeFilePath;
+
+  // 文件树上的改动标记：porcelain 只含已改动/未跟踪的文件，所以这张表天然很小。
+  const changedFilesByPath = useMemo(
+    () => new Map((projectGit.info?.files ?? []).map((file) => [file.path, file.status] as const)),
+    [projectGit.info],
+  );
+
   // 会话头部「运行」按钮左边的命令列表：同样按项目取（存在 projects.json），探测和运行都
   // 落在会话自己的工作区上。
   const projectCommands = useProjectCommands({
@@ -761,8 +832,10 @@ export function App() {
       rightPanelWidth,
       leftSidebarCollapsed,
       rightPanelCollapsed,
+      // 只记工具 tab：文件 tab 一多，最后停在文件 tab 上就会把「上次的工具视图」冲掉。
+      rightPanelTab: panelTabs.activeTab?.kind === "tool" ? panelTabs.activeTab.id : undefined,
     });
-  }, [appearance, leftSidebarCollapsed, leftSidebarWidth, rightPanelCollapsed, rightPanelWidth, theme]);
+  }, [appearance, leftSidebarCollapsed, leftSidebarWidth, panelTabs.activeTab, rightPanelCollapsed, rightPanelWidth, theme]);
 
   useEffect(() => () => {
     for (const url of attachmentPreviewUrlsRef.current.values()) {
@@ -2627,6 +2700,45 @@ export function App() {
     return () => window.removeEventListener("keydown", handleSearchShortcut, true);
   }, [openInTaskSearch]);
 
+  /**
+   * 让某个项目成为「当前项目」。
+   *
+   * 文件树在左、文件预览在右，两边都绑在**当前项目**上（服务端跟着选中的会话走）。
+   * 所以点别的项目上的图标时先切到它最近的一个会话 —— 否则树和右侧预览会指向两个不同的项目。
+   */
+  function focusProjectForPanel(projectId: string): boolean {
+    if (projectId === bootstrap.activeProjectId) {
+      return true;
+    }
+
+    const project = projects.find((candidate) => candidate.id === projectId);
+    const session = project?.sessions.find((candidate) => !candidate.pinned) ?? project?.sessions[0];
+    if (!session) {
+      return false;
+    }
+
+    setActiveMainView("chat");
+    markThreadSwitch();
+    void selectSession(projectId, session.path).catch(() => {
+      // `selectSession` 内部已把错误写进 state。
+    });
+    return true;
+  }
+
+  /** 项目条目上的「文件」图标：在左侧栏打开这个项目的文件树。 */
+  function openProjectFileTree(projectId: string) {
+    if (focusProjectForPanel(projectId)) {
+      setSidebarFileTreeProjectId(projectId);
+    }
+  }
+
+  /** 项目条目上的「技能/包」图标：弹出技能、包与 MCP 的管理弹窗。 */
+  function openProjectCapabilities(projectId: string) {
+    if (focusProjectForPanel(projectId)) {
+      setCapabilitiesDialogProjectId(projectId);
+    }
+  }
+
   async function handleGlobalSearchSelect(result: SessionSearchResult) {
     // 结果可能在「全局技能与扩展」页上被点中，先切回会话视图，否则切了会话也看不见。
     setActiveMainView("chat");
@@ -2702,6 +2814,21 @@ export function App() {
             setActiveMainView("capabilities");
             setShowLeftPanel(false);
           }}
+          fileTreeProjectId={sidebarFileTreeProjectId}
+          onCloseFileTree={() => setSidebarFileTreeProjectId("")}
+          onOpenProjectFileTree={openProjectFileTree}
+          onOpenProjectCapabilities={openProjectCapabilities}
+          fileTreeView={
+            <FilesPane
+              files={workspaceFiles}
+              changedFiles={changedFilesByPath}
+              activePath={activeFileTabPath}
+              onOpenContent={openWorkspaceContent}
+              // 树上的右键「看改动」用默认来源（未暂存）：要按分组选来源得去「改动」tab。
+              onOpenDiff={(path) => openWorkspacePreview(path, "unstaged")}
+              onOpenInIde={(path) => void projectGit.openFile(path)}
+            />
+          }
           onOpenSettings={() => setShowSettings(true)}
           theme={theme}
           onToggleTheme={() => setTheme((value) => (value === "dark" ? "light" : "dark"))}
@@ -2814,6 +2941,7 @@ export function App() {
               onMergeBranch={projectGit.mergeBranch}
               onOpenDiff={projectGit.openDiff}
               onOpenFile={projectGit.openFile}
+              onPreviewDiff={openWorkspacePreview}
               onAutoResolveConflicts={autoResolveConflicts}
               onGenerateMessage={projectGit.generateCommitMessage}
             />
@@ -2881,6 +3009,10 @@ export function App() {
             searchQuery={inTaskSearch.open ? inTaskSearch.query : ""}
             searchActiveIndex={inTaskSearch.activeIndex}
             onSearchCountChange={handleInTaskSearchCount}
+            onChangedFileDiff={(path) => openWorkspacePreview(path, "unstaged")}
+            onChangedFileContent={openWorkspaceContent}
+            onChangedFileInIde={(path) => void projectGit.openFile(path)}
+            workspaceRoot={activeProject.cwd}
           />
           {inTaskSearch.open ? (
             <InTaskSearchBar
@@ -3216,39 +3348,111 @@ export function App() {
           onPointerUp={handlePanelResizeEnd}
           onDoubleClick={() => setRightPanelCollapsed((value) => !value)}
         />
-        <aside
-          className={cn(
-            "context-panel-surface grid min-h-0 min-w-0 content-start overflow-y-auto p-[18px]",
-            rightPanelCollapsed && "invisible pointer-events-none",
-            // 窄屏（≤920px）这个面板是贴右边缘的浮层。它必须从标题栏下面开始：标题栏
-            // 是 z-[100] 的不透明条，浮层 z-20 从 y=0 起就会被整条盖住 —— 面板第一行
-            // 是搜索框，用户看到的就是「搜索显示不全」。左侧项目栏同样用
-            // top-[var(--titlebar-height)] + bottom-0，两边保持一致。
-            "max-[920px]:fixed max-[920px]:top-[var(--titlebar-height)] max-[920px]:bottom-0 max-[920px]:right-0 max-[920px]:left-auto max-[920px]:z-20 max-[920px]:w-[min(88vw,360px)] max-[920px]:translate-x-[105%] max-[920px]:shadow-[var(--app-shadow-drawer-left)] max-[920px]:transition-transform",
-            showPanel && "max-[920px]:visible max-[920px]:translate-x-0 max-[920px]:pointer-events-auto",
-          )}
-          aria-label={t("capability.context.panelAria")}
-        >
-        {/* Only what this project adds — builtin/agent-level capabilities live in
-            the Global skills & packages page and must not be listed twice. */}
-        <ProjectCapabilitiesPanel
-          capabilities={capabilities}
-          projectName={activeProject.name}
-          onSetDefault={setCapabilityDefault}
-          onSetPinned={setCapabilityPinned}
-          onDelete={deleteCapabilityItem}
-          onImportSkill={importSkill}
-          onInstallPackage={installPackage}
-          onUpdatePackage={updatePackage}
-          onInsertPackageCommand={insertPackageCommandIntoComposer}
-          onSaveMcpServer={saveMcpServer}
-          onInspectMcpServer={inspectMcpServer}
-          onReadMcpServer={readMcpServerDetail}
-          onParseMcpImport={parseMcpImport}
+        {/* 右侧面板的壳（视图 strip / 滚动区 / 窄屏浮层定位）在 RightPanel 里。
+            内容仍然在这里组：能力面板的 call site 必须留在本文件 ——
+            `capabilityPanelParity.test.ts` 就靠它的 props 接线核对两个宿主是否一致。 */}
+        <RightPanel
+          collapsed={rightPanelCollapsed}
+          narrowOpen={showPanel}
+          tabs={panelTabs.tabs}
+          activeTabId={panelTabs.activeTabId}
+          onSelectTab={panelTabs.activateTab}
+          onCloseTab={panelTabs.closeTab}
+          onCloseOtherTabs={panelTabs.closeOtherTabs}
+          onCloseAllTabs={panelTabs.closeAllTabs}
+          onOpenToolTab={panelTabs.openToolTab}
+          recentClosedTabs={panelTabs.recentClosedTabs}
+          onReopenClosedTab={panelTabs.reopenClosedTab}
+          onMoveTab={panelTabs.moveTab}
+          views={{
+            // 完整的改动 review 面（按来源切）；提交这种写操作仍在 git 徽标里。
+            git: (
+              <GitPane
+                info={projectGit.info}
+                projectId={bootstrap.activeProjectId}
+                sessionPath={visibleSessionPath}
+                isRefreshing={projectGit.isRefreshing}
+                activePath={activeFileTabPath}
+                onRefresh={() => void projectGit.refresh()}
+                onOpenDiff={openWorkspacePreview}
+                onOpenContent={openWorkspaceContent}
+                onOpenInIde={(path) => void projectGit.openFile(path)}
+              />
+            ),
+            // 一张 tab 都没有时的空状态（`+` 下拉能开的东西列一遍）。
+            [EMPTY_RIGHT_PANEL_VIEW_ID]: <LauncherPane onChooseTool={panelTabs.openToolTab} />,
+            // 一个文件一张 tab：点树 / 改动列表 / 每轮清单里的文件都会新开（同一个文件同一个模式
+            // 则复用，见 `openPanelTab`）。每张 tab 自带 loading / 失败态，互不影响。
+            ...Object.fromEntries(
+              panelTabs.tabs.flatMap((tab) => {
+                if (tab.kind !== "file") {
+                  return [];
+                }
+                const data = panelTabs.dataByTabId[tab.id];
+                return [
+                  [
+                    tab.id,
+                    <PreviewPane
+                      subject={
+                        tab.mode === "diff"
+                          ? diffSubject({ path: tab.path, source: tab.source ?? "unstaged", base: tab.base })
+                          : contentSubject(tab.path)
+                      }
+                      diff={data?.diff ?? null}
+                      content={data?.content ?? null}
+                      isLoading={data?.isLoading ?? true}
+                      error={data?.error ?? ""}
+                      themeMode={theme}
+                      onClose={() => panelTabs.closeTab(tab.id)}
+                      onRetry={() => panelTabs.reloadTab(tab.id)}
+                      onOpenInIde={() => void projectGit.openFile(tab.path)}
+                    />,
+                  ] as const,
+                ];
+              }),
+            ),
+          }}
         />
-        </aside>
           </>
         ) : null}
+
+        {/* 项目条目上的「技能/包」图标开的就是这个弹窗（ZCode 把 workspace 的 skills/packages
+            收在这一层，不再是右面板的一张 tab）。内容仍是同一个 `ProjectCapabilitiesPanel`：
+            和「全局技能与扩展」页共用一套对话框，不许在弹窗里再抄一份（见 capabilityPanelParity）。 */}
+        <Dialog
+          open={Boolean(capabilitiesDialogProjectId)}
+          onOpenChange={(next) => {
+            if (!next) {
+              setCapabilitiesDialogProjectId("");
+            }
+          }}
+        >
+          <DialogContent
+            className="grid h-[min(82svh,720px)] w-[min(94vw,780px)] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden border-border bg-[var(--app-content-surface)] p-0 sm:max-w-none"
+          >
+            <DialogHeader className="border-b border-border px-5 py-3.5 text-left">
+              <DialogTitle>{t("sidebar.capabilitiesDialog.title")}</DialogTitle>
+              <DialogDescription>{t("sidebar.capabilitiesDialog.hint")}</DialogDescription>
+            </DialogHeader>
+            <div className="min-h-0 overflow-y-auto px-5 py-3">
+              <ProjectCapabilitiesPanel
+                capabilities={capabilities}
+                projectName={projects.find((project) => project.id === capabilitiesDialogProjectId)?.name ?? activeProject.name}
+                onSetDefault={setCapabilityDefault}
+                onSetPinned={setCapabilityPinned}
+                onDelete={deleteCapabilityItem}
+                onImportSkill={importSkill}
+                onInstallPackage={installPackage}
+                onUpdatePackage={updatePackage}
+                onInsertPackageCommand={insertPackageCommandIntoComposer}
+                onSaveMcpServer={saveMcpServer}
+                onInspectMcpServer={inspectMcpServer}
+                onReadMcpServer={readMcpServerDetail}
+                onParseMcpImport={parseMcpImport}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <SettingsModal
           open={showSettings}
@@ -6871,6 +7075,11 @@ function ProjectSidebar({
   onFocusComposer,
   activeMainView,
   onOpenCapabilities,
+  fileTreeProjectId,
+  onCloseFileTree,
+  onOpenProjectFileTree,
+  onOpenProjectCapabilities,
+  fileTreeView,
   onOpenSettings,
   theme,
   onToggleTheme,
@@ -6903,6 +7112,13 @@ function ProjectSidebar({
   onFocusComposer: () => void;
   activeMainView: "chat" | "capabilities";
   onOpenCapabilities: () => void;
+  /** 左栏正在显示哪个项目的文件树（空串 = 显示项目/会话列表）。 */
+  fileTreeProjectId: string;
+  onCloseFileTree: () => void;
+  onOpenProjectFileTree: (projectId: string) => void;
+  onOpenProjectCapabilities: (projectId: string) => void;
+  /** 文件树本体（在 App 里组：它要用工作区文件、改动、右侧预览那几个 hook）。 */
+  fileTreeView: ReactNode;
   onOpenSettings: () => void;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -7480,6 +7696,28 @@ function ProjectSidebar({
           {t("sidebar.dropFolderToCreateProject")}
         </div>
       ) : null}
+      {fileTreeProjectId ? (
+        /* 文件树（ZCode 里就在左侧栏）：点文件 → 右侧开一张文件 tab；返回键回项目列表。 */
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-sidebar-file-tree>
+          <div className="flex h-9 shrink-0 items-center gap-1 px-2.5 pt-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={onCloseFileTree}
+              aria-label={t("sidebar.filesBack")}
+              title={t("sidebar.filesBack")}
+              className="size-6 text-muted-foreground"
+            >
+              <ChevronLeft className="size-[18px]" />
+            </Button>
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
+              {projects.find((project) => project.id === fileTreeProjectId)?.name ?? ""}
+            </span>
+          </div>
+          {fileTreeView}
+        </div>
+      ) : (
       <AutoHideScroll className="flex-1" onScroll={hideHoverCard}>
         {/* Acting on a row must close its preview immediately: after a click the pointer is
             still over the row (so no mouseleave ever fires) and the card would otherwise
@@ -7607,6 +7845,33 @@ function ProjectSidebar({
                     34px apart. 24px (`size-6`) with no gap between them leaves 4px per side, so
                     the two glyphs sit ~8px apart and read as a single group. */}
                 <div className={cn("absolute top-1/2 right-1 flex -translate-y-1/2 items-center", sidebarHoverActionClass, project.pinned && "opacity-100")}>
+                  {/* 文件树（左栏）与技能/包（弹窗）的入口挂在项目条目上 —— ZCode 的布局。 */}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={sidebarLock.locked}
+                    className={cn("size-6", sidebarLock.lockClass)}
+                    onClick={() => onOpenProjectFileTree(project.id)}
+                    aria-label={t("sidebar.filesNav")}
+                    title={t("sidebar.filesNav")}
+                    data-project-files-nav={project.id}
+                  >
+                    <FolderTree className="size-[17px]" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={sidebarLock.locked}
+                    className={cn("size-6", sidebarLock.lockClass)}
+                    onClick={() => onOpenProjectCapabilities(project.id)}
+                    aria-label={t("sidebar.projectCapabilitiesNav")}
+                    title={t("sidebar.projectCapabilitiesNav")}
+                    data-project-capabilities-nav={project.id}
+                  >
+                    <Blocks className="size-[17px]" />
+                  </Button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -7716,6 +7981,7 @@ function ProjectSidebar({
         })}
         </div>
       </AutoHideScroll>
+      )}
 
       {hoverCard ? (
         <div

@@ -28,6 +28,8 @@ import {
   type RefObject,
 } from "react";
 import { perfCount, perfEnabled, perfMark, perfSpan } from "../../lib/perf";
+import type { ToolCallLike } from "../../shared/turnChangedFiles";
+import { TurnChangedFiles } from "./TurnChangedFiles";
 import { chatJumpBus } from "../../shared/chatJumpBus";
 import { chatScrollToBottomBus } from "../../shared/chatScrollBus";
 import { useThreadSearch, type ThreadViewportController } from "./useThreadSearch";
@@ -71,6 +73,15 @@ type ChatThreadProps = {
   searchActiveIndex?: number;
   /** 命中数量回传，供浮动小条显示「第 N / 共 M」。 */
   onSearchCountChange?: (count: number) => void;
+  /**
+   * 「N 个文件已更改」面板里的文件动作。三个都是可选的：没有宿主（比如只读回放）时
+   * 面板干脆不出现，而不是给几个点了没反应的按钮。
+   */
+  onChangedFileDiff?: (path: string) => void;
+  onChangedFileContent?: (path: string) => void;
+  onChangedFileInIde?: (path: string) => void;
+  /** 当前项目根（把工具参数里的绝对路径折成相对路径）。 */
+  workspaceRoot?: string;
 };
 
 export type ViewportState = {
@@ -102,7 +113,46 @@ function viewportRootCount(viewport: HTMLElement): number {
  * App renders/s while typing in the composer); a stable `components` object lets
  * the library bail out instead.
  */
-const MESSAGE_COMPONENTS = { UserMessage: UserMessageSlot, AssistantMessage };
+/**
+ * 「这一轮改了哪些文件」那三个动作走 context 而不是 props：`MESSAGE_COMPONENTS` 必须是
+ * 模块级常量（见上面的注释），行组件拿不到 props。
+ */
+const ChatThreadChangedFilesContext = createContext<{
+  workspaceRoot: string;
+  onOpenDiff: (path: string) => void;
+  onOpenContent: (path: string) => void;
+  onOpenInIde: (path: string) => void;
+} | null>(null);
+
+/**
+ * 助手气泡 + 底下的「N 个文件已更改」。
+ *
+ * 面板只在**这一轮结束后**渲染：流式途中工具还在跑，列表会一行行往外蹦（滚动位置跟着跳），
+ * 而且那时的 diff 也不完整。判断用状态而不是「有没有正在跑的工具卡」——后者在两次工具调用
+ * 之间会短暂为假，面板就会闪。
+ */
+function AssistantMessageSlot() {
+  const actions = useContext(ChatThreadChangedFilesContext);
+  const parts = useAuiState((s) => s.message.parts);
+  const isRunning = useAuiState((s) => s.message.status?.type === "running");
+
+  return (
+    <>
+      <AssistantMessage />
+      {actions && !isRunning ? (
+        <TurnChangedFiles
+          parts={parts as readonly ToolCallLike[]}
+          workspaceRoot={actions.workspaceRoot}
+          onOpenDiff={actions.onOpenDiff}
+          onOpenContent={actions.onOpenContent}
+          onOpenInIde={actions.onOpenInIde}
+        />
+      ) : null}
+    </>
+  );
+}
+
+const MESSAGE_COMPONENTS = { UserMessage: UserMessageSlot, AssistantMessage: AssistantMessageSlot };
 
 /**
  * User bubble slot: the ordinary bubble, or the inline editor when this message
@@ -171,6 +221,10 @@ export const ChatThread = memo(function ChatThread({
   searchQuery = "",
   searchActiveIndex = 0,
   onSearchCountChange,
+  onChangedFileDiff,
+  onChangedFileContent,
+  onChangedFileInIde,
+  workspaceRoot = "",
 }: ChatThreadProps) {
   // Idle-window probe: `render.messages` only counts store updates whose
   // `messages` identity changed, so a window with commits but no
@@ -266,8 +320,41 @@ export const ChatThread = memo(function ChatThread({
     };
   }, [capabilities, editDraftText, editingMessageId, isStreaming, onCancelEditMessage, onSubmitEditMessage]);
 
+  // 三个回调每次 App render 都是新函数（宿主里是内联箭头）。直接把它们放进 context 的
+  // value 会让**每一行助手气泡**在每次 App render 时重渲染（记过：一次 App render 已经
+  // 牵动 9 个气泡）。所以 value 的恒定性靠自己保证：三个包装函数建一次就不变，
+  // 真正的实现塞在 ref 里（render 期间写入是有意的 —— 用 effect 写会让首帧的点击落空）。
+  const changedFileActionsRef = useRef<{
+    onOpenDiff: (path: string) => void;
+    onOpenContent: (path: string) => void;
+    onOpenInIde: (path: string) => void;
+  } | null>(null);
+  const hasChangedFileActions = Boolean(onChangedFileDiff && onChangedFileContent && onChangedFileInIde);
+  changedFileActionsRef.current = hasChangedFileActions
+    ? {
+        onOpenDiff: onChangedFileDiff as (path: string) => void,
+        onOpenContent: onChangedFileContent as (path: string) => void,
+        onOpenInIde: onChangedFileInIde as (path: string) => void,
+      }
+    : null;
+
+  const changedFileActions = useMemo(
+    () =>
+      hasChangedFileActions
+        ? {
+            // 项目根是字符串（只在切项目时变），可以直接进 value；三个回调走 ref 保持恒定。
+            workspaceRoot,
+            onOpenDiff: (path: string) => changedFileActionsRef.current?.onOpenDiff(path),
+            onOpenContent: (path: string) => changedFileActionsRef.current?.onOpenContent(path),
+            onOpenInIde: (path: string) => changedFileActionsRef.current?.onOpenInIde(path),
+          }
+        : null,
+    [hasChangedFileActions, workspaceRoot],
+  );
+
   const tree = (
     <AssistantRuntimeProvider runtime={runtime}>
+      <ChatThreadChangedFilesContext.Provider value={changedFileActions}>
       <ChatThreadEditContext.Provider value={editController}>
         <UserMessageActionsProvider onEditMessage={onStartEditMessage}>
           <UserMessageInlineAttachmentProvider
@@ -290,6 +377,7 @@ export const ChatThread = memo(function ChatThread({
           </UserMessageInlineAttachmentProvider>
         </UserMessageActionsProvider>
       </ChatThreadEditContext.Provider>
+      </ChatThreadChangedFilesContext.Provider>
     </AssistantRuntimeProvider>
   );
 

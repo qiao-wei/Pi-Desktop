@@ -27,7 +27,10 @@ import {
   gitRenameBranchBlockReason,
   gitStatusLabelKey,
   gitStatusLetter,
+  gitStatusLetterClass,
   groupGitFiles,
+  isGitFileStatus,
+  GIT_FILE_STATUSES,
   isGitClean,
   type GitBranchSummary,
   type GitFileChange,
@@ -769,4 +772,23 @@ test("服务端提供只读查询 / init / 切分支 / 提交四条路由，路�
     /await deleteGitBranch\(cwd, String\(body\?\.branch \?\? ""\)\)/,
     "删除分支要在会话 workspace 里执行，且目标只从请求体取分支名",
   );
+});
+test("文件状态：认得出全部六个，别的字符串一律不认（归一化时靠它兜底）", () => {
+  assert.equal(GIT_FILE_STATUSES.length, 6);
+  for (const status of GIT_FILE_STATUSES) {
+    assert.equal(isGitFileStatus(status), true, status);
+  }
+  for (const value of ["", "Modified", "unknown", null, undefined, 7, {}, []]) {
+    assert.equal(isGitFileStatus(value), false, String(value));
+  }
+});
+
+test("状态字母的颜色：每个状态都有绿/红/灰/黄/蓝中的一种，且不是空串", () => {
+  const seen = new Set<string>();
+  for (const status of GIT_FILE_STATUSES) {
+    const className = gitStatusLetterClass(status);
+    assert.match(className, /text-(emerald|rose|sky|amber)-6\d\d dark:text-(emerald|rose|sky|amber)-4\d\d|text-muted-foreground/, status);
+    seen.add(className);
+  }
+  assert.equal(seen.size, 5, "modified/added/deleted/untracked/conflicted 各自一种颜色，renamed 与 modified 同色");
 });

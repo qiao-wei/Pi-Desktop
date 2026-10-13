@@ -45,8 +45,9 @@ export const GIT_NETWORK_TIMEOUT_MS = 120000;
 /**
  * 只读子命令白名单。故意不含 `init`：写操作走 `initGitRepo` 的独立通道。
  * `show` 只用来读 `HEAD:<path>` 的旧内容（双击改动文件打开 IDE diff 时的左侧），不改任何东西。
+ * `merge-base` 只用来算分支 diff 的分叉点（`workspaceDiff.mjs` 的 `branch` 来源），也不改任何东西。
  */
-export const READ_ONLY_SUBCOMMANDS = new Set(["rev-parse", "status", "diff", "for-each-ref", "log", "show"]);
+export const READ_ONLY_SUBCOMMANDS = new Set(["rev-parse", "status", "diff", "for-each-ref", "log", "show", "merge-base"]);
 
 /**
  * 会碰磁盘或执行外部程序的参数。本模块的 argv 都是自己拼的，这层是纵深防御：

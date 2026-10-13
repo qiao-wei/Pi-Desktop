@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import type { WorkspaceDiffSource } from "@/shared/workspaceDiff";
 import { useT } from "../i18n/react";
 import {
   gitBadgeKind,
@@ -43,6 +44,7 @@ import {
   gitRenameBranchBlockReason,
   gitStatusLabelKey,
   gitStatusLetter,
+  gitStatusLetterClass,
   groupGitFiles,
   type GitFileChange,
   type GitFileStatus,
@@ -95,27 +97,16 @@ export interface GitStatusBadgeProps {
   onMergeBranch: (branch: string) => Promise<boolean>;
   /** 双击冲突文件：用宿主机 IDE 打开文件本身（编辑冲突标记）。 */
   onOpenFile: (path: string) => Promise<boolean>;
+  /**
+   * 单击改动文件：在右面板里打开这个文件的改动预览（读操作，不弹 IDE）。
+   * `source` 由它所在的分组决定：已暂存组看 index↔HEAD，其余看工作区。
+   */
+  onPreviewDiff: (path: string, source: WorkspaceDiffSource) => void;
   /** 自动解决冲突：新建会话并把冲突 prompt 填进 composer。 */
   onAutoResolveConflicts: () => Promise<void>;
   /** 双击改动文件：用宿主机的 IDE 打开它的 diff（HEAD ↔ 工作区）。 */
   onOpenDiff: (path: string) => void;
   onGenerateMessage: (paths: string[]) => Promise<string | null>;
-}
-
-/** 状态字母的颜色。绿/红之外还带字母本身，颜色不是唯一信息载体。 */
-function statusLetterClass(status: GitFileStatus): string {
-  switch (status) {
-    case "added":
-      return "text-emerald-600 dark:text-emerald-400";
-    case "deleted":
-      return "text-rose-600 dark:text-rose-400";
-    case "untracked":
-      return "text-muted-foreground";
-    case "conflicted":
-      return "text-amber-600 dark:text-amber-400";
-    default:
-      return "text-sky-600 dark:text-sky-400";
-  }
 }
 
 /**
@@ -153,6 +144,7 @@ export function GitStatusBadge({
   onOpenFile,
   onAutoResolveConflicts,
   onOpenDiff,
+  onPreviewDiff,
   onGenerateMessage,
 }: GitStatusBadgeProps) {
   const t = useT();
@@ -620,27 +612,35 @@ export function GitStatusBadge({
           <div className="max-h-64 min-h-[6rem] flex-1 overflow-auto border-t py-1">
             <GitFileGroup
               title={t("git.group.staged")}
+              // 已暂存组看的是 index ↔ HEAD，所以要看的是 staged 那份改动。
+              source="staged"
               files={grouped.staged}
               unselected={unselected}
               onToggle={toggleFile}
               onOpenDiff={onOpenDiff}
               onOpenFile={onOpenFile}
+              onPreviewDiff={onPreviewDiff}
             />
             <GitFileGroup
               title={t("git.group.unstaged")}
+              source="unstaged"
               files={grouped.unstaged}
               unselected={unselected}
               onToggle={toggleFile}
               onOpenDiff={onOpenDiff}
               onOpenFile={onOpenFile}
+              onPreviewDiff={onPreviewDiff}
             />
             <GitFileGroup
               title={t("git.group.untracked")}
+              // 未跟踪文件也要走 unstaged：服务端会自己合成一份「整篇新增」的补丁。
+              source="unstaged"
               files={grouped.untracked}
               unselected={unselected}
               onToggle={toggleFile}
               onOpenDiff={onOpenDiff}
               onOpenFile={onOpenFile}
+              onPreviewDiff={onPreviewDiff}
             />
           </div>
         )}
@@ -944,18 +944,23 @@ export function GitStatusBadge({
 
 function GitFileGroup({
   title,
+  source,
   files,
   unselected,
   onToggle,
   onOpenDiff,
   onOpenFile,
+  onPreviewDiff,
 }: {
   title: string;
+  /** 这一组文件看哪个来源的改动：已暂存组是 index↔HEAD，其余是工作区。 */
+  source: WorkspaceDiffSource;
   files: GitFileChange[];
   unselected: ReadonlySet<string>;
   onToggle: (path: string, checked: boolean) => void;
   onOpenDiff: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onPreviewDiff: (path: string, source: WorkspaceDiffSource) => void;
 }) {
   const t = useT();
   if (files.length === 0) {
@@ -967,9 +972,20 @@ function GitFileGroup({
       <div className="px-3 py-1 text-[0.7rem] font-medium text-muted-foreground">{title}</div>
       {files.map((file) => (
         // 规则：**只有勾选框自己**会选中/取消（所以这里故意用 div、不用 label —— label 会把
-        // 整行都变成勾选框的热区）；行上剩下的动作只有双击（用 IDE 看 diff）。
+        // 整行都变成勾选框的热区）；行上剩下的动作是单击（在右面板看改动）与双击（用 IDE 看）。
         <div
           key={`${file.origPath ? `${file.origPath}→` : ""}${file.path}`}
+          onClick={(event) => {
+            // 勾选框自己的点击不能穿透到行动作，否则勾一个文件就会顺手把预览顶开。
+            if ((event.target as HTMLElement).closest('[role="checkbox"]')) {
+              return;
+            }
+            // 冲突文件在右面板里没得看：要看的是三方合并的标记，不是 HEAD ↔ 工作区的 diff。
+            if (file.conflicted) {
+              return;
+            }
+            onPreviewDiff(file.path, source);
+          }}
           onDoubleClick={(event) => {
             if ((event.target as HTMLElement).closest('[role="checkbox"]')) {
               return;
@@ -1007,7 +1023,7 @@ function GitFileGroup({
             />
           )}
           <span
-            className={cn("w-3 shrink-0 text-center font-mono", statusLetterClass(file.status))}
+            className={cn("w-3 shrink-0 text-center font-mono", gitStatusLetterClass(file.status))}
             title={t(gitStatusLabelKey(file.status))}
           >
             {gitStatusLetter(file.status)}

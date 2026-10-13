@@ -38,6 +38,14 @@ export interface UiPreferences {
   rightPanelWidth: number;
   leftSidebarCollapsed: boolean;
   rightPanelCollapsed: boolean;
+  /**
+   * 右侧面板上次停留的视图 id。
+   *
+   * 故意是 `string` 而不是 `RightPanelTabId`：`lib/` 不该反向依赖 `features/`。真实值由
+   * `features/workspace/rightPanelTabs.ts` 的 `normalizeRightPanelTab()` 在读取处校对
+   * （和 `appearance` 的 validator 同一套思路）。缺省 = 能力面板。
+   */
+  rightPanelTab?: string;
   projectSidebarShowPinned: boolean;
   projectSidebarExpandedProjectIds?: string[];
   /** 设置页里被折叠起来的供应商（按 provider id）；缺省 = 全部展开。 */
