@@ -42,7 +42,7 @@ tests/           node:test 用例
 | --- | --- |
 | Node.js 22 或更高 | 开发、测试，以及所有 `slim` 打包（桥声明了 `engines.node >= 22`） |
 | Rust stable + [Tauri v2 的系统依赖](https://tauri.app/start/prerequisites/) | 只做 Tauri 外壳才需要 |
-| Python 3.13 源 + `uv` | 只做 `bundled` 打包才需要，见[打包机需要什么](#打包机需要什么) |
+| 网络（下载钉版本的 Node / Python 载荷） | 只做 `bundled` 打包才需要，见[打包机需要什么](#打包机需要什么) |
 
 ### 跑起来
 
@@ -117,12 +117,19 @@ node scripts/diag-scan.mjs --since=30m     # 在日志里找异常窗口
 
 ### 两种运行时模式
 
-- **`bundled`**（现状）自带 Node 和 Python，终端用户不需要装。安装也做了隔离：`pip install` 落到 `~/.pi/agent/python`，npm 落到
-  `~/.pi/agent/node` 并用自己的 cache，不碰机器上的 Python、pip、Node、npm 及它们的全局配置。
-  Python 只带标准库和 `pip`，构建时会把其它 site-packages 全部删掉，并验证 `python -m pip`
-  解析到包内。
-- **`slim`** 两个运行时都不带，用机器上已有的 `node`、`npm`、`python3`、`pip`；要求目标机器
-  装了 Node 22+。此时不再有隔离：`npm i -g` 装到用户的全局 prefix。
+- **`bundled`**（现状）带钉版本的 Node 25 与 CPython 3.13 载荷，机器上两者都没有也能用上
+  `node`、`npm`、`python3`、`pip`。载荷是**构建期下载**官方发行版（sha256 记进 `SOURCES.json`），
+  不是从打包机上拷一份现成安装。
+- **机器上已有的解释器优先，而且是按运行时分别判定的。** 用户自己装的 `node` / `python3`
+  （nvm、pyenv、Homebrew、python.org）会被直接使用，它的 PATH、全局 prefix、site-packages
+  我们都不碰；内置载荷只补缺的那一个——只缺 node、只缺 python、或者两个都缺。macOS 的
+  `/usr/bin/python3`（Command Line Tools）和 Windows 的 `WindowsApps` 别名**不算**「用户已有」，
+  判定靠真的 spawn 探测，不是 `existsSync`。
+- 接管某个运行时时，安装落点才会被重定向：`pip install` 落到 `~/.pi/agent/python`，`npm i -g`
+  落到 `~/.pi/agent/node` 并用自己的 cache；随包的解释器目录**从不被写**（这也是签名后的
+  `.app` 还能验签的原因）。Python 只带标准库和 `pip`。
+- **`slim`** 两个运行时都不带，要求目标机器装了 Node 22+；所有运行时都等同「用户自己的」
+  （不再有隔离：`npm i -g` 装到用户的全局 prefix）。
 
 模式**不烘进产物，而是推断**：只要产物里那两个 runtime 目录都在，两个外壳都判成 `bundled`，
 否则判成 `system` —— 于是打包配置和运行期读的是同一个事实，不可能互相矛盾。打包链会按你选
@@ -191,22 +198,26 @@ Windows 没有 launcher 脚本：两个外壳都是 `node-runtime\node.exe` + `b
 
 ### 打包机需要什么
 
-- **`bundled`** 需要网络和**目标平台原生的**运行时源。`python:build` 和 `node:build` 会执行
-  它们刚拷过去的那份解释器来证明它自包含，所以**不能交叉构建** —— Windows 的运行时要在
-  Windows 上组装。
-  - Python：macOS 用 `uv` 装的受管 CPython 3.13（`uv python install 3.13`），可用
-    `PI_DESKTOP_PYTHON_SOURCE_DIR` 指定；**不能用 Homebrew Python**，它的扩展模块链到
-    Homebrew 的库。Windows 要用完整安装目录，不是 embeddable ZIP；Linux 要用可重定位的
-    CPython prefix。
-  - Node：构建推断不出来时用 `PI_DESKTOP_NODE_SOURCE_DIR` 指向官方 Node 发行包根目录 ——
-    Linux 上是必须的。
-- **`slim`** 两样都不需要：不用运行时源、不用额外的网络，打包机上只要有 Node 22+。
+- **`bundled`** 需要网络：载荷是下载来的，不是从机器上拿的。
+  - Node：目标平台的官方发行版，版本是 `scripts/lib/runtimePayloads.mjs` 里的 `NODE_VERSION`
+    （默认 npmmirror，用 `PI_DESKTOP_NODE_DIST_MIRROR` 换源）。
+  - Python：python-build-standalone 的 `install_only_stripped` CPython，版本 + release tag 同样
+    钉在那个模块里（默认 npmmirror，`PI_DESKTOP_PYTHON_DIST_MIRROR` 可指向 GitHub Releases 或内网镜像）。
+  - `scripts/lib/runtimePins.json` 记每个目标平台的预期 sha256：对不上直接构建失败；还没钉过的
+    目标只记录到 `SOURCES.json` 并打警告（第一个 pin 就是这么产生的）。
+  - 离线/内网：`PI_DESKTOP_NODE_SOURCE_DIR` / `PI_DESKTOP_PYTHON_SOURCE_DIR` 指向已经解开的
+    发行版根目录，跳过下载。
+  - 打包机上**不需要**装目标原生解释器。只有目标平台就是构建机时才会真的执行载荷
+    （`isNativeTarget`）；交叉组装的载荷走文件级门禁（可重定位、shebang、软链）。
+- **`slim`** 两样都不需要：不用载荷、不用额外网络，打包机上有 Node 22+ 就行。
 
 ### 交叉构建
 
-**`bundled`** 只有目标平台自己的机器能出：`python:build` 和 `node:build` 要执行它们刚拷过去的
-解释器，而 Windows 的 `python.exe` 在 macOS 上跑不起来。这种组合 `--cross` 会在动手之前就拒掉，
-并把三条出路一起打出来。**`slim` 交叉没问题**：它不带 runtime。
+运行时载荷是按目标平台组装的（每个归档都按目标寻址，所以 macOS 上能解开 win32 载荷），但
+`--cross` 仍然拒掉 `bundled`：目标平台的 `node.exe` / `python.exe` 在这里跑不起来，
+`node:build` / `python:build` 就没法证明刚打进包的这份解释器真的能用。这是一条**验收边界**，
+不是技术上做不到——门禁的报错本身就写明了这一点和几条出路。
+**`slim` 交叉没问题**：它不带 runtime。
 
 | 打包机 | macOS 目标 | Windows 目标 |
 | --- | --- | --- |
@@ -239,22 +250,30 @@ Electron 另外有 `app.asar`，里面**只有主进程**。它的 `files` 是**
 `src-electron/` 下出现第三方依赖就报红。开发期读的是仓库的 `node_modules`，所以那种错误只会在
 打包版暴露。
 
-### 从 bundled 升级到 slim
+### 从 bundled 升级 / 机器后来自己装了运行时
 
-旧 bundled 安装写下的 launcher 指向的 `node-runtime` 新包里已经没有，而 `~/.pi/agent/bin` 在
-PATH 最前 —— 留下的后果是用 `exit 127` 把用户自己的 `node` 遮掉。因此桥只删它能证明是**自己的**
-那些（内容里有 `PI_DESKTOP_BUNDLED_*` 标记，或软链指向 `-runtime` 目录），用户自己的文件不碰；
-逻辑见 `server/agentShimFiles.mjs`。
+旧 bundled 安装写下的 launcher 指向的 `node-runtime` 新包里已经没有（slim 包，或者用户后来自己
+装了 Node），而 `~/.pi/agent/bin` 在 PATH 最前 —— 留下的后果是用 `exit 127` 把真正的解释器遮掉。
+因此桥只删它能证明是**自己的**那些（内容里有 `PI_DESKTOP_BUNDLED_*` 标记，或软链指向 `-runtime`
+目录），而且是**按运行时**分别处理，用户自己的文件不碰；逻辑见 `server/agentShimFiles.mjs`。
+
+「按运行时接管」带来的后果：
+
+- 用内置 npm 装过的全局 CLI 仍然可调用（它的输出目录是**追加**在用户 PATH 之后，不是前插）；
+- 装进 `~/.pi/agent/python` 的包对用户自己的解释器不可见，也不做迁移 —— 目录留在那里，用户要
+  用可以自己取;
+- `pi` launcher 和桥自己永远跑随包的 Node，与 agent 的 `node` 解析到谁无关（桥声明了
+  `engines.node >= 22`，用户的可能更旧）。
 
 缺 Node 要报出来，而不是静默活着：Electron 走 `reportStartupFailure`，Tauri 弹
 `MessageDialog` 再退出，而不是 panic 成一次无声闪退。
 
 macOS 和 Linux 上会回读登录 shell 的 PATH，因为 GUI 启动的应用拿不到它（`launchctl getenv PATH`
 是空的，`/etc/paths` 里也没有 `/opt/homebrew/bin`），用户自己装在包外的工具——`/opt/homebrew/bin`、
-`~/.local/bin`——只能这样找到。问多深取决于模式：`system` 要机器上的 Node，而 nvm / pyenv / asdf
-的 Node 只写在交互式 rc 里；`bundled` 自带运行时，因此只读非交互的登录 shell——交互式那些文件才是
-贵的（版本管理器每次开 shell 都要重新挑一次 Node），而它们对自带运行时的包没有任何补充。两种模式下
-`PI_DESKTOP_HOST_PATH` 都能覆盖。
+`~/.local/bin`——只能这样找到。回读的是**交互式**那一次（`-lic`）：nvm / pyenv / asdf 只从交互式
+rc 文件里导 PATH，而那些解释器正是我们要让位的对象。交互式也是最贵的那次，所以当应用手上这条 PATH
+已经能解析出一个**用户的** node **和**一个用户的 python 时就跳过回读。`PI_DESKTOP_HOST_PATH` 可以
+整个覆盖掉。
 
 ### 签名档位（macOS）
 
@@ -307,23 +326,25 @@ Electron 自带的 220 个 locale 目录裁到 `en` / `zh_CN` / `zh_TW` —— �
 | `VITE_PI_DESKTOP_API_BASE` | 渲染层：桥的基地址，只跑 `dev:web` 时用 |
 | `PI_DESKTOP_RUNTIME_MODE` | 强制 `bundled` 或 `system`，不走推断 |
 | `PI_DESKTOP_SIGN`、`PI_DESKTOP_SIGN_IDENTITY` | macOS 的签名档位（`local`\|`release`）与用哪张证书；平时由 `--sign` 和 `Developer ID Application` 默认值下发，只用于覆盖 |
-| `PI_DESKTOP_HOST_PATH` | `system` 模式下覆盖用来找 host `node` 的 PATH |
+| `PI_DESKTOP_HOST_PATH` | 覆盖桥用来判定和注入的 PATH —— 也就是去哪里找用户自己的 `node`/`python3` |
 | `PI_DESKTOP_DIAGNOSTICS_ENABLED=1` | 打开桥的 NDJSON 探针日志 |
 | `PI_DESKTOP_DIAGNOSTIC_LOG` | 日志位置（默认 `~/.pi/agent/pi-desktop-runtime.ndjson`） |
 | `PI_DESKTOP_DIAGNOSTICS_STDERR=1` | 探针行同时打到 stderr |
 | `VITE_PI_DESKTOP_PERF=1`、`VITE_PI_DESKTOP_DIAGNOSTICS_ENABLED=1` | 渲染层性能探针，供 `scripts/diag-scan.mjs` 使用 |
 | `PI_DESKTOP_COMPACTION_RESERVE_TOKENS`、`PI_DESKTOP_COMPACTION_KEEP_RECENT_TOKENS` | 压缩阈值（默认 2200 / 1400） |
-| `PI_DESKTOP_PYTHON_SOURCE_DIR`、`PI_DESKTOP_NODE_SOURCE_DIR` | `bundled` 构建用的运行时源 |
+| `PI_DESKTOP_NODE_DIST_MIRROR`、`PI_DESKTOP_PYTHON_DIST_MIRROR` | `node:build` / `python:build` 从哪里下载钉版本的归档（默认 npmmirror；python 上游是 python-build-standalone 的 GitHub Releases） |
+| `PI_DESKTOP_PYTHON_SOURCE_DIR`、`PI_DESKTOP_NODE_SOURCE_DIR` | 离线出路：用已经解开的发行版根目录组装载荷，不下载 |
 | `PI_DESKTOP_TARGET_TRIPLE` | 出包链下发给 `node:build` / `python:build` / `bridge:build` 的目标三元组（优先于 Tauri 自己的 `TAURI_ENV_TARGET_TRIPLE`） |
 | `PI_DESKTOP_PACK_PREPARED=1` | 由 `scripts/pack.mjs` 设置，让 `tauri:prepare` 空转，准备步骤每个包只跑一次 |
-| `UV_PYTHON_INSTALL_DIR` | `uv` 存放受管 CPython 的位置（`bundled` 构建用） |
 | `PI_DESKTOP_SIDECAR_BIN`、`PI_DESKTOP_GATE_NODE_RUNTIME`、`PI_DESKTOP_GATE_PYTHON_RUNTIME`、`PI_DESKTOP_GATE_CWD`、`PI_DESKTOP_GATE_TIMEOUT_MS` | `sidecar:verify` 起什么、在哪起 |
 
 以下是外壳或 launcher 自己设的，不要手工设：`PI_DESKTOP_BUNDLED_NODE_BIN`、
-`PI_DESKTOP_BUNDLED_NPM_CLI`、`PI_DESKTOP_BUNDLED_PYTHON_BIN`、`PI_DESKTOP_BUNDLED_PYTHON_HOME`
-（**它们缺席**正是让技能去用机器自带解释器的开关）、`PI_DESKTOP_APP_SKILLS_DIR`、
-`PI_DESKTOP_APP_PACKAGES_DIR`、`PI_DESKTOP_CAPABILITIES_DEFAULTS_FILE`。生成的 POSIX launcher
-还接受 `PI_DESKTOP_BRIDGE_DIR`、`PI_DESKTOP_BRIDGE_NODE`，用于换位置。
+`PI_DESKTOP_BUNDLED_NPM_CLI`、`PI_DESKTOP_BUNDLED_PYTHON_BIN`、`PI_DESKTOP_BUNDLED_PYTHON_HOME` ——
+它们只说载荷**在哪**；用不用内置的那份，由桥拿着传给它的 PATH 按运行时分别探测决定
+（`server/agentEnv.mjs`）。slim 包一个载荷都不带，两个运行时自然都落到机器自带的解释器上。
+另外还会设：`PI_DESKTOP_APP_SKILLS_DIR`、`PI_DESKTOP_APP_PACKAGES_DIR`、
+`PI_DESKTOP_CAPABILITIES_DEFAULTS_FILE`。生成的 POSIX launcher 还接受 `PI_DESKTOP_BRIDGE_DIR`、
+`PI_DESKTOP_BRIDGE_NODE`，用于换位置。
 
 ## 其它文档
 

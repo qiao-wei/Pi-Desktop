@@ -6,7 +6,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import { homedir, tmpdir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { agentRuntimePathDirs, mergePath } from "./agentEnv.mjs";
+import { agentRuntimePathEntries, mergePath, packageManagerBinDirs, selectAgentRuntimes } from "./agentEnv.mjs";
 import { removeBundledShims, runtimeShimSpecs } from "./agentShimFiles.mjs";
 import { createAgentShims } from "./agentShims.mjs";
 import { capabilityReloadPlan, reloadRuntimeSkills, sameCapabilityIds } from "./capabilityReload.mjs";
@@ -247,18 +247,54 @@ const http429StatusPatterns = [
 // app still cannot call the tool, which looks exactly like "not installed". This
 // is the one place both shells (Electron, Tauri) and `npm run dev` share, so the
 // rule lives here rather than being duplicated per shell.
+//
+// Which interpreter `node` / `python3` / `pip` mean is decided once, here: the user's own
+// runtime wins, and the bundled payload only fills the gap (server/agentEnv.mjs has the
+// reasoning, including why macOS `/usr/bin/python3` does not count as "the user's Python").
+// The shells only put `agentDir/bin` in front of the login-shell PATH, so the judgement runs on
+// the same PATH it later injects into - see `ownDirs` below.
+const bundledNodeBinEnv = process.env.PI_DESKTOP_BUNDLED_NODE_BIN?.trim() || "";
+const bundledNpmCliEnv = process.env.PI_DESKTOP_BUNDLED_NPM_CLI?.trim() || "";
+const bundledPythonBinEnv = process.env.PI_DESKTOP_BUNDLED_PYTHON_BIN?.trim() || "";
+const bundledPythonHomeEnv = process.env.PI_DESKTOP_BUNDLED_PYTHON_HOME?.trim() || "";
+const bundledRuntimes = {
+  node:
+    existsSync(bundledNodeBinEnv) && existsSync(bundledNpmCliEnv)
+      ? { bin: bundledNodeBinEnv, npmCli: bundledNpmCliEnv }
+      : null,
+  python: existsSync(bundledPythonBinEnv) ? { bin: bundledPythonBinEnv, home: bundledPythonHomeEnv } : null,
+};
+const runtimeSelection = selectAgentRuntimes({
+  pathValue: process.env.PATH,
+  // Everything this app (or a previous launch) put in front of the host PATH must not be judged
+  // as "the user's node" - otherwise the bundled node we prepended last time counts as a system
+  // runtime on the next start and the payload is never used again.
+  ownDirs: [
+    agentBinDir,
+    ...(bundledRuntimes.node ? [dirname(bundledRuntimes.node.bin)] : []),
+    ...packageManagerBinDirs(agentDir, process.platform),
+  ],
+  bundled: bundledRuntimes,
+  // Slim packaging ships no payloads: never fall back to one, even if the environment says so.
+  forceSystem: runtimeMode(),
+  platform: process.platform,
+});
+
 function applyAgentRuntimePath() {
-  const runtimeDirs = agentRuntimePathDirs({
+  const { prepend, append } = agentRuntimePathEntries({
     agentDir,
-    bundledNodeBin: process.env.PI_DESKTOP_BUNDLED_NODE_BIN?.trim() || undefined,
+    selection: runtimeSelection,
     platform: process.platform,
   });
-  // Anything we spawn (npm, pip, MCP servers, skill scripts) inherits this. Without it a stray
-  // `python -c import ...` writes __pycache__ into the read-only app bundle, baking this
-  // machine's paths into a shipped tree.
-  process.env.PYTHONPYCACHEPREFIX = join(agentPythonCacheDir, "pycache");
+  if (runtimeSelection.python.source === "bundled") {
+    // Anything we spawn (npm, pip, MCP servers, skill scripts) inherits this. Without it a stray
+    // `python -c import ...` writes __pycache__ into the read-only app bundle, baking this
+    // machine's paths into a shipped tree. The user's own Python is left alone: its caches are
+    // its own business.
+    process.env.PYTHONPYCACHEPREFIX = join(agentPythonCacheDir, "pycache");
+  }
   const usable = [];
-  for (const dir of runtimeDirs) {
+  for (const dir of prepend) {
     try {
       mkdirSync(dir, { recursive: true });
       usable.push(dir);
@@ -267,12 +303,20 @@ function applyAgentRuntimePath() {
       // report a missing bundled runtime themselves.
     }
   }
-  process.env.PATH = mergePath(usable, process.env.PATH, process.platform);
+  const separator = process.platform === "win32" ? ";" : ":";
+  const merged = mergePath(usable, process.env.PATH, process.platform);
+  // Install output from a runtime we did *not* take over stays behind the host PATH: it is the
+  // user's environment that should win, while a tool installed by an earlier bundled version
+  // stays callable.
+  process.env.PATH = append.length ? mergePath([], [merged, ...append].join(separator), process.platform) : merged;
   if (diagnosticsEnabled) {
     // `ps -E` only ever shows the environment a process was exec'd with, never a
     // later mutation, so the assembled PATH has to be reported by the process
-    // itself for it to be checkable on a user's machine.
-    console.log(`[pi-desktop:diag] runtime PATH=${process.env.PATH ?? ""}`);
+    // itself for it to be checkable on a user's machine. The selection is part of
+    // that fact: "the app ignored my nvm node" is not diagnosable from PATH alone.
+    console.log(
+      `[pi-desktop:diag] runtime node=${runtimeSelection.node.source} python=${runtimeSelection.python.source} PATH=${process.env.PATH ?? ""}`,
+    );
   }
 }
 
@@ -450,80 +494,63 @@ const RUNTIME_SHIM_SPECS = runtimeShimSpecs();
 // Writing the launchers must never take the bridge down: without them skills lose
 // node/python, but a window that cannot reach the API is a worse failure, and an
 // uncaught throw here used to be silent.
+//
 try {
-  if (runtimeMode()) {
-    // Slim packaging: the machine's own node/python/npm/pip are what skills must reach, so the
-    // launchers we wrote in a previous, bundled installation have to go. Leaving them behind is
-    // worse than never writing them: `~/.pi/agent/bin` is first on PATH, so a launcher pointing
-    // at a `node-runtime` this build no longer ships shadows the user's own node with exit 127.
-    ensurePiShim();
-    removeBundledShims({
-      dir: agentBinDir,
-      readFileSync,
-      readlinkSync,
-      rmSync,
-      join,
-      warn: (message) => console.error(`[pi-desktop] ${message}`),
-    });
-  } else {
-    ensureBundledPythonShims();
-  }
+  ensurePiShim();
+  // Per runtime, not per install: a machine with node but no python gets the python launchers
+  // and one the machine's own node. The launchers for a runtime we did *not* take over are
+  // removed - `~/.pi/agent/bin` is first on PATH, so a leftover launcher pointing at a payload
+  // (or a deleted one) would shadow the user's own interpreter with `exit 127`, which looks
+  // exactly like "the tool is not installed".
+  syncRuntimeShims("node", runtimeSelection.node.source === "bundled");
+  syncRuntimeShims("python", runtimeSelection.python.source === "bundled");
 } catch (error) {
   console.error(
     `[pi-desktop] could not refresh ${agentBinDir} launchers: ${error instanceof Error ? error.message : String(error)}`,
   );
 }
 
+/** Remove this family's launchers (it is not ours to provide), or write them. */
+function syncRuntimeShims(family, takenOver) {
+  if (!takenOver) {
+    removeBundledShims({
+      dir: agentBinDir,
+      family,
+      readFileSync,
+      readlinkSync,
+      rmSync,
+      join,
+      warn: (message) => console.error(`[pi-desktop] ${message}`),
+    });
+    return;
+  }
+
+  const bundled = family === "node" ? bundledRuntimes.node : bundledRuntimes.python;
+  if (!bundled) {
+    return;
+  }
+  const shimSpecs = RUNTIME_SHIM_SPECS.filter((shim) => shim.family === family);
+  for (const shim of shimSpecs) {
+    const shimPath = join(agentBinDir, shim.name);
+    const content =
+      family === "node"
+        ? process.platform === "win32"
+          ? agentShims.renderWindowsNodeShim(bundled.bin, bundled.npmCli, shim.kind)
+          : agentShims.renderPosixNodeShim(bundled.bin, bundled.npmCli, shim.kind)
+        : process.platform === "win32"
+          ? agentShims.renderWindowsShim(bundled.bin, shim.kind, bundled.home)
+          : agentShims.renderPosixShim(bundled.bin, shim.kind, bundled.home);
+    if (process.platform === "win32") {
+      writeFileSync(shimPath, content, "utf-8");
+    } else {
+      writeFileSync(shimPath, content, { encoding: "utf-8", mode: 0o755 });
+    }
+  }
+}
+
 /** True when this install relies on the host's node/python instead of shipped runtimes. */
 function runtimeMode() {
   return process.env.PI_DESKTOP_RUNTIME_MODE?.trim().toLowerCase() === "system";
-}
-
-function ensureBundledPythonShims() {
-  const bundledPythonBin = process.env.PI_DESKTOP_BUNDLED_PYTHON_BIN?.trim();
-  ensurePiShim();
-  ensureBundledNodeShims();
-
-  if (!bundledPythonBin || !existsSync(bundledPythonBin)) {
-    return;
-  }
-  const bundledPythonHome = process.env.PI_DESKTOP_BUNDLED_PYTHON_HOME?.trim();
-
-  const shimSpecs = RUNTIME_SHIM_SPECS.filter((shim) => shim.family === "python");
-
-  for (const shim of shimSpecs) {
-    const shimPath = join(agentBinDir, shim.name);
-    if (process.platform === "win32") {
-      writeFileSync(shimPath, agentShims.renderWindowsShim(bundledPythonBin, shim.kind, bundledPythonHome), "utf-8");
-    } else {
-      writeFileSync(shimPath, agentShims.renderPosixShim(bundledPythonBin, shim.kind, bundledPythonHome), {
-        encoding: "utf-8",
-        mode: 0o755,
-      });
-    }
-  }
-}
-
-function ensureBundledNodeShims() {
-  const bundledNodeBin = process.env.PI_DESKTOP_BUNDLED_NODE_BIN?.trim();
-  const bundledNpmCli = process.env.PI_DESKTOP_BUNDLED_NPM_CLI?.trim();
-  if (!bundledNodeBin || !bundledNpmCli || !existsSync(bundledNodeBin) || !existsSync(bundledNpmCli)) {
-    return;
-  }
-
-  const shimSpecs = RUNTIME_SHIM_SPECS.filter((shim) => shim.family === "node");
-
-  for (const shim of shimSpecs) {
-    const shimPath = join(agentBinDir, shim.name);
-    if (process.platform === "win32") {
-      writeFileSync(shimPath, agentShims.renderWindowsNodeShim(bundledNodeBin, bundledNpmCli, shim.kind), "utf-8");
-    } else {
-      writeFileSync(shimPath, agentShims.renderPosixNodeShim(bundledNodeBin, bundledNpmCli, shim.kind), {
-        encoding: "utf-8",
-        mode: 0o755,
-      });
-    }
-  }
 }
 
 function ensurePiShim() {

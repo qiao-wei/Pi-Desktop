@@ -116,21 +116,27 @@ export function parseShebang(text) {
   };
 }
 
-/** Is there an interpreter with this name inside the bundle (i.e. shipped)? */
+/**
+ * Is there an interpreter with this name inside the bundle (i.e. shipped)? Windows keeps the
+ * `.exe` suffix, so a payload prepared for win32 has `bin\node.exe` where POSIX has `bin/node` -
+ * both spellings count, otherwise a correct Windows payload looks like a host dependency.
+ */
 export function hasInTreeInterpreter(runtimeDir, name, extraDirs = []) {
   if (!name) {
     return false;
   }
   const roots = [runtimeDir, ...(Array.isArray(extraDirs) ? extraDirs : [])].filter(Boolean);
   const dirs = roots.flatMap((root) => [root, join(root, "bin"), join(root, "Scripts"), join(root, "sbin")]);
-  return dirs.some((dir) => {
-    const candidate = join(dir, name);
-    try {
-      return existsSync(candidate);
-    } catch {
-      return false;
-    }
-  });
+  const names = process.platform === "win32" || /\.exe$/i.test(name) ? [name] : [name, `${name}.exe`];
+  return dirs.some((dir) =>
+    names.some((candidate) => {
+      try {
+        return existsSync(join(dir, candidate));
+      } catch {
+        return false;
+      }
+    }),
+  );
 }
 
 /** Reason this shebang needs a host/build-machine interpreter, or null if safe. */

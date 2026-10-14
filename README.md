@@ -43,7 +43,7 @@ tests/           node:test suites
 | --- | --- |
 | Node.js 22 or newer | dev, tests, and any `slim` build (the bridge declares `engines.node >= 22`) |
 | Rust stable + the [Tauri v2 prerequisites](https://tauri.app/start/prerequisites/) | the Tauri shell only |
-| Python 3.13 source + `uv` | `bundled` packaging only - see [Build machine requirements](#build-machine-requirements) |
+| Network access (pinned Node/Python payloads) | `bundled` packaging only - see [Build machine requirements](#build-machine-requirements) |
 
 ### Run it
 
@@ -122,15 +122,20 @@ Two independent choices: **host** (Tauri or Electron) and **runtime mode** (`bun
 
 ### Runtime modes
 
-- **`bundled`** (default) ships its own Node and Python, so end users need neither. It also
-  isolates package installs: `pip install` goes to
-  `~/.pi/agent/python`, npm to `~/.pi/agent/node` with its own cache, and the host's Python, pip,
-  Node, npm and global configuration are never touched. Python ships with its standard library and
-  `pip` only - the build strips every other site package and verifies that `python -m pip` resolves
-  inside the bundle.
-- **`slim`** ships neither runtime and uses the machine's own `node`, `npm`, `python3` and `pip`; it
-  requires Node 22+ on the target machine. Nothing is isolated any more: `npm i -g` installs into the
-  user's global prefix.
+- **`bundled`** (default) ships pinned Node 25 and CPython 3.13 payloads, so a machine with neither
+  still gets `node`, `npm`, `python3` and `pip`. The payloads are downloaded at build time (official
+  distributions, sha256 recorded in `SOURCES.json`), not copied from the build machine.
+- **The machine's own interpreter wins, per runtime.** If the user has a `node` / `python3` *they*
+  installed (nvm, pyenv, Homebrew, python.org), that is what the agent gets, with their PATH, their
+  global prefix and their site-packages untouched. The bundled payload only fills a gap - node only,
+  python only, or both. macOS `/usr/bin/python3` (the Command Line Tools build) and Windows'
+  `WindowsApps` stubs are not "the user has Python"; they are probed, not just checked for existence.
+- When a payload *is* taken over, installs are redirected: `pip install` goes to
+  `~/.pi/agent/python`, `npm i -g` to `~/.pi/agent/node` with its own cache, and the shipped runtime
+  directory is never written (that is also what keeps a signed `.app` verifiable). Python ships with
+  its standard library and `pip`.
+- **`slim`** ships neither runtime and requires Node 22+ on the target machine; every runtime behaves
+  as "the user's own" (nothing is isolated: `npm i -g` uses the user's global prefix).
 
 The mode is **inferred, not baked into the artifact**: both shells report `bundled` when *both*
 runtime directories are present in the bundle and `system` otherwise, so the packaging config and the
@@ -215,23 +220,30 @@ no `pi-desktop-server.exe` exists in any bundle.
 
 ### Build machine requirements
 
-- **`bundled`** needs network access and target-native runtime sources. `python:build` and
-  `node:build` execute the interpreter they just copied to prove it is self-contained, so they
-  **cannot cross-build** - assemble the Windows runtimes on Windows.
-  - Python: on macOS the build uses a managed CPython 3.13 installed by `uv`
-    (`uv python install 3.13`); set `PI_DESKTOP_PYTHON_SOURCE_DIR` to override. It must not be
-    Homebrew Python, whose extension modules link to Homebrew libraries. Windows needs a full Python
-    installation directory rather than the embeddable ZIP; Linux needs a relocatable CPython prefix.
-  - Node: set `PI_DESKTOP_NODE_SOURCE_DIR` to an official Node distribution root when the build
-    cannot infer one - Linux always requires it.
-- **`slim`** needs neither: no runtime sources, no network beyond `npm install`, just Node 22+ on the
-  build machine.
+- **`bundled`** needs network access: the payloads are downloaded, not taken from the machine.
+  - Node: the official distribution for the target platform, `NODE_VERSION` in
+    `scripts/lib/runtimePayloads.mjs` (npmmirror by default, `PI_DESKTOP_NODE_DIST_MIRROR` to change).
+  - Python: python-build-standalone's `install_only_stripped` CPython, version + release tag pinned
+    in the same module (npmmirror by default, `PI_DESKTOP_PYTHON_DIST_MIRROR` for GitHub Releases or
+    an internal mirror).
+  - `scripts/lib/runtimePins.json` holds the expected sha256 per target: a mismatch fails the build.
+    A target without a pin is recorded in `SOURCES.json` and warned about (that is how the first pin
+    is produced).
+  - Offline/air-gapped: `PI_DESKTOP_NODE_SOURCE_DIR` / `PI_DESKTOP_PYTHON_SOURCE_DIR` point at an
+    already-unpacked distribution root for the target and skip the download.
+  - Nothing target-native has to be installed on the build machine. The payload is only *executed*
+    when the target also runs there (`isNativeTarget`); a cross-assembled payload is gated
+    file-by-file instead (relocation, shebangs, symlinks).
+- **`slim`** needs neither: no payloads, no network beyond `npm install`, just Node 22+ on the build
+  machine.
 
 ### Cross-builds
 
-Only each target's own machine can build a **`bundled`** package: `python:build` and `node:build`
-execute the interpreter they just copied, and a Windows `python.exe` does not run on macOS. `--cross`
-refuses that combination up front, with the three ways out, instead of failing halfway through.
+The runtime payloads are assembled per target platform (each archive is addressed by target, so a
+win32 payload can be unpacked on macOS), but `--cross` still refuses `bundled`: the target's
+`node.exe` / `python.exe` cannot be executed here, so `node:build` / `python:build` cannot check that
+the interpreter they just packed actually runs. That is a verification boundary, not a technical
+impossibility - the gate's message says so and lists the ways out.
 **`slim` cross-builds fine**: it ships no runtimes.
 
 | Build machine | macOS target | Windows target |
@@ -267,13 +279,23 @@ Vite had already bundled into `<resources>/renderer`.
 `src-electron/` ever requires a third-party module; dev reads the repository's `node_modules`, so
 that mistake would only show up in the packaged app.
 
-### Upgrading a bundled install to slim
+### Upgrading a bundled install / a machine that later gets its own runtimes
 
-A launcher written by a previous bundled installation points at a `node-runtime` the slim bundle no
-longer ships, and `~/.pi/agent/bin` is first on PATH - leaving it behind shadows the user's own `node`
-with `exit 127`. The bridge therefore deletes only the launchers it can prove are its own (a
-`PI_DESKTOP_BUNDLED_*` marker in the content, or a symlink into a `-runtime` directory) and leaves
-user files alone; see `server/agentShimFiles.mjs`.
+A launcher written by an earlier bundled installation points at a `node-runtime` this build no longer
+uses (slim, or the user installed their own Node in the meantime), and `~/.pi/agent/bin` is first on
+PATH - leaving it behind shadows the real interpreter with `exit 127`. The bridge therefore deletes
+only the launchers it can prove are its own (a `PI_DESKTOP_BUNDLED_*` marker in the content, or a
+symlink into a `-runtime` directory), per runtime family, and leaves user files alone; see
+`server/agentShimFiles.mjs`.
+
+What follows from taking over per runtime instead of per install:
+
+- a `npm i -g <cli>` installed with the bundled Node stays callable (its output directory is appended
+  behind the user's PATH instead of being prepended);
+- packages installed into `~/.pi/agent/python` are *not* visible to the user's own interpreter, and
+  nothing is migrated - the directory stays there for the user to keep using;
+- the `pi` launcher and the app's own bridge always run on the shipped Node, whatever the agent's
+  `node` resolves to (the bridge declares `engines.node >= 22`; the user's may be older).
 
 A missing Node is reported instead of survived silently: Electron shows it through
 `reportStartupFailure`, Tauri shows a `MessageDialog` before exiting rather than panicking into a
@@ -282,12 +304,10 @@ silent flash.
 On macOS and Linux the host PATH is read back from the login shell, because a GUI-launched app does
 not inherit one (`launchctl getenv PATH` is empty, and `/etc/paths` has no `/opt/homebrew/bin`), so a
 tool the user installed outside the bundle - `/opt/homebrew/bin`, `~/.local/bin` - is only findable
-that way. How much of the shell gets asked depends on the mode: `system` needs the machine's own
-Node, which for nvm / pyenv / asdf users only exists in the interactive rc files, while `bundled`
-ships its own runtimes and therefore reads the non-interactive login shell only - the interactive
-files are the expensive ones (a version manager re-picking a Node on every shell start) and would
-add nothing the bundle does not already carry. `PI_DESKTOP_HOST_PATH` overrides the result in both
-modes.
+that way. The read is the *interactive* one (`-lic`): nvm / pyenv / asdf export their PATH from the
+interactive rc files only, and those interpreters are exactly what the app defers to. It is also the
+expensive read, so it is skipped when the PATH the app already has resolves a *user* node **and** a
+*user* python. `PI_DESKTOP_HOST_PATH` overrides the result.
 
 ### macOS signing tiers
 
@@ -348,22 +368,24 @@ on its own.
 | `VITE_PI_DESKTOP_API_BASE` | renderer: bridge base URL, for `dev:web` without `dev` |
 | `PI_DESKTOP_RUNTIME_MODE` | force `bundled` or `system` instead of inferring it |
 | `PI_DESKTOP_SIGN`, `PI_DESKTOP_SIGN_IDENTITY` | macOS signing tier (`local`\|`release`) and the certificate to sign with; the pack plan derives both from `--sign` and the `Developer ID Application` default, set them only to override |
-| `PI_DESKTOP_HOST_PATH` | override the PATH used to find the host's `node` in `system` mode |
+| `PI_DESKTOP_HOST_PATH` | override the PATH the bridge judges and injects - i.e. where the user's own `node`/`python3` are looked for |
 | `PI_DESKTOP_DIFF_IDE`, `PI_DESKTOP_DIFF_IDE_KIND` | which IDE opens a changed file's diff when it is double-clicked in the git popover. Detection covers VS Code, CodeBuddy, Cursor, Windsurf, VSCodium, Zed, Sublime Text and the JetBrains IDEs; set these only for something else (`KIND` is `vscode`\|`zed`\|`sublime`\|`jetbrains`, default `vscode`) |
 | `PI_DESKTOP_DIAGNOSTICS_ENABLED=1` | write the bridge's NDJSON probe log |
 | `PI_DESKTOP_DIAGNOSTIC_LOG` | where that log goes (default `~/.pi/agent/pi-desktop-runtime.ndjson`) |
 | `PI_DESKTOP_DIAGNOSTICS_STDERR=1` | also echo probe lines on stderr |
 | `VITE_PI_DESKTOP_PERF=1`, `VITE_PI_DESKTOP_DIAGNOSTICS_ENABLED=1` | renderer-side perf probes, for `scripts/diag-scan.mjs` |
 | `PI_DESKTOP_COMPACTION_RESERVE_TOKENS`, `PI_DESKTOP_COMPACTION_KEEP_RECENT_TOKENS` | compaction thresholds (defaults 2200 / 1400) |
-| `PI_DESKTOP_PYTHON_SOURCE_DIR`, `PI_DESKTOP_NODE_SOURCE_DIR` | runtime sources for `bundled` builds |
+| `PI_DESKTOP_NODE_DIST_MIRROR`, `PI_DESKTOP_PYTHON_DIST_MIRROR` | where `node:build` / `python:build` fetch the pinned archives from (defaults: npmmirror; the python upstream is python-build-standalone's GitHub Releases) |
+| `PI_DESKTOP_PYTHON_SOURCE_DIR`, `PI_DESKTOP_NODE_SOURCE_DIR` | offline escape hatch: assemble the payload from an already-unpacked distribution root instead of downloading |
 | `PI_DESKTOP_TARGET_TRIPLE` | target triple the packing chain hands to `node:build` / `python:build` / `bridge:build` (outranks Tauri's own `TAURI_ENV_TARGET_TRIPLE`) |
 | `PI_DESKTOP_PACK_PREPARED=1` | set by `scripts/pack.mjs`; makes `tauri:prepare` a no-op so the prep steps run once per package |
-| `UV_PYTHON_INSTALL_DIR` | where `uv` keeps the managed CPython used for `bundled` builds |
 | `PI_DESKTOP_SIDECAR_BIN`, `PI_DESKTOP_GATE_NODE_RUNTIME`, `PI_DESKTOP_GATE_PYTHON_RUNTIME`, `PI_DESKTOP_GATE_CWD`, `PI_DESKTOP_GATE_TIMEOUT_MS` | what `sidecar:verify` boots and where |
 
 Set by the shell or the launcher, not by hand: `PI_DESKTOP_BUNDLED_NODE_BIN`,
-`PI_DESKTOP_BUNDLED_NPM_CLI`, `PI_DESKTOP_BUNDLED_PYTHON_BIN`, `PI_DESKTOP_BUNDLED_PYTHON_HOME`
-(their absence is what makes skills reach the machine's own interpreters), `PI_DESKTOP_APP_SKILLS_DIR`,
+`PI_DESKTOP_BUNDLED_NPM_CLI`, `PI_DESKTOP_BUNDLED_PYTHON_BIN`, `PI_DESKTOP_BUNDLED_PYTHON_HOME`. They
+say *where the payloads are*; whether the agent uses one is decided in the bridge, per runtime, by
+probing the PATH it was handed (`server/agentEnv.mjs`). A slim bundle ships no payload at all, which
+is what makes both runtimes resolve to the machine's own interpreters. Also set: `PI_DESKTOP_APP_SKILLS_DIR`,
 `PI_DESKTOP_APP_PACKAGES_DIR`, `PI_DESKTOP_CAPABILITIES_DEFAULTS_FILE`. The generated POSIX launcher
 accepts `PI_DESKTOP_BRIDGE_DIR` and `PI_DESKTOP_BRIDGE_NODE` as relocation overrides.
 
