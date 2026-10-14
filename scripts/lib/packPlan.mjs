@@ -167,12 +167,18 @@ const CROSS_GATE_NOTE =
   "交叉构建跳过 sidecar:verify：bridge 已按目标平台剪过平台包（例如 darwin 的 esbuild 二进制已被删），" +
   "在构建机上启动它验证不具备意义。目标平台上的首发/回归测试是这条链的替代保障。";
 
+/**
+ * 载荷本身已经按目标平台下载/组装（`scripts/lib/runtimePayloads.mjs`），所以这条门禁挡的是
+ * **验收**：目标平台的 node/python 在构建机上跑不起来，刚打进包的这份解释器就无法被证明可用。
+ * 这条边界是有意保留的，纯 slim 交叉不受影响。
+ */
 function bundledCrossError(target) {
   return new PackPlanError(
-    `bundled 模式无法交叉构建到 ${target}：内置 Node/Python runtime 必须由目标原生的解释器组装并验收。`,
+    `bundled 模式暂不支持交叉构建到 ${target}：runtime 载荷能按目标平台组装，但目标平台的 ` +
+      "node/python 在构建机上跑不起来，无法在装包前验收。",
     [
-      "在目标平台的原生机器（或 CI runner）上跑同一条命令；",
-      "或先做「预构建 runtime + 哈希发布」，让交叉侧只下载不组装；",
+      "在目标平台的原生机器（或 CI runner）上跑同一条命令 —— 目前只有这条路径被真正验收过；",
+      "确实要交叉 bundling，就显式放开这道门（scripts/lib/packPlan.mjs 的 bundledCrossError）；",
       "或用 slim 模式交叉（不带 runtime，README「打包」一节有能力对照表）。",
     ],
   );
@@ -294,8 +300,9 @@ function buildFullPlan(options, { platform, hostArch, commandExists, env }) {
   }
   if (runtimeMode === "bundled" && arch !== defaultArch(target, hostArch)) {
     notes.push(
-      `bundled 且目标架构（${arch}）≠ 本机架构：内置 runtime 需要该架构的原生源码，用 ` +
-        "PI_DESKTOP_NODE_SOURCE_DIR / PI_DESKTOP_PYTHON_SOURCE_DIR 指过去；验收时目标解释器要能在构建机上跑起来。",
+      `bundled 且目标架构（${arch}）≠ 本机架构：runtime 载荷会按目标架构下载（scripts/lib/runtimePayloads.mjs），` +
+        "但本机跑不了该架构的解释器，验收要放到对应架构的环境里（离线可用 PI_DESKTOP_NODE_SOURCE_DIR / " +
+        "PI_DESKTOP_PYTHON_SOURCE_DIR 指到已解开的发行版）。",
     );
   }
 

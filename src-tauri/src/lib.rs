@@ -308,9 +308,9 @@ fn start_bridge(app: &AppHandle) -> Result<(Child, String), Box<dyn std::error::
     let mode = runtime_mode(app);
     // The login-shell readback is what makes anything the user installed outside the bundle visible
     // here at all: a GUI-launched app does not inherit a shell's PATH (`launchctl getenv PATH` is
-    // empty), so the process PATH alone finds nothing. Both modes read it; only `system` also needs
-    // the interactive rc files - see `system_host_path`.
-    let host_path = system_host_path(mode);
+    // empty), so the process PATH alone finds nothing. See `system_host_path` - which runtime the
+    // agent ends up on is decided in the bridge, per runtime, from exactly this PATH.
+    let host_path = system_host_path();
 
     // Shipped runtimes are both optional and mode-dependent: assembled here so the "is it there"
     // question is asked exactly once.
@@ -389,11 +389,7 @@ fn start_bridge(app: &AppHandle) -> Result<(Child, String), Box<dyn std::error::
         .env("PI_DESKTOP_HOST", "127.0.0.1")
         .env(
             "PATH",
-            bridge_path(
-                &user_pi_agent_dir(),
-                bundled.as_ref().map(|runtimes| runtimes.node_bin.as_path()),
-                &host_path,
-            )?,
+            bridge_path(&user_pi_agent_dir(), &host_path)?,
         );
     if let Some(runtimes) = &bundled {
         // Only ever set in `bundled` mode: their absence is what makes the bridge leave the
@@ -577,19 +573,17 @@ fn runtime_mode(app: &AppHandle) -> RuntimeMode {
 ///
 /// A GUI app does not inherit a login shell's PATH, so anything installed outside the bundle -
 /// `/opt/homebrew/bin`, `~/.local/bin`, or a Node from nvm / pyenv - is invisible to it. Reading
-/// the login shell's PATH back is the only way to find those, and how much of the shell to ask for
-/// depends on the mode:
+/// the login shell's PATH back is the only way to find those.
 ///
-/// - `system` mode needs the machine's own Node, which for nvm / pyenv / asdf users only exists in
-///   the interactive rc files - but those files are also what makes the read cost real time
-///   (`nvm use` in `.zshrc` alone can dominate startup), so it is skipped as soon as the current
-///   PATH resolves a Node.
-/// - `bundled` mode ships its own Node and Python, so the interactive files would add nothing the
-///   app needs while still costing their full price. A non-interactive login shell is enough for
-///   the profile-level installs the user's own CLIs come from.
+/// The read is the *interactive* one (`-lic`): nvm / pyenv / asdf export their PATH from the
+/// interactive rc files only, and those interpreters are exactly what the bridge prefers over the
+/// bundled payload. It is also the expensive read (`nvm use` in `.zshrc` alone can dominate
+/// startup), so it is skipped when the PATH we already have resolves both a *user* Node and a
+/// *user* Python - the two interpreters that decide whether the app takes any runtime over (see
+/// `server/agentEnv.mjs`; this mirrors `systemHostPath` in `src-electron/paths.js`).
 ///
-/// `PI_DESKTOP_HOST_PATH` overrides the result in both modes.
-fn system_host_path(mode: RuntimeMode) -> String {
+/// `PI_DESKTOP_HOST_PATH` overrides the result.
+fn system_host_path() -> String {
     let current = std::env::var("PATH").unwrap_or_default();
     if let Ok(explicit) = std::env::var("PI_DESKTOP_HOST_PATH") {
         let explicit = explicit.trim().to_owned();
@@ -597,29 +591,25 @@ fn system_host_path(mode: RuntimeMode) -> String {
             return explicit;
         }
     }
-    let interactive = mode == RuntimeMode::System;
-    if interactive && resolve_node_on_path(&current).is_some() {
+    if resolve_node_on_path(&current).is_some() && resolve_python_on_path(&current).is_some() {
         return current;
     }
-    match login_shell_path(interactive) {
-        Some(from_shell) => prepend_missing_paths(&from_shell, &current),
-        None => current,
+    #[cfg(not(windows))]
+    if let Some(from_shell) = login_shell_path() {
+        return prepend_missing_paths(&from_shell, &current);
     }
+    current
 }
 
 /// The shell flag the readback uses. Mirrors the argument in `paths.js`.
 #[cfg(not(windows))]
-fn login_shell_flag(interactive: bool) -> &'static str {
-    if interactive {
-        "-lic"
-    } else {
-        "-lc"
-    }
+fn login_shell_flag() -> &'static str {
+    "-lic"
 }
 
 /// The PATH a login shell reports, or `None` when it cannot be read. Windows has no equivalent.
 #[cfg(not(windows))]
-fn login_shell_path(interactive: bool) -> Option<String> {
+fn login_shell_path() -> Option<String> {
     const MARKER: &str = "__PI_DESKTOP_LOGIN_PATH__";
 
     let shell = std::env::var("SHELL")
@@ -631,12 +621,11 @@ fn login_shell_path(interactive: bool) -> Option<String> {
         return None;
     }
 
-    // `-i` is the caller's choice, not a default: see `system_host_path`. Those rc files may
-    // print banners, so the value is fished out by marker instead of trusting stdout. No timeout
-    // is available on a blocking `Command`; a shell that hangs on `-i` would already break every
-    // terminal the user opens.
+    // `-i` is not optional: see `system_host_path`. Those rc files may print banners, so the value
+    // is fished out by marker instead of trusting stdout. No timeout is available on a blocking
+    // `Command`; a shell that hangs on `-i` would already break every terminal the user opens.
     let output = Command::new(&shell)
-        .arg(login_shell_flag(interactive))
+        .arg(login_shell_flag())
         .arg(format!("printf '%s%s' '{MARKER}' \"$PATH\""))
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -661,8 +650,28 @@ fn login_shell_path(interactive: bool) -> Option<String> {
 /// First `node` on a PATH value, or `None`. Existence only - the version is the bridge's problem.
 fn resolve_node_on_path(path: &str) -> Option<PathBuf> {
     let executable = if cfg!(windows) { "node.exe" } else { "node" };
+    resolve_executable_on_path(path, executable)
+}
+
+/// First `python3` / `python` the *user* owns on a PATH value, or `None`.
+fn resolve_python_on_path(path: &str) -> Option<PathBuf> {
+    let names: &[&str] = if cfg!(windows) {
+        &["python.exe", "python3.exe"]
+    } else {
+        &["python3", "python"]
+    };
+    names
+        .iter()
+        .find_map(|name| resolve_executable_on_path(path, name))
+}
+
+/// Existence-only lookup that skips the directories belonging to the OS or a developer toolchain:
+/// macOS `/usr/bin/python3` is the Command Line Tools build (3.9.6, and a dialog when absent),
+/// Windows' `WindowsApps` entries are 0-byte stubs. Neither counts as "the user has Python". The
+/// rule mirrors `isToolchainDir` in `server/agentEnv.mjs`, which is the side that decides for real.
+fn resolve_executable_on_path(path: &str, executable: &str) -> Option<PathBuf> {
     for dir in std::env::split_paths(&OsString::from(path)) {
-        if dir.as_os_str().is_empty() {
+        if dir.as_os_str().is_empty() || is_toolchain_dir(&dir) {
             continue;
         }
         let candidate = dir.join(executable);
@@ -671,6 +680,34 @@ fn resolve_node_on_path(path: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn is_toolchain_dir(dir: &Path) -> bool {
+    if cfg!(windows) {
+        return dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case("WindowsApps"));
+    }
+    if !cfg!(target_os = "macos") {
+        // Linux' /usr/bin/python3 is the distribution's real environment - not a toolchain stub.
+        return false;
+    }
+    const TOOLCHAIN_ONLY_PREFIXES: [&str; 8] = [
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+        "/System",
+        "/Library/Developer/CommandLineTools",
+        "/Library/Apple/usr/bin",
+        "/Applications/Xcode.app",
+    ];
+    let value = dir.to_string_lossy();
+    let trimmed = value.trim_end_matches('/');
+    TOOLCHAIN_ONLY_PREFIXES
+        .iter()
+        .any(|prefix| trimmed == *prefix || trimmed.starts_with(&format!("{prefix}/")))
 }
 
 /// `first`'s entries followed by whatever `second` adds, without duplicates.
@@ -690,20 +727,14 @@ fn prepend_missing_paths(first: &str, second: &str) -> String {
         .unwrap_or_else(|_| second.to_owned())
 }
 
-fn bridge_path(
-    agent_dir: &Path,
-    node_bin: Option<&Path>,
-    host_path: &str,
-) -> Result<OsString, Box<dyn std::error::Error>> {
+/// `agentDir/bin` first (the `pi` launcher lives there), then the host PATH.
+///
+/// The bundled Node bin directory is deliberately *not* prepended: whether the agent's `node` and
+/// `python3` mean the payload or the user's own installation is decided in the bridge, per
+/// runtime, on this very PATH (`server/agentEnv.mjs`). Prepending it here would shadow an nvm node
+/// before the bridge ever gets to look.
+fn bridge_path(agent_dir: &Path, host_path: &str) -> Result<OsString, Box<dyn std::error::Error>> {
     let mut paths = vec![agent_dir.join("bin")];
-    if let Some(node_bin) = node_bin {
-        paths.push(
-            node_bin
-                .parent()
-                .ok_or("Bundled Node executable has no parent directory")?
-                .to_path_buf(),
-        );
-    }
     paths.extend(std::env::split_paths(&OsString::from(host_path)));
     Ok(std::env::join_paths(paths)?)
 }
@@ -743,19 +774,13 @@ mod tests {
 
     #[cfg(not(windows))]
     #[test]
-    fn bundled_mode_asks_a_non_interactive_login_shell() {
+    fn the_login_shell_readback_is_interactive() {
         use super::login_shell_flag;
 
-        assert_eq!(
-            login_shell_flag(true),
-            "-lic",
-            "system mode needs a Node that only the interactive rc files export"
-        );
-        assert_eq!(
-            login_shell_flag(false),
-            "-lc",
-            "bundled mode ships its runtimes and must not pay for `.zshrc`"
-        );
+        // Both modes need the interactive rc files: that is where nvm / pyenv export the
+        // interpreter the bundled runtime is supposed to defer to. The read is skipped wholesale
+        // when the process PATH already resolves a user Node and a user Python.
+        assert_eq!(login_shell_flag(), "-lic");
     }
 
     #[test]

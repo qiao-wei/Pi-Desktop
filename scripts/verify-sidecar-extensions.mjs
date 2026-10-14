@@ -75,15 +75,16 @@ async function startSidecar() {
     HOME: homedir(),
     USER: process.env.USER ?? "unknown",
     TMPDIR: tmpdir(),
-    // In `system` mode the launcher has to find the host's node, so the host PATH is what it gets
-    // (plus the shim directory, exactly like a packaged slim app passes it).
+    // The shells hand the bridge the login-shell PATH (plus the shim directory) and let the
+    // bridge decide which runtime wins, per runtime. A build gate must not depend on the machine
+    // it runs on: in `bundled` mode the host PATH is pinned to the OS directories, so the shipped
+    // payloads are always the ones under test. In `system` mode the launcher needs the host's own
+    // node, so that is what it gets.
     PATH: [
       join(agentDir, "bin"),
-      ...(runtimeMode === "bundled" ? [join(nodeRuntime, "bin")] : String(process.env.PATH ?? "").split(process.platform === "win32" ? ";" : ":")),
-      "/usr/bin",
-      "/bin",
-      "/usr/sbin",
-      "/sbin",
+      ...(runtimeMode === "bundled"
+        ? ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        : String(process.env.PATH ?? "").split(process.platform === "win32" ? ";" : ":")),
     ].filter(Boolean).join(":"),
     PI_DESKTOP_APP_SKILLS_DIR: join(rootDir, "skills"),
     PI_DESKTOP_CAPABILITIES_DEFAULTS_FILE: join(rootDir, "capabilities.defaults.json"),

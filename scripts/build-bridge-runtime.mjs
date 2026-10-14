@@ -78,6 +78,41 @@ function installedVersion(pkg) {
   }
 }
 
+/**
+ * Versions of every `@earendil-works/*` package in the repo tree, keyed by name.
+ *
+ * The bridge installs pi's packages by range, so a dependency of a dependency floats: pi-codemode
+ * 1.2.0 (allowed by pi-coding-agent's `^1.1.0`) dropped an export 1.1.0 imports, and the packaged
+ * bridge died on startup while `npm test` against the repo tree stayed green. The repo's own tree is
+ * what the tests ran against, so its exact versions become npm `overrides` for the shipped install.
+ */
+function installedPiFamilyVersions() {
+  const scopeDir = join(repoRoot, "node_modules", "@earendil-works");
+  if (!existsSync(scopeDir)) {
+    return {};
+  }
+  const versions = {};
+  for (const entry of readdirSync(scopeDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const manifest = join(scopeDir, entry.name, "package.json");
+    if (!existsSync(manifest)) {
+      continue;
+    }
+    try {
+      const version = JSON.parse(readFileSync(manifest, "utf8")).version ?? "";
+      if (version) {
+        versions[`@earendil-works/${entry.name}`] = version;
+      }
+    } catch {
+      // A package we cannot read is one we cannot pin; the direct-import check below still fails
+      // loudly if it was actually needed.
+    }
+  }
+  return versions;
+}
+
 function declaredVersions() {
   try {
     const manifest = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
@@ -126,7 +161,8 @@ export function buildBridgeRuntime({ skipInstall = false, target = "", targetPla
     );
   }
 
-  const { manifest, missing } = bridgePackageManifest({ versions, imports });
+  const overrides = installedPiFamilyVersions();
+  const { manifest, missing } = bridgePackageManifest({ versions, imports, overrides });
   if (missing.length) {
     throw new Error(`bridge imports packages with no installed version: ${missing.join(", ")}`);
   }
@@ -295,6 +331,10 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
   const target = cliTarget || envTriple || defaultTargetTriple();
   const targetPlatform = resolveTargetPlatform({ triple: cliTarget || envTriple });
   const { manifest } = buildBridgeRuntime({ skipInstall, target, targetPlatform });
+  const pinned = Object.keys(manifest.overrides ?? {});
+  if (pinned.length) {
+    console.log(`bridge: pinned ${pinned.length} transitive dep(s) to the repo tree: ${pinned.map((name) => `${name}@${manifest.overrides[name]}`).join(", ")}`);
+  }
   const checked = skipInstall ? 0 : verifyBridgeSelfResolve();
   console.log(`bridge: ${Object.keys(manifest.dependencies).length} deps -> ${bridgeDir}`);
   console.log(`launcher: ${launcherPath}`);

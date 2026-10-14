@@ -52,7 +52,7 @@ export function packageNameOf(specifier) {
  * import must be covered by it, otherwise the shipped tree would resolve a package the build
  * machine happened to hoist rather than one we declared.
  */
-export function bridgePackageManifest({ versions = {}, imports = [], name = "pi-desktop-bridge" } = {}) {
+export function bridgePackageManifest({ versions = {}, imports = [], overrides = {}, name = "pi-desktop-bridge" } = {}) {
   const missing = new Set();
   const dependencies = {};
   for (const specifier of imports) {
@@ -66,6 +66,12 @@ export function bridgePackageManifest({ versions = {}, imports = [], name = "pi-
       missing.add(pkg);
     }
   }
+  // Exact transitive pins for the packages the repo's own tree resolved. Without them npm is free
+  // to pick a newer minor for a dependency of a dependency (`^1.1.0` -> 1.2.0), and the bridge then
+  // ships a combination no test ever ran - pi-codemode 1.2.0 dropped an export pi-coding-agent
+  // 1.1.0 imports, which broke startup while the repo tree was fine.
+  const pins = Object.fromEntries(Object.entries(overrides).filter(([pkg]) => dependencies[pkg] === undefined));
+
   return {
     manifest: {
       name,
@@ -75,6 +81,7 @@ export function bridgePackageManifest({ versions = {}, imports = [], name = "pi-
       description: "Pi Desktop local bridge. Not an app; installed by npm ci at build time.",
       engines: { node: ">=22" },
       dependencies,
+      ...(Object.keys(pins).length ? { overrides: pins } : {}),
     },
     missing: [...missing].sort(),
   };
