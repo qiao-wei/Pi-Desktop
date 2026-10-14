@@ -152,10 +152,13 @@ test("交叉：bundled 在动手之前拒绝，并给出三条可走的路", () 
     buildPackPlan(parsePackArgs(["--host", "electron", "--target", "windows", "--cross"]), { platform: "darwin", arch: "arm64" }),
   );
 
-  assert.match(error.message, /bundled 模式无法交叉构建到 windows/);
-  assert.equal(error.hints.length, 3, "三条出路要都在：原生机器 / 预构建 runtime / slim");
+  assert.match(error.message, /bundled 模式暂不支持交叉构建到 windows/);
+  assert.equal(error.hints.length, 3, "三条出路要都在：原生机器 / 显式放开门禁 / slim");
   assert.ok(error.hints.some((hint) => hint.includes("slim")), error.hints.join("\n"));
-  assert.ok(error.hints.some((hint) => hint.includes("预构建")), error.hints.join("\n"));
+  assert.ok(error.hints.some((hint) => hint.includes("bundledCrossError")), error.hints.join("\n"));
+  // 载荷已经能按目标平台组装，所以这条门禁挡的是验收而不是能力 —— 报错本身要说清楚。
+  assert.ok(/载荷能按目标平台组装/.test(error.message), error.message);
+  assert.ok(/在构建机上跑不起来/.test(error.message), error.message);
 });
 
 test("交叉：slim 放行，跳过门禁并说明原因，Tauri 换成 cargo-xwin", () => {

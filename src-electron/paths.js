@@ -62,7 +62,7 @@ function resolveShellPaths(app) {
       nodeRuntime: path.join(runtimeRoot, "node-runtime"),
     };
     const runtimeMode = resolveRuntimeMode(dirs);
-    const hostPath = systemHostPath({ runtimeMode });
+    const hostPath = systemHostPath({ env: process.env, platform });
     const systemNode = runtimeMode === "system" ? resolveNodeOnPath(hostPath, platform) : null;
     return {
       ...dirs,
@@ -124,28 +124,27 @@ function resolveRuntimeMode(dirs, env = process.env) {
  * A GUI app on macOS does not inherit a login shell's PATH (`launchctl getenv PATH` is empty), so
  * anything the user installed outside the bundle - `/opt/homebrew/bin`, `~/.local/bin`, or a node
  * from nvm / pyenv - is invisible to it. Reading the login shell's PATH back is the only way those
- * installs can be found; how much of the shell to ask for depends on the mode:
+ * installs can be found.
  *
- * - `system` mode needs the machine's own node. For nvm / pyenv / asdf users that only exists in
- *   the *interactive* rc files, but those are also the expensive ones (`nvm use` in `.zshrc` alone
- *   can dominate startup), so this is skipped as soon as the current PATH resolves a node.
- * - `bundled` mode ships node and python, so the interactive files would add nothing the app needs
- *   while still costing their full price. A *non-interactive* login shell is enough for the
- *   profile-level installs (`~/.local/bin`, Homebrew, cargo) the user's own CLIs come from.
+ * The read is the *interactive* one (`-lic`): nvm / pyenv / asdf only export their PATH from the
+ * interactive rc files, and those same interpreters are what the bridge prefers over the bundled
+ * payload. It is also the expensive read (`nvm use` in `.zshrc` alone can dominate startup), so it
+ * is skipped when the PATH we already have resolves both a *user* node and a *user* python - the
+ * two interpreters that decide whether the app takes over at all (see server/agentEnv.mjs; the
+ * OS/toolchain directories there are the same ones skipped here).
  *
- * `PI_DESKTOP_HOST_PATH` overrides the result in both modes.
+ * `PI_DESKTOP_HOST_PATH` overrides the result.
  */
-function systemHostPath({ runtimeMode, env = process.env, platform = process.platform } = {}) {
+function systemHostPath({ env = process.env, platform = process.platform } = {}) {
   const current = String(env.PATH ?? "");
   const explicit = String(env.PI_DESKTOP_HOST_PATH ?? "").trim();
   if (explicit) {
     return explicit;
   }
-  const interactive = runtimeMode === "system";
-  if (interactive && resolveNodeOnPath(current, platform)) {
+  if (resolveNodeOnPath(current, platform) && resolvePythonOnPath(current, platform)) {
     return current;
   }
-  const fromLoginShell = loginShellPath(env, platform, { interactive });
+  const fromLoginShell = loginShellPath(env, platform, { interactive: true });
   return fromLoginShell ? joinPathValues([fromLoginShell, current], platform) : current;
 }
 
@@ -181,11 +180,31 @@ function loginShellPath(env = process.env, platform = process.platform, { intera
 
 /** First `node` on a PATH value, or null. Existence only - the version is the bridge's problem. */
 function resolveNodeOnPath(pathValue, platform) {
+  return resolveExecutableOnPath(pathValue, platform === "win32" ? "node.exe" : "node", platform);
+}
+
+/** First `python3` / `python` the user owns on a PATH value, or null. */
+function resolvePythonOnPath(pathValue, platform) {
+  for (const name of platform === "win32" ? ["python.exe", "python3.exe"] : ["python3", "python"]) {
+    const found = resolveExecutableOnPath(pathValue, name, platform);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
+/**
+ * Existence-only lookup that skips the directories belonging to the OS or a developer toolchain.
+ * macOS `/usr/bin/python3` is the Command Line Tools build (and a dialog when it is missing),
+ * Windows' `WindowsApps` entries are 0-byte stubs: neither is "the user has Python". The rule
+ * mirrors `isToolchainDir` in server/agentEnv.mjs, which is the side that decides for real.
+ */
+function resolveExecutableOnPath(pathValue, executable, platform) {
   const separator = platform === "win32" ? ";" : ":";
-  const executable = platform === "win32" ? "node.exe" : "node";
   for (const dir of String(pathValue ?? "").split(separator)) {
     const entry = dir.trim();
-    if (!entry) {
+    if (!entry || isToolchainDir(entry, platform)) {
       continue;
     }
     const candidate = path.join(entry, executable);
@@ -194,6 +213,30 @@ function resolveNodeOnPath(pathValue, platform) {
     }
   }
   return null;
+}
+
+/** Directories whose interpreter belongs to the OS or a toolchain rather than to the user. */
+const TOOLCHAIN_ONLY_PREFIXES = [
+  "/usr/bin",
+  "/bin",
+  "/usr/sbin",
+  "/sbin",
+  "/System",
+  "/Library/Developer/CommandLineTools",
+  "/Library/Apple/usr/bin",
+  "/Applications/Xcode.app",
+];
+
+function isToolchainDir(dir, platform) {
+  const entry = String(dir ?? "").trim().replace(/[/\\]+$/, "") || "/";
+  if (platform === "win32") {
+    return /(^|[\\/])windowsapps([\\/]|$)/i.test(entry);
+  }
+  if (platform !== "darwin") {
+    // Linux' /usr/bin/python3 is the distribution's real environment - not a toolchain stub.
+    return false;
+  }
+  return TOOLCHAIN_ONLY_PREFIXES.some((prefix) => entry === prefix || entry.startsWith(`${prefix}/`));
 }
 
 /** Prepends `values` to each other, dropping duplicates without reordering. */
@@ -292,6 +335,7 @@ module.exports = {
   bundledPythonPaths,
   resolveRuntimeMode,
   resolveNodeOnPath,
+  resolvePythonOnPath,
   systemHostPath,
   loginShellPath,
   joinPathValues,

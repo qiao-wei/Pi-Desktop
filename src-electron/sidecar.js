@@ -109,9 +109,13 @@ function bridgeEnv(shellPaths) {
     }
   }
 
+  // `agentDir/bin` comes first so the `pi` launcher is reachable; the bundled Node bin is *not*
+  // prepended here. Whether the agent's `node`/`python3` mean the payload or the user's own
+  // installation is decided in the bridge (server/agentEnv.mjs), per runtime, on this very PATH -
+  // and the bridge's decision is what has to win, or a machine with nvm would still get the
+  // bundled Node because the shell put it in front.
   const pathEntries = [
     path.join(agentDir, "bin"),
-    ...(runtimeMode === "bundled" ? [path.dirname(node.bin)] : []),
     ...(hostPath ? String(hostPath).split(path.delimiter) : []),
   ].filter(Boolean);
 

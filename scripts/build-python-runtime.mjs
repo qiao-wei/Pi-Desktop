@@ -1,9 +1,40 @@
+/**
+ * Assemble the bundled Python runtime: a pinned python-build-standalone CPython, downloaded and
+ * unpacked, so `python3`, `pip` and `python3 -m venv` work on a machine that has none.
+ *
+ *   npm run python:build
+ *
+ * Produces `src-tauri/binaries/python-runtime/` (gitignored): the interpreter, its standard
+ * library and the pip it ships with, plus `SOURCES.json` (archive URL + sha256) and
+ * `pi-desktop-runtime.json`.
+ *
+ * Two deliberate consequences of shipping the upstream archive as-is:
+ *
+ *  - `pip` comes from the payload instead of `ensurepip`, so the build never executes the
+ *    interpreter it is assembling. That is what lets a win32 payload be prepared on macOS, and
+ *    it is why nothing here bakes a build-machine path into `bin/pip`.
+ *  - bytecode caches are stripped, so the shipped tree is not written at runtime either: the
+ *    app's own launchers point `PYTHONPYCACHEPREFIX` at `~/.pi/agent/python/cache`, and a
+ *    signed `.app` whose `Resources` change after signing stops verifying.
+ */
+
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
+import {
+  PYTHON_RELEASE_TAG,
+  PYTHON_VERSION,
+  downloadArchive,
+  ensureExecutable,
+  extractArchive,
+  isNativeTarget,
+  pythonArchiveSpec,
+  runtimeSpec,
+  verifyPinnedHash,
+  writeProvenance,
+} from "./lib/runtimePayloads.mjs";
 import {
   platformForTarget,
   pruneHostReferenceMetadata,
@@ -17,163 +48,101 @@ const binariesDir = join(rootDir, "src-tauri", "binaries");
 const outputDir = join(binariesDir, "python-runtime");
 // 同 build-node-runtime.mjs：出包脚本给的优先，其次是 Tauri 自己导出的，最后才是构建机自己。
 const targetTriple = process.env.PI_DESKTOP_TARGET_TRIPLE?.trim() || process.env.TAURI_ENV_TARGET_TRIPLE?.trim() || hostTargetTriple();
-const sourceDir = resolvePythonSourceDir(targetTriple);
+const spec = runtimeSpec(targetTriple);
+const archiveSpec = pythonArchiveSpec(targetTriple);
+const sourceOverride = process.env.PI_DESKTOP_PYTHON_SOURCE_DIR?.trim();
 
 mkdirSync(binariesDir, { recursive: true });
 rmSync(outputDir, { recursive: true, force: true });
 mkdirSync(outputDir, { recursive: true });
-cpSync(sourceDir, outputDir, {
-  recursive: true,
-  dereference: true,
-});
-removeMacFrameworkAliases(targetTriple, outputDir);
 
+let sha256 = "";
+if (sourceOverride) {
+  if (!existsSync(sourceOverride)) {
+    throw new Error(`PI_DESKTOP_PYTHON_SOURCE_DIR does not exist: ${sourceOverride}`);
+  }
+  console.log(`python: using ${sourceOverride} (target ${spec.key}, no download)`);
+  cpSync(sourceOverride, outputDir, { recursive: true });
+} else {
+  const archivePath = join(binariesDir, ".downloads", archiveSpec.name);
+  console.log(`python: downloading ${archiveSpec.url}`);
+  sha256 = await downloadArchive(archiveSpec.url, archivePath);
+  const { verified } = verifyPinnedHash({ id: "python", target: targetTriple, sha256 });
+  console.log(
+    `python: ${PYTHON_VERSION}+${PYTHON_RELEASE_TAG} sha256 ${sha256}${verified ? " (matches runtimePins.json)" : ""}`,
+  );
+  extractArchive(archivePath, archiveSpec.type, outputDir);
+  rmSync(dirname(archivePath), { recursive: true, force: true });
+}
+
+removeMacFrameworkAliases(targetTriple, outputDir);
 const layout = bundledPythonLayout(targetTriple, outputDir);
 ensurePythonExecutable(layout);
-resetSitePackages(layout);
-verifyNoHostRuntimeDependencies(layout, targetTriple);
-bootstrapPip(layout);
+ensureExecutable(layout.bin);
+// The payload ships pip; only the two markers that stop it from installing into the app's own
+// tree are removed. `site-packages` is left exactly as upstream built it.
+preparePip(layout);
 
-// cpSync leaves symlinks pointing into `sourceDir`, and ensurepip bakes this
-// build-time path into bin/pip (or Scripts/pip.exe). Both resolve on this machine
-// and nowhere else, so the tree has to be repaired before it is shipped.
-const hostPaths = [sourceDir, outputDir];
+// Repair pass (the override path needs it; the archive path finds nothing to repair) and the
+// gate that has to hold for both. Nothing below executes Python unless the target is native.
+const hostPaths = [sourceOverride, outputDir].filter(Boolean);
+const prunedMetadata = pruneHostReferenceMetadata(outputDir, { forbidden: hostPaths });
+const stripped = stripBytecodeCache(outputDir);
 const relocated = relocateRuntime(outputDir, {
   platform: platformForTarget(targetTriple),
   pythonName: basename(layout.bin),
   pythonExeName: platformForTarget(targetTriple) === "win32" ? basename(layout.bin) : undefined,
   forbidden: hostPaths,
 });
-const pruned = pruneHostReferenceMetadata(outputDir, { forbidden: hostPaths });
-// Bytecode caches are stripped *after* everything that runs Python during the
-// build, because a `.pyc` records the absolute path of the module it came from.
-const stripped = stripBytecodeCache(outputDir);
+if (relocated.symlinks.length || relocated.scripts.length || relocated.wrappers.length || prunedMetadata.length || stripped.length) {
+  console.log(
+    `python: relocated ${relocated.symlinks.length} symlink(s), ${relocated.scripts.length} console script(s), ` +
+      `${relocated.wrappers.length} windows wrapper(s), pruned ${prunedMetadata.length} host-path metadata file(s), ` +
+      `stripped ${stripped.length} __pycache__ entr(ies)`,
+  );
+}
 
-verifyStandalonePython(layout);
-// The checks above run the interpreter, which regenerates caches that record this
-// machine's paths - strip again, then gate last.
-const strippedLate = stripBytecodeCache(outputDir);
+// The payload cannot be executed while cross-assembling one, so the two checks that need a
+// running interpreter (and `otool`) only happen on a native build. The file-level gate below
+// still runs for every target.
+const native = isNativeTarget(targetTriple);
+let strippedLate = [];
+if (native) {
+  verifyNoHostRuntimeDependencies(layout, targetTriple);
+  verifyStandalonePython(layout);
+  // Running the interpreter regenerates caches that record this machine's paths - strip again,
+  // then gate last.
+  strippedLate = stripBytecodeCache(outputDir);
+} else {
+  console.log(`python: skipping the executable checks for ${spec.key} (assembled on ${process.platform}/${process.arch})`);
+}
+
 verifyRuntimeRelocatable(outputDir, {
   platform: platformForTarget(targetTriple),
   forbidden: hostPaths,
 });
 
-if (relocated.symlinks.length || relocated.scripts.length || relocated.wrappers.length || pruned.length || stripped.length || strippedLate.length) {
-  console.log(
-    `Relocated bundled Python: ${relocated.symlinks.length} symlink(s), ` +
-      `${relocated.scripts.length} console script(s), ${relocated.wrappers.length} windows wrapper(s), ` +
-      `${pruned.length} host-path-bound metadata file(s) removed, ` +
-      `${stripped.length + strippedLate.length} __pycache__ entr(ies) stripped`,
-  );
-}
+writeRuntimeMetadata(layout, targetTriple, { relocated, pruned: prunedMetadata, stripped: [...stripped, ...strippedLate], sha256, url: sourceOverride ? "" : archiveSpec.url });
+writeProvenance(outputDir, {
+  id: "python",
+  version: PYTHON_VERSION,
+  releaseTag: PYTHON_RELEASE_TAG,
+  target: spec.key,
+  url: sourceOverride ? "" : archiveSpec.url,
+  sha256,
+  source: sourceOverride || undefined,
+  includesPip: true,
+});
 
-writeRuntimeMetadata(layout, targetTriple, { relocated, pruned });
-console.log(`Built Pi Desktop Python runtime for ${targetTriple}: ${outputDir}`);
+console.log(`Built Pi Desktop Python runtime for ${spec.key} (${PYTHON_VERSION}): ${outputDir}`);
 
-function resolvePythonSourceDir(target) {
-  const override = process.env.PI_DESKTOP_PYTHON_SOURCE_DIR?.trim();
-  if (override) {
-    if (!existsSync(override)) {
-      throw new Error(`PI_DESKTOP_PYTHON_SOURCE_DIR does not exist: ${override}`);
-    }
-    return override;
-  }
-
-  if (target.includes("windows")) {
-    return resolveWindowsPythonSource();
-  }
-
-  if (target.includes("apple-darwin")) {
-    return resolveMacPythonSource(target);
-  }
-
-  throw new Error(
-    "Set PI_DESKTOP_PYTHON_SOURCE_DIR to a target-native, self-contained Python 3.13 runtime. Homebrew Python is not supported because it links to Homebrew libraries.",
-  );
-}
-
-function resolveMacPythonSource(target) {
-  const uvArchitecture = target.startsWith("aarch64-") ? "aarch64" : "x86_64";
-  const candidates = [
-    // uv-managed CPython builds are relocatable and do not depend on Homebrew.
-    ...managedUvPythonCandidates(uvArchitecture),
-  ];
-
-  for (const candidate of candidates) {
-    if (existsSync(join(candidate, "bin", "python3.13"))) {
-      return candidate;
-    }
-  }
-
-  throw new Error(
-    "Unable to find a target-native macOS Python 3.13 runtime. Install one with `uv python install 3.13` or set PI_DESKTOP_PYTHON_SOURCE_DIR to a relocatable Python.framework/runtime path.",
-  );
-}
-
-function managedUvPythonCandidates(architecture) {
-  const uvPythonDir = process.env.UV_PYTHON_INSTALL_DIR?.trim() || join(homedir(), ".local", "share", "uv", "python");
-  if (!existsSync(uvPythonDir)) {
-    return [];
-  }
-
-  return readdirSync(uvPythonDir)
-    .filter((entry) => entry.startsWith("cpython-3.13") && entry.includes(`macos-${architecture}-`))
-    .sort()
-    .reverse()
-    .map((entry) => join(uvPythonDir, entry));
-}
-
-function resolveWindowsPythonSource() {
-  const candidates = [
-    fromWhere("python"),
-    fromWhere("python3"),
-    join(process.env.LocalAppData ?? "", "Programs", "Python", "Python313"),
-    join(process.env.ProgramFiles ?? "", "Python313"),
-    join(process.env["ProgramFiles(x86)"] ?? "", "Python313"),
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    if (
-      existsSync(join(candidate, "python.exe")) &&
-      existsSync(join(candidate, "Lib")) &&
-      existsSync(join(candidate, "DLLs"))
-    ) {
-      return candidate;
-    }
-  }
-
-  throw new Error(
-    "Unable to find a Windows Python install. Set PI_DESKTOP_PYTHON_SOURCE_DIR to the Python installation root.",
-  );
-}
-
-function fromWhere(command) {
-  try {
-    const result = spawnSync("where", [command], {
-      encoding: "utf-8",
-      timeout: 5000,
-      windowsHide: true,
-    });
-    if (result.status === 0 && result.stdout) {
-      const firstMatch = result.stdout.trim().split(/\r?\n/)[0];
-      if (firstMatch) {
-        return dirname(firstMatch);
-      }
-    }
-  } catch {
-    // Ignore lookup failures and continue with the next candidate.
-  }
-
-  return "";
-}
-
-function removeMacFrameworkAliases(target, outputDir) {
-  if (!target.includes("apple-darwin") || !existsSync(join(outputDir, "Versions", "3.13"))) {
+function removeMacFrameworkAliases(target, runtimeDir) {
+  if (!target.includes("apple-darwin") || !existsSync(join(runtimeDir, "Versions", "3.13"))) {
     return;
   }
 
-  rmSync(join(outputDir, "Versions", "Current"), { recursive: true, force: true });
-  rmSync(join(outputDir, "Headers"), { recursive: true, force: true });
+  rmSync(join(runtimeDir, "Versions", "Current"), { recursive: true, force: true });
+  rmSync(join(runtimeDir, "Headers"), { recursive: true, force: true });
 }
 
 function bundledPythonLayout(target, runtimeDir) {
@@ -219,11 +188,17 @@ function ensurePythonExecutable(layout) {
   }
 }
 
-function resetSitePackages(layout) {
+/**
+ * Keep the shipped pip usable from inside the app's own tree:
+ *  - `EXTERNALLY-MANAGED` (a distro-packaging marker) would make `pip install` refuse;
+ *  - a `sitecustomize.py` in the stdlib would run on every interpreter start.
+ */
+function preparePip(layout) {
   rmSync(join(layout.stdlib, "EXTERNALLY-MANAGED"), { force: true });
   rmSync(join(layout.stdlib, "sitecustomize.py"), { force: true });
-  rmSync(layout.sitePackages, { recursive: true, force: true });
-  mkdirSync(layout.sitePackages, { recursive: true });
+  if (!existsSync(layout.sitePackages)) {
+    throw new Error(`Python runtime has no site-packages directory: ${layout.sitePackages}`);
+  }
 }
 
 function verifyNoHostRuntimeDependencies(layout, target) {
@@ -231,10 +206,13 @@ function verifyNoHostRuntimeDependencies(layout, target) {
     return;
   }
 
-  const binaries = [
-    layout.bin,
-    ...collectFiles(join(layout.stdlib, "lib-dynload")).filter((path) => path.endsWith(".so")),
-  ];
+  const binaries = [layout.bin];
+  const dynload = join(layout.stdlib, "lib-dynload");
+  for (const entry of existsSync(dynload) ? walk(dynload) : []) {
+    if (entry.endsWith(".so")) {
+      binaries.push(entry);
+    }
+  }
   for (const binary of binaries) {
     const result = spawnSync("otool", ["-L", binary], { encoding: "utf8" });
     if (result.status !== 0) {
@@ -252,24 +230,16 @@ function verifyNoHostRuntimeDependencies(layout, target) {
   }
 }
 
-function collectFiles(root) {
-  if (!existsSync(root)) {
-    return [];
-  }
-  const files = [];
+function walk(root, found = []) {
   for (const entry of readdirSync(root)) {
     const path = join(root, entry);
     if (statSync(path).isDirectory()) {
-      files.push(...collectFiles(path));
+      walk(path, found);
     } else {
-      files.push(path);
+      found.push(path);
     }
   }
-  return files;
-}
-
-function bootstrapPip(layout) {
-  runPython(layout, ["-m", "ensurepip", "--upgrade", "--default-pip"], "bootstrap pip");
+  return found;
 }
 
 function verifyStandalonePython(layout) {
@@ -290,25 +260,30 @@ function verifyStandalonePython(layout) {
   runPython(layout, ["-c", validation], "verify standalone Python and pip");
 }
 
-function writeRuntimeMetadata(layout, target, relocation = {}) {
+function writeRuntimeMetadata(layout, target, { relocated, pruned, stripped, sha256, url } = {}) {
   writeFileSync(join(outputDir, "pi-desktop-runtime.json"), `${JSON.stringify({
     kind: "python",
+    version: PYTHON_VERSION,
+    releaseTag: PYTHON_RELEASE_TAG,
     target,
+    url: url || undefined,
+    sha256: sha256 || undefined,
     home: relativeRuntimePath(layout.home),
     executable: relativeRuntimePath(layout.bin),
-    pip: "ensurepip",
+    pip: "bundled",
     relocatable: true,
     relocated: {
-      symlinks: (relocation.relocated?.symlinks ?? []).map(relativeRuntimePath),
-      scripts: (relocation.relocated?.scripts ?? []).map(relativeRuntimePath),
-      wrappers: (relocation.relocated?.wrappers ?? []).map(relativeRuntimePath),
-      pruned: (relocation.pruned ?? []).map(relativeRuntimePath),
+      symlinks: (relocated?.symlinks ?? []).map(relativeRuntimePath),
+      scripts: (relocated?.scripts ?? []).map(relativeRuntimePath),
+      wrappers: (relocated?.wrappers ?? []).map(relativeRuntimePath),
+      pruned: (pruned ?? []).map(relativeRuntimePath),
+      stripped: (stripped ?? []).map(relativeRuntimePath),
     },
   }, null, 2)}\n`, "utf8");
 }
 
 function relativeRuntimePath(value) {
-  return value.slice(outputDir.length).replace(/^[/\\]/, "").replace(/\\/g, "/");
+  return value.slice(outputDir.length).replace(/^[/\\]/, "").replace(/\\/g, "/") || ".";
 }
 
 function runPython(layout, args, label) {
@@ -332,7 +307,7 @@ function isolatedPythonEnv(layout) {
   delete env.PYTHONHOME;
   delete env.PYTHONUSERBASE;
   // A pycache prefix redirects bytecode (and pip's RECORD entries for it) to a
-  // host-absolutepath cache outside the runtime - the relocatability gate then
+  // host-absolute-path cache outside the runtime - the relocatability gate then
   // fails on build-machine paths baked into shipped metadata.
   delete env.PYTHONPYCACHEPREFIX;
   delete env.PIP_PREFIX;

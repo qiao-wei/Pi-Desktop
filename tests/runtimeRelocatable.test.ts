@@ -34,6 +34,7 @@ import { spawnSync } from "node:child_process";
 
 import {
   findUnrelocatable,
+  hasInTreeInterpreter,
   parseShebang,
   platformForTarget,
   pruneHostReferenceMetadata,
@@ -203,6 +204,26 @@ test("`#!/usr/bin/env python3` is fine only when the bundle ships that name", ()
   assert.equal(shebangProblem(parseShebang("#!/bin/sh"), "/rt/bin/x", "/rt"), null);
 });
 
+test("a Windows payload counts `node.exe` as an in-tree interpreter", () => {
+  // The win32 archives keep the `.exe` suffix and put node at the payload root, so a correct
+  // Windows payload has no `bin/node` at all - it must still satisfy an `#!/usr/bin/env node`
+  // script inside npm, otherwise a right payload gets reported as a host dependency.
+  const root = mkdtempSync(join(tmpdir(), "pi-win-payload-"));
+  try {
+    writeFileSync(join(root, "node.exe"), "", { mode: 0o755 });
+    writeFileSync(join(root, "npm-cli.js"), "#!/usr/bin/env node\n", { mode: 0o644 });
+    assert.equal(hasInTreeInterpreter(root, "node"), true);
+    assert.equal(hasInTreeInterpreter(root, "python3"), false, "an unrelated name is still missing");
+    assert.equal(
+      shebangProblem(parseShebang("#!/usr/bin/env node"), join(root, "npm-cli.js"), root),
+      null,
+      "`/usr/bin/env node` resolves to the shipped node.exe",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("env-shebang scripts pass the gate once bin/python3 exists in the tree", () =>
   fixture(({ runtimeDir }) => {
     fakePython(join(runtimeDir, "bin", "python3.13"));
@@ -338,15 +359,21 @@ test("the build scripts actually run the relocatability pipeline", () => {
 
 test("the sidecar puts the bundled runtimes and their install dirs on PATH", () => {
   const source = readFileSync("server/index.mjs", "utf8");
-  assert.match(source, /import \{ agentRuntimePathDirs, mergePath \} from "\.\/agentEnv\.mjs"/);
   assert.match(
     source,
-    /const runtimeDirs = agentRuntimePathDirs\(\{[\s\S]*?\}\);/,
-    "the bundled runtime dirs are computed",
+    /import \{ agentRuntimePathEntries, mergePath, packageManagerBinDirs, selectAgentRuntimes \} from "\.\/agentEnv\.mjs"/,
+  );
+  // The decision (user's interpreter wins, bundled payload fills the gap) is made here, once,
+  // and PATH is assembled from its result - judging and injection read the same PATH.
+  assert.match(source, /selectAgentRuntimes\(\{[\s\S]*?\}\)/, "the runtime selection is computed");
+  assert.match(
+    source,
+    /const \{ prepend, append \} = agentRuntimePathEntries\(\{[\s\S]*?\}\);/,
+    "the PATH entries are computed from the selection",
   );
   assert.match(
     source,
-    /process\.env\.PATH = mergePath\(usable, process\.env\.PATH/,
+    /mergePath\(usable, process\.env\.PATH/,
     "PATH is merged with them instead of replaced",
   );
   assert.match(source, /applyAgentRuntimePath\(\);/, "it happens during startup");
@@ -356,6 +383,51 @@ test("the sidecar puts the bundled runtimes and their install dirs on PATH", () 
   );
   // One renderer, or Electron and Tauri drift apart again.
   assert.ok(!/export function renderPosixShim/.test(source), "launchers come from server/agentShims.mjs only");
+});
+
+// The payload half: where the shipped interpreters come from. Copying the build machine's own
+// installation made the shipped version a fact of whoever ran the build, and made the symlink /
+// shebang repairs below necessary in the first place.
+test("the runtime payloads are pinned downloads, not copies of this machine", () => {
+  const nodeBuild = readFileSync("scripts/build-node-runtime.mjs", "utf8");
+  const pythonBuild = readFileSync("scripts/build-python-runtime.mjs", "utf8");
+  const payloads = readFileSync("scripts/lib/runtimePayloads.mjs", "utf8");
+
+  // Version pinned in the repository, archives addressed per target platform.
+  assert.match(payloads, /export const NODE_VERSION = "v\d+\.\d+\.\d+"/);
+  assert.match(payloads, /export const PYTHON_VERSION = "\d+\.\d+\.\d+"/);
+  assert.match(payloads, /"darwin-arm64": \{/);
+  assert.match(payloads, /"win32-x64": \{/);
+  assert.match(payloads, /"linux-x64": \{/);
+
+  for (const [label, source] of [
+    ["node", nodeBuild],
+    ["python", pythonBuild],
+  ]) {
+    assert.match(source, /downloadArchive\(/, `${label}: the payload is downloaded`);
+    assert.match(source, /verifyPinnedHash\(/, `${label}: the download is checked against runtimePins.json`);
+    assert.match(source, /writeProvenance\(/, `${label}: SOURCES.json records version + url + sha256`);
+    assert.match(source, /isNativeTarget\(/, `${label}: cross-assembled payloads are not executed`);
+    // Nothing may take the interpreter from this machine by default. (`process.execPath` still
+    // appears inside the validation snippet that runs *in the payload*, which is about making
+    // sure it did not escape the runtime - not about where the runtime came from.)
+    assert.ok(
+      !/dirname\(dirname\(process\.execPath\)\)/.test(source),
+      `${label}: the build machine's own installation is not the source`,
+    );
+  }
+
+  // python used to come from a uv/Homebrew install plus `ensurepip`; both bake build-machine
+  // paths into the shipped tree and neither survives cross-assembly.
+  // `ensurepip` bakes the build-time absolute interpreter path into `bin/pip`.
+  assert.ok(!/\["-m", "ensurepip"\]/.test(pythonBuild), "pip comes from the payload, not from running it");
+  assert.match(pythonBuild, /pip: "bundled"/, "the shipped pip is the payload's own");
+  assert.ok(!/\.local\/share\/uv|LocalAppData/.test(pythonBuild), "no host-installed Python is picked up");
+  assert.match(
+    pythonBuild,
+    /if \(native\) \{[\s\S]*?verifyStandalonePython\(layout\);/,
+    "the executable check is native-only",
+  );
 });
 
 // The real shipped trees: if they are built locally, they must pass the same gate

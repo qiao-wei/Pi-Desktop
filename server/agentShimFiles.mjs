@@ -41,11 +41,16 @@ export function isBundledShimLink(target) {
  * Delete the launchers a bundled installation wrote. Only files that are recognisably ours are
  * touched: a user who parked their own `node` in that directory keeps it.
  *
+ * `family` limits the sweep to one runtime ("node" or "python"). That is what per-runtime
+ * takeover needs: on a machine that has its own Node but no Python, the node launchers must go
+ * while the python ones stay.
+ *
  * The filesystem is injected so this can be tested against a real temp directory without patching
  * globals, and so a failure to read one file can never take the bridge down.
  */
 export function removeBundledShims({
   dir,
+  family = null,
   platform = process.platform,
   readFileSync,
   readlinkSync,
@@ -55,6 +60,9 @@ export function removeBundledShims({
 }) {
   const removed = [];
   for (const spec of runtimeShimSpecs(platform)) {
+    if (family && spec.family !== family) {
+      continue;
+    }
     const shimPath = join(dir, spec.name);
     if (!isOurs(shimPath, { readFileSync, readlinkSync })) {
       continue;

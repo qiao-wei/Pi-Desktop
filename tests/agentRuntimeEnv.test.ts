@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
-import { agentRuntimePathDirs, mergePath, packageManagerBinDirs } from "../server/agentEnv.mjs";
+import { agentRuntimePathEntries, mergePath, packageManagerBinDirs } from "../server/agentEnv.mjs";
 import { createAgentShims } from "../server/agentShims.mjs";
 
 // A PATH with nothing but OS directories: no nvm, no Homebrew, no pyenv.
@@ -60,19 +60,25 @@ function run(file, args = [], env = {}) {
   });
 }
 
-test("PATH assembly keeps the bundled runtimes first and adds package-manager output", () => {
-  const result = agentRuntimePathDirs({
+test("two bundled runtimes: launchers first, then both package-manager outputs", () => {
+  const result = agentRuntimePathEntries({
     agentDir: "/home/user/.pi/agent",
-    bundledNodeBin: "/Applications/Pi Desktop.app/Contents/Resources/node-runtime/bin/node",
+    selection: {
+      node: { source: "bundled", path: "/Applications/Pi Desktop.app/Contents/Resources/node-runtime/bin/node" },
+      python: { source: "bundled", path: "/Applications/Pi Desktop.app/Contents/Resources/python-runtime/bin/python3.13" },
+    },
     platform: "darwin",
   });
 
-  assert.deepEqual(result, [
-    "/home/user/.pi/agent/bin",
-    "/Applications/Pi Desktop.app/Contents/Resources/node-runtime/bin",
-    "/home/user/.pi/agent/node/bin",
-    "/home/user/.pi/agent/python/bin",
-  ]);
+  assert.deepEqual(result, {
+    prepend: [
+      "/home/user/.pi/agent/bin",
+      "/Applications/Pi Desktop.app/Contents/Resources/node-runtime/bin",
+      "/home/user/.pi/agent/node/bin",
+      "/home/user/.pi/agent/python/bin",
+    ],
+    append: [],
+  });
 });
 
 test("package-manager output directories follow each platform's convention", () => {
@@ -88,10 +94,46 @@ test("package-manager output directories follow each platform's convention", () 
   assert.deepEqual(packageManagerBinDirs("/agent", "linux"), packageManagerBinDirs("/agent", "darwin"));
 });
 
-test("bundledNodeBin is optional (dev runs the server without a shell)", () => {
-  const result = agentRuntimePathDirs({ agentDir: "/agent", platform: "darwin" });
-  assert.equal(result[0], join("/agent", "bin"));
-  assert.equal(result.length, 3, "shim dir + the two package-manager dirs");
+test("a runtime the user already has keeps its place; only the gaps are filled", () => {
+  const systemOnly = agentRuntimePathEntries({
+    agentDir: "/agent",
+    selection: { node: { source: "system", path: "/opt/homebrew/bin/node" }, python: { source: "system", path: "/usr/bin/python3" } },
+    platform: "darwin",
+    dirExists: () => false,
+  });
+  assert.deepEqual(systemOnly, { prepend: ["/agent/bin"], append: [] });
+
+  // A CLI installed by an earlier bundled version is still callable (appended, behind the
+  // user's own PATH) - but pip's user-scripts dir is not, because that would split the
+  // environment across two interpreters.
+  const mixed = agentRuntimePathEntries({
+    agentDir: "/agent",
+    selection: {
+      node: { source: "system", path: "/opt/homebrew/bin/node" },
+      python: { source: "bundled", path: "/app/python-runtime/bin/python3.13" },
+    },
+    platform: "darwin",
+    dirExists: (dir) => dir === join("/agent", "node", "bin"),
+  });
+  assert.deepEqual(mixed, { prepend: ["/agent/bin", join("/agent", "python", "bin")], append: [join("/agent", "node", "bin")] });
+
+  // Nothing installed yet -> nothing appended.
+  const mixedEmpty = agentRuntimePathEntries({
+    agentDir: "/agent",
+    selection: { node: { source: "system", path: "/opt/homebrew/bin/node" }, python: { source: "system", path: "/usr/bin/python3" } },
+    platform: "darwin",
+    dirExists: () => false,
+  });
+  assert.deepEqual(mixedEmpty.append, []);
+});
+
+test("missing runtimes add nothing to PATH", () => {
+  const result = agentRuntimePathEntries({
+    agentDir: "/agent",
+    selection: { node: { source: "missing" }, python: { source: "missing" } },
+    platform: "darwin",
+  });
+  assert.deepEqual(result, { prepend: ["/agent/bin"], append: [] });
 });
 
 test("mergePath prepends without reordering or duplicating", () => {

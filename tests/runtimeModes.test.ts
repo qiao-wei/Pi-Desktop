@@ -28,7 +28,7 @@ import { removeBundledShims, runtimeShimSpecs } from "../server/agentShimFiles.m
 
 const require = createRequire(import.meta.url);
 
-const { resolveRuntimeMode, resolveNodeOnPath, systemHostPath, loginShellPath, joinPathValues, bundledNodePaths } =
+const { resolveRuntimeMode, resolveNodeOnPath, resolvePythonOnPath, systemHostPath, loginShellPath, joinPathValues, bundledNodePaths } =
   require("../src-electron/paths.js");
 const { bridgeEnv } = require("../src-electron/sidecar.js");
 
@@ -126,31 +126,31 @@ test("win32 找的是 node.exe，且用 ; 分段", () =>
     assert.equal(resolveNodeOnPath(`${root}:${root}`, "win32"), null, "win32 下 : 不是分隔符");
   }));
 
-test("bundled 模式下登录 shell 读不出来就原样透传 GUI 的 PATH", () => {
+test("登录 shell 读不出来就原样透传 GUI 的 PATH", () => {
   const env = { PATH: "/usr/bin:/bin", SHELL: "/definitely/missing" };
-  assert.equal(systemHostPath({ runtimeMode: "bundled", env, platform: "darwin" }), "/usr/bin:/bin");
+  assert.equal(systemHostPath({ env, platform: "darwin" }), "/usr/bin:/bin");
 });
 
-test("bundled 模式也回读登录 shell，但只问非交互的 -lc", { skip: process.platform === "win32" }, () =>
+test("bundled 模式也回读登录 shell：nvm/pyenv 的解释器就是我们要让位的那些", { skip: process.platform === "win32" }, () =>
   withTemp((root) => {
     // `~/.local/bin` 是 pipx / 各类 CLI 安装器的落点（bsk 就在那里），brew 在 /opt/homebrew/bin。
     // 两者都写在 .zprofile 里，所以不需要读 .zshrc 就能拿到。
     const shell = fakeLoginShell(root, "/opt/homebrew/bin:/Users/me/.local/bin:/usr/bin:/bin");
     const merged = systemHostPath({
-      runtimeMode: "bundled",
       env: { PATH: "/usr/bin:/bin", SHELL: shell },
       platform: "darwin",
     });
 
     assert.equal(merged, "/opt/homebrew/bin:/Users/me/.local/bin:/usr/bin:/bin");
-    assert.equal(loginShellArgs(root)[0], "-lc", "bundled 不该为 .zshrc（nvm use）付启动时间");
+    // 内置运行时只在用户没有自己的解释器时才接管，而 nvm / pyenv 只从交互式 rc 文件里
+    // 导 PATH——所以两种模式问的都是 -lic（`systemHostPath` 上方的注释是完整理由）。
+    assert.equal(loginShellArgs(root)[0], "-lic");
   }));
 
-test("system 模式仍然问交互式的 -lic（nvm / pyenv 的 node 只在 .zshrc 里）", { skip: process.platform === "win32" }, () =>
+test("system 模式问的同样是交互式的 -lic（nvm / pyenv 的 node 只在 .zshrc 里）", { skip: process.platform === "win32" }, () =>
   withTemp((root) => {
     const shell = fakeLoginShell(root, "/usr/bin:/bin");
     systemHostPath({
-      runtimeMode: "system",
       env: { PATH: "/usr/bin:/bin", SHELL: shell },
       platform: "darwin",
     });
@@ -158,32 +158,59 @@ test("system 模式仍然问交互式的 -lic（nvm / pyenv 的 node 只在 .zsh
     assert.equal(loginShellArgs(root)[0], "-lic", "少了 -i 就找不到 nvm 装的 node");
   }));
 
-test("system 模式下 PATH 里已经有 node 就不再问登录 shell", () =>
+test("PATH 里已经有用户 node 和 python 时不再问登录 shell", () =>
+  withTemp((root) => {
+    mkdirSync(root, { recursive: true });
+    const node = join(root, "node");
+    const python = join(root, "python3");
+    writeFileSync(node, "", "utf8");
+    writeFileSync(python, "", "utf8");
+    const path = `/usr/bin:${root}`;
+    // SHELL 指向一个不存在的东西：两个解释器都在，就绝不该走到那一步。
+    assert.equal(systemHostPath({ env: { PATH: path, SHELL: "/missing" }, platform: "darwin" }), path);
+  }));
+
+test("只有 node 不够：python 仍然可能只在 .zshrc 里，所以还会去问", { skip: process.platform === "win32" }, () =>
   withTemp((root) => {
     mkdirSync(root, { recursive: true });
     const node = join(root, "node");
     writeFileSync(node, "", "utf8");
-    const path = `/usr/bin:${root}`;
-    // SHELL 指向一个不存在的东西：只要还能看到 node，就绝不该走到那一步。
-    assert.equal(systemHostPath({ runtimeMode: "system", env: { PATH: path, SHELL: "/missing" }, platform: "darwin" }), path);
+    const shell = fakeLoginShell(root, `${root}:/opt/homebrew/bin:/usr/bin:/bin`);
+
+    systemHostPath({ env: { PATH: `${root}:/usr/bin:/bin`, SHELL: shell }, platform: "darwin" });
+
+    assert.equal(loginShellArgs(root)[0], "-lic", "只看 node 会把 pyenv 的 python 漏掉");
   }));
 
-test("PI_DESKTOP_HOST_PATH 能直接指定，两种模式都认", () => {
-  const bundled = { PATH: "/usr/bin", PI_DESKTOP_HOST_PATH: "/opt/custom/bin:/usr/bin" };
-  assert.equal(systemHostPath({ runtimeMode: "bundled", env: bundled, platform: "darwin" }), "/opt/custom/bin:/usr/bin");
-  assert.equal(
-    systemHostPath({
-      runtimeMode: "system",
-      env: { PATH: "/usr/bin", PI_DESKTOP_HOST_PATH: "/opt/custom/bin:/usr/bin" },
-      platform: "darwin",
-    }),
-    "/opt/custom/bin:/usr/bin",
-  );
+test("工具链自带的 python 不算「用户已有」，回读照样发生", { skip: process.platform === "win32" }, () =>
+  withTemp((root) => {
+    // 只装了 Command Line Tools 的 Mac：/usr/bin/python3 存在，但它是 3.9.6 + pip 21.x，
+    // 不能拿它当「用户已经有 Python」而跳过回读。
+    const shell = fakeLoginShell(root, "/opt/homebrew/bin:/usr/bin:/bin");
+    systemHostPath({ env: { PATH: "/usr/bin:/bin", SHELL: shell }, platform: "darwin" });
+
+    assert.equal(loginShellArgs(root)[0], "-lic");
+  }));
+
+test("找 python 时跳过工具链目录，Linux 的 /usr/bin 不算工具链", () =>
+  withTemp((root) => {
+    mkdirSync(root, { recursive: true });
+    const python = join(root, "python3");
+    writeFileSync(python, "", "utf8");
+
+    assert.equal(resolvePythonOnPath(`/usr/bin:${root}`, "darwin"), python, "macOS /usr/bin 里的不算");
+    assert.equal(resolvePythonOnPath("/usr/bin", "linux"), join("/usr/bin", "python3"), "Linux 是发行版真环境");
+    assert.equal(resolvePythonOnPath("/usr/bin:/bin", "darwin"), null);
+  }));
+
+test("PI_DESKTOP_HOST_PATH 能直接指定", () => {
+  const env = { PATH: "/usr/bin", PI_DESKTOP_HOST_PATH: "/opt/custom/bin:/usr/bin" };
+  assert.equal(systemHostPath({ env, platform: "darwin" }), "/opt/custom/bin:/usr/bin");
 });
 
 // macOS GUI 应用拿不到登录 shell 的 PATH（launchctl 的 PATH 是空的），nvm / pyenv / /opt/homebrew
 // 装的 node 只能靠回读登录 shell 的 PATH 才看得见。这里用一个假 shell 验证回读与污染处理。
-test("system 模式下找得到登录 shell 里的 node（rc 输出污染也要能吃下）", { skip: process.platform === "win32" }, () =>
+test("找得到登录 shell 里的 node（rc 输出污染也要能吃下）", { skip: process.platform === "win32" }, () =>
   withTemp((root) => {
     const bin = join(root, "nvm-bin");
     mkdirSync(bin, { recursive: true });
@@ -195,7 +222,7 @@ test("system 模式下找得到登录 shell 里的 node（rc 输出污染也要�
     const env = { PATH: "/usr/bin:/bin", SHELL: shell };
     assert.equal(loginShellPath(env, "darwin"), `${bin}:/usr/bin:/bin`);
 
-    const merged = systemHostPath({ runtimeMode: "system", env, platform: "darwin" });
+    const merged = systemHostPath({ env, platform: "darwin" });
     assert.equal(merged, `${bin}:/usr/bin:/bin`, "登录 shell 的值在前，且不重复");
     // 真的能从这条 PATH 里解析出 node —— 这才是这一整段存在的理由。
     assert.equal(resolveNodeOnPath(merged, "darwin"), node);
@@ -210,7 +237,7 @@ test("登录 shell 读不出来时不能编造 PATH", { skip: process.platform =
     chmodSync(silent, 0o755);
     assert.equal(loginShellPath({ PATH: "/usr/bin", SHELL: silent }, "darwin"), null);
     assert.equal(
-      systemHostPath({ runtimeMode: "system", env: { PATH: "/usr/bin:/bin", SHELL: silent }, platform: "darwin" }),
+      systemHostPath({ env: { PATH: "/usr/bin:/bin", SHELL: silent }, platform: "darwin" }),
       "/usr/bin:/bin",
     );
   }));

@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
@@ -65,6 +65,46 @@ test("the manifest pins what the bridge imports and reports what it cannot", () 
   assert.deepEqual(manifest.dependencies, { "@earendil-works/pi-ai": "0.84.2", typebox: "1.0.0" });
   assert.equal(manifest.private, true);
   assert.deepEqual(missing, ["not-installed"]);
+});
+
+test("transitive pins become npm overrides, direct deps stay plain dependencies", () => {
+  const { manifest } = bridgePackageManifest({
+    imports: ["@earendil-works/pi-coding-agent"],
+    versions: { "@earendil-works/pi-coding-agent": "1.1.0" },
+    overrides: {
+      // A dependency of a dependency: this is the one npm would otherwise float to a newer minor.
+      "@earendil-works/pi-codemode": "1.1.0",
+      // Also reachable transitively, but it is a direct dependency here - npm rejects an override
+      // that contradicts the declared spec, so it must not be duplicated.
+      "@earendil-works/pi-coding-agent": "1.1.0",
+    },
+  });
+
+  assert.deepEqual(manifest.dependencies, { "@earendil-works/pi-coding-agent": "1.1.0" });
+  assert.deepEqual(manifest.overrides, { "@earendil-works/pi-codemode": "1.1.0" });
+});
+
+test("no transitive pins means no overrides block at all", () => {
+  const { manifest } = bridgePackageManifest({ imports: ["typebox"], versions: { typebox: "1.0.0" }, overrides: {} });
+  assert.equal("overrides" in manifest, false, "an empty overrides block is still an npm override surface");
+});
+
+test("every pi-family package in the repo tree is pinned to a version npm will accept", () => {
+  const { bridgePackageManifest: build } = require("../scripts/lib/bridgeRuntime.mjs");
+  const declared = readJson("package.json").dependencies;
+  const scopeDir = resolve(repoRoot, "node_modules", "@earendil-works");
+  const pinned = Object.fromEntries(
+    readdirSync(scopeDir)
+      .filter((name) => existsSync(resolve(scopeDir, name, "package.json")))
+      .map((name) => [`@earendil-works/${name}`, readJson(`node_modules/@earendil-works/${name}/package.json`).version]),
+  );
+
+  const { manifest } = build({ imports: Object.keys(declared).filter((name) => name.startsWith("@earendil-works/")), versions: declared, overrides: pinned });
+  for (const [name, version] of Object.entries(manifest.overrides ?? {})) {
+    assert.equal(version, pinned[name], `${name} must be pinned to the version the repo tree resolved`);
+    assert.equal(/^\d+\.\d+\.\d+/.test(version), true, "an override has to be an exact version, not a range");
+  }
+  assert.equal(pinned["@earendil-works/pi-codemode"] !== undefined, true, "pi-codemode is the one that floated");
 });
 
 test("the bridge really only imports packages we declare", () => {
