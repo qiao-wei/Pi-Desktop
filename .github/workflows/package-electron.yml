@@ -1,0 +1,251 @@
+# Electron 出包：Actions 页面上点「Run workflow」触发。
+#
+# 这一份只做一件事：把 `node scripts/pack.mjs --host electron …` 放进 CI 里跑，参数全部从按钮的
+# 表单里来。真正的规则（哪些组合不可能、缺公证凭证要先报错、签名档位是什么）都在仓库里那份
+# plan 里，工作流不重复判定 —— 所以这里没有 "if sign == release 就检查 secrets" 之类的手写校验，
+# 缺凭证时 pack 会在动手之前带着修复提示退出（scripts/lib/macSigning.cjs）。
+#
+# 三条必须知道的边界：
+#   * mac 目标只能在 macOS runner 上打（dmg / 签名 / 公证都绑 mac）；
+#   * bundled 模式不支持交叉（目标平台的 node/python 在构建机上跑不起来，无法验收）—— 所以每个
+#     架构都在自己的 runner 上原生构建：arm64 → macos-15，x64 → macos-15-intel；
+#   * sidecar 能力包门禁（sidecar:verify）在 CI 上是空转的：它读 ~/.pi/agent/settings.json，
+#     runner 上没有这个文件就跳过。别把它的绿灯当成"能力包已验证"。
+name: Package · Electron
+
+on:
+  # 「点按钮触发」就是它：Actions → Package · Electron → Run workflow。
+  workflow_dispatch:
+    inputs:
+      mac:
+        description: "macOS 架构（release 档的签名 + 公证只在 macOS 目标上生效）"
+        type: choice
+        default: arm64
+        options:
+          - arm64
+          - x64
+          - both
+          - none
+      windows:
+        description: "Windows 目标（x64；NSIS 安装包）"
+        type: choice
+        default: none
+        options:
+          - x64
+          - none
+      mode:
+        description: "运行时模式：bundled 内嵌 Node 25 + CPython 3.13（下载约 100MB）；slim 内嵌 0 字节、要求用户机器有 Node 22+"
+        type: choice
+        default: bundled
+        options:
+          - bundled
+          - slim
+      sign:
+        description: "macOS 签名档位：local = ad-hoc（本机自用）；release = Developer ID 真签名 + 时间戳 + 公证（需要 APPLE_* Secrets，且要等 Apple 排队）"
+        type: choice
+        default: local
+        options:
+          - local
+          - release
+      run_tests:
+        description: "打包前在 ubuntu 上跑 npm test"
+        type: boolean
+        default: true
+
+# 同一个 ref 上重复点按钮时排队而不是互相踩（打包是长任务，取消半途会留下半成品）。
+concurrency:
+  group: package-electron-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ── 把表单变成矩阵 ──────────────────────────────────────────────────────────
+  # 一次只打用户勾的那几个：空矩阵会让 package job 直接不跑，所以连 count 一起带出来。
+  plan:
+    name: 规划要打哪些包
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - id: plan
+        env:
+          MAC: ${{ inputs.mac }}
+          WINDOWS: ${{ inputs.windows }}
+        run: |
+          node -e '
+            const include = [];
+            const mac = process.env.MAC;
+            if (mac === "arm64" || mac === "both") {
+              include.push({ runner: "macos-15", target: "mac", arch: "arm64", outdir: "mac-arm64" });
+            }
+            if (mac === "x64" || mac === "both") {
+              include.push({ runner: "macos-15-intel", target: "mac", arch: "x64", outdir: "mac" });
+            }
+            if (process.env.WINDOWS === "x64") {
+              include.push({ runner: "windows-latest", target: "windows", arch: "x64", outdir: "win-unpacked" });
+            }
+            require("node:fs").appendFileSync(
+              process.env.GITHUB_OUTPUT,
+              `count=${include.length}\nmatrix=${JSON.stringify({ include })}\n`,
+            );
+          '
+          cat "$GITHUB_OUTPUT"
+
+  # ── 测试 ────────────────────────────────────────────────────────────────────
+  verify:
+    name: 测试（npm test）
+    if: ${{ inputs.run_tests }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "25"
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  # ── 出包 ────────────────────────────────────────────────────────────────────
+  package:
+    name: ${{ matrix.target }}/${{ matrix.arch }} · ${{ inputs.mode }} · 签名 ${{ matrix.target == 'mac' && inputs.sign || 'n/a' }}
+    needs: [plan, verify]
+    # verify 可能被 run_tests=false 跳过：skipped 不算失败。plan 失败时矩阵是空的，先看它的 result。
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.count != '0' && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      # 载荷镜像：留空就用仓库里的默认值（npmmirror）。IP 到不了 npmmirror 时在仓库 Variables 里
+      # 指到上游即可：PI_DESKTOP_NODE_DIST_MIRROR=https://nodejs.org/dist
+      # PI_DESKTOP_PYTHON_DIST_MIRROR=https://github.com/astral-sh/python-build-standalone/releases/download
+      PI_DESKTOP_NODE_DIST_MIRROR: ${{ vars.PI_DESKTOP_NODE_DIST_MIRROR }}
+      PI_DESKTOP_PYTHON_DIST_MIRROR: ${{ vars.PI_DESKTOP_PYTHON_DIST_MIRROR }}
+      # npm/Electron 走镜像时再加（留空 = 默认）：
+      # ELECTRON_MIRROR: ${{ vars.ELECTRON_MIRROR }}
+      # ELECTRON_BUILDER_BINARIES_MIRROR: ${{ vars.ELECTRON_BUILDER_BINARIES_MIRROR }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "25"
+          cache: npm
+
+      # Electron 与 electron-builder 的下载缓存：每次 100MB+ 地重下 Electron zip / nsis，缓存后
+      # 只在 lockfile 变化时重下。路径是这两个工具自己的约定，不随我们改。
+      - name: 缓存 Electron / electron-builder 下载（macOS）
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-dl-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-dl-${{ runner.os }}-${{ matrix.arch }}-
+
+      - name: 缓存 Electron / electron-builder 下载（Windows）
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: electron-dl-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-dl-${{ runner.os }}-${{ matrix.arch }}-
+
+      # node:build 在 win32 目标上用 `unzip` 解 node 的 zip（runtimePayloads.mjs），而 Windows 镜像
+      # 的软件清单里只有 7-Zip —— 没有 unzip。必须是一个真的 `unzip.exe`：Node 在 Windows 上
+      # `spawnSync("unzip", …)` 是 shell:false，CreateProcess 只会补 `.exe`，`.cmd`/`.bat` 的 shim
+      # 既不被搜到、还会被 Node 直接拒掉。所以兜底走 Chocolatey 的 unzip（Info-ZIP）。
+      - name: 确保 unzip 可用（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Get-Command unzip -ErrorAction SilentlyContinue) { Write-Host "unzip 已在 PATH"; exit 0 }
+
+          $gitBin = "C:\Program Files\Git\usr\bin"
+          if (Test-Path (Join-Path $gitBin "unzip.exe")) {
+            Write-Host "用 Git for Windows 自带的 unzip：$gitBin"
+            $gitBin | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+            exit 0
+          }
+
+          Write-Host "镜像里没有 unzip，用 Chocolatey 装一个"
+          choco install unzip -y --no-progress --limit-output
+
+          $chocoBin = "C:\ProgramData\chocolatey\bin"
+          $chocoBin | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          if (-not (Test-Path (Join-Path $chocoBin "unzip.exe"))) { throw "choco 装完仍找不到 $chocoBin\unzip.exe" }
+          Write-Host "unzip 就位：$chocoBin\unzip.exe"
+
+      - name: 安装依赖
+        run: npm ci
+
+      # 出包入口自己会念出这单的档位、目标三元组和步骤；`--sign`/`--mode` 只从命令行来，
+      # 所以这里不需要（也不该）在 env 里塞 PI_DESKTOP_SIGN。
+      - name: 打包
+        env:
+          # 凭证只挂在这一步：npm ci（含各依赖的 postinstall）不该看见 Apple 凭证。
+          # release 档缺凭证时 pack 会在这里带提示退出；local 档给了也不会用。
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          # 换证书名时用仓库 Variable 覆盖（local 档永远是 ad-hoc，覆盖不了）。
+          PI_DESKTOP_SIGN_IDENTITY: ${{ vars.PI_DESKTOP_SIGN_IDENTITY }}
+        run: node scripts/pack.mjs --host electron --target ${{ matrix.target }} --arch ${{ matrix.arch }} --mode ${{ inputs.mode }} --sign ${{ inputs.sign }}
+
+      # 签名自洽只看三样：Identifier = CFBundleIdentifier、Signature（local 档必须是 adhoc，不能是
+      # Electron 自带包那种 linker-signed）、有 Sealed Resources。release 档额外要求 TeamIdentifier。
+      - name: 验收签名（macOS）
+        if: matrix.target == 'mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="dist-electron/${{ matrix.outdir }}/Pi Desktop.app"
+          report="$RUNNER_TEMP/codesign.txt"
+          codesign -dv --verbose=2 "$app" 2>&1 | tee "$report"
+          codesign --verify --strict --verbose=2 "$app"
+          grep -q '^Identifier=com.pi.desktop$' "$report"
+          grep -q '^Sealed Resources' "$report"
+          if [ "${{ inputs.sign }}" = "release" ]; then
+            grep -qE '^TeamIdentifier=[A-Z0-9]+$' "$report"
+          else
+            grep -q '^Signature=adhoc$' "$report"
+          fi
+          echo "签名自洽：$(grep -E '^(Identifier|Signature|TeamIdentifier)=' "$report" | tr '\n' ' ')"
+
+      # .app 目录直接上传会丢符号链接和执行位，签名就废了；ditto 保留一切（含 xattr）。
+      - name: 打包 .app（macOS）
+        if: matrix.target == 'mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -e 'console.log(require("./package.json").version)')
+          ditto -c -k --sequesterRsrc --keepParent \
+            "dist-electron/${{ matrix.outdir }}/Pi Desktop.app" \
+            "dist-electron/Pi-Desktop-${version}-${{ matrix.arch }}.app.zip"
+          ls -lh dist-electron
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-desktop-electron-${{ matrix.target }}-${{ matrix.arch }}-${{ inputs.mode }}-${{ inputs.sign }}
+          path: |
+            dist-electron/*.dmg
+            dist-electron/*.exe
+            dist-electron/*.zip
+            dist-electron/*.blockmap
+            dist-electron/*.yml
+            dist-electron/builder-*.yaml
+          if-no-files-found: error
+          retention-days: 14
