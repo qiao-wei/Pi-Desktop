@@ -33,13 +33,15 @@ on:
         options:
           - x64
           - none
-      mode:
-        description: "运行时模式：bundled 内嵌 Node 25 + CPython 3.13（下载约 100MB）；slim 内嵌 0 字节、要求用户机器有 Node 22+"
-        type: choice
-        default: bundled
-        options:
-          - bundled
-          - slim
+      # GitHub 的表单没有真正的多选框，boolean 就是那个勾选框：两个都勾 = 两种模式都打。
+      bundled:
+        description: "运行时模式 bundled：内嵌 Node 25 + CPython 3.13（首次下载约 100MB）"
+        type: boolean
+        default: true
+      slim:
+        description: "运行时模式 slim：内嵌 0 字节，要求用户机器自己有 Node 22+"
+        type: boolean
+        default: false
       sign:
         description: "macOS 签名档位：local = ad-hoc（本机自用）；release = Developer ID 真签名 + 时间戳 + 公证（需要 APPLE_* Secrets，且要等 Apple 排队）"
         type: choice
@@ -62,7 +64,7 @@ permissions:
 
 jobs:
   # ── 把表单变成矩阵 ──────────────────────────────────────────────────────────
-  # 一次只打用户勾的那几个：空矩阵会让 package job 直接不跑，所以连 count 一起带出来。
+  # 目标平台 × 运行时模式：两个都勾就是每个目标打两个包。一个都没勾就报错，而不是静默不跑。
   plan:
     name: 规划要打哪些包
     runs-on: ubuntu-latest
@@ -75,19 +77,35 @@ jobs:
         env:
           MAC: ${{ inputs.mac }}
           WINDOWS: ${{ inputs.windows }}
+          BUNDLED: ${{ inputs.bundled }}
+          SLIM: ${{ inputs.slim }}
         run: |
           node -e '
-            const include = [];
+            const modes = [];
+            if (process.env.BUNDLED === "true") modes.push("bundled");
+            if (process.env.SLIM === "true") modes.push("slim");
+            if (modes.length === 0) {
+              console.error("pack: 至少勾一个运行时模式（bundled / slim）");
+              process.exit(1);
+            }
+
+            const targets = [];
             const mac = process.env.MAC;
             if (mac === "arm64" || mac === "both") {
-              include.push({ runner: "macos-15", target: "mac", arch: "arm64", outdir: "mac-arm64" });
+              targets.push({ runner: "macos-15", target: "mac", arch: "arm64", outdir: "mac-arm64" });
             }
             if (mac === "x64" || mac === "both") {
-              include.push({ runner: "macos-15-intel", target: "mac", arch: "x64", outdir: "mac" });
+              targets.push({ runner: "macos-15-intel", target: "mac", arch: "x64", outdir: "mac" });
             }
             if (process.env.WINDOWS === "x64") {
-              include.push({ runner: "windows-latest", target: "windows", arch: "x64", outdir: "win-unpacked" });
+              targets.push({ runner: "windows-latest", target: "windows", arch: "x64", outdir: "win-unpacked" });
             }
+            if (targets.length === 0) {
+              console.error("pack: 至少选一个目标平台（macOS / Windows）");
+              process.exit(1);
+            }
+
+            const include = targets.flatMap((target) => modes.map((mode) => ({ ...target, mode })));
             require("node:fs").appendFileSync(
               process.env.GITHUB_OUTPUT,
               `count=${include.length}\nmatrix=${JSON.stringify({ include })}\n`,
@@ -112,7 +130,7 @@ jobs:
 
   # ── 出包 ────────────────────────────────────────────────────────────────────
   package:
-    name: ${{ matrix.target }}/${{ matrix.arch }} · ${{ inputs.mode }} · 签名 ${{ matrix.target == 'mac' && inputs.sign || 'n/a' }}
+    name: ${{ matrix.target }}/${{ matrix.arch }} · ${{ matrix.mode }} · 签名 ${{ matrix.target == 'mac' && inputs.sign || 'n/a' }}
     needs: [plan, verify]
     # verify 可能被 run_tests=false 跳过：skipped 不算失败。plan 失败时矩阵是空的，先看它的 result。
     if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.count != '0' && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}
@@ -202,7 +220,7 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           # 换证书名时用仓库 Variable 覆盖（local 档永远是 ad-hoc，覆盖不了）。
           PI_DESKTOP_SIGN_IDENTITY: ${{ vars.PI_DESKTOP_SIGN_IDENTITY }}
-        run: node scripts/pack.mjs --host electron --target ${{ matrix.target }} --arch ${{ matrix.arch }} --mode ${{ inputs.mode }} --sign ${{ inputs.sign }}
+        run: node scripts/pack.mjs --host electron --target ${{ matrix.target }} --arch ${{ matrix.arch }} --mode ${{ matrix.mode }} --sign ${{ inputs.sign }}
 
       # 签名自洽只看三样：Identifier = CFBundleIdentifier、Signature（local 档必须是 adhoc，不能是
       # Electron 自带包那种 linker-signed）、有 Sealed Resources。release 档额外要求 TeamIdentifier。
@@ -239,7 +257,7 @@ jobs:
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: pi-desktop-electron-${{ matrix.target }}-${{ matrix.arch }}-${{ inputs.mode }}-${{ inputs.sign }}
+          name: pi-desktop-electron-${{ matrix.target }}-${{ matrix.arch }}-${{ matrix.mode }}-${{ inputs.sign }}
           path: |
             dist-electron/*.dmg
             dist-electron/*.exe
