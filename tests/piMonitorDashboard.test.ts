@@ -5,9 +5,15 @@
  * 空闲自动关闭、大 body 拒绝。不 mock http。
  */
 import assert from "node:assert/strict";
-import test, { type TestContext } from "node:test";
+import type { TestContext } from "node:test";
 
-import { renderDashboardHtml, startDashboardServer } from "../../../.pi/agent/packages/pi-monitor/extensions/monitor/dashboard.ts";
+import { AGENT_PACKAGES_DIR, loadAgentModule, test } from "./agentPackageGuard.ts";
+
+type MonitorDashboard = typeof import("../../../.pi/agent/packages/pi-monitor/extensions/monitor/dashboard.ts");
+const monitor = await loadAgentModule<MonitorDashboard>(
+	new URL("pi-monitor/extensions/monitor/dashboard.ts", AGENT_PACKAGES_DIR),
+);
+const { renderDashboardHtml, startDashboardServer } = monitor ?? ({} as MonitorDashboard);
 
 /**
  * 把页面里内联的 <script> 抽出来（renderDashboardHtml 已经把 token / title 插进去了）。
