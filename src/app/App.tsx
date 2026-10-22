@@ -13,7 +13,6 @@ import {
   ExternalLink,
   FileText,
   FileUp,
-  Clock3,
   Folder,
   FolderOpen,
   Mic,
@@ -37,6 +36,7 @@ import {
   Terminal,
   Trash2,
   Wrench,
+  Loader,
   Loader2,
   Sun,
   GitFork,
@@ -197,7 +197,12 @@ import {
   stepMatchIndex,
   type SessionSearchResult,
 } from "../shared/sessionSearch";
-import { sidebarStreamingSessionPaths } from "../features/chat/sidebarStreaming";
+import {
+  SIDEBAR_SESSION_BUSY_ICON_CLASS,
+  SIDEBAR_SESSION_BUSY_SLOT_CLASS,
+  sidebarSessionBusyIndicator,
+  sidebarStreamingSessionPaths,
+} from "../features/chat/sidebarStreaming";
 import type { MessageEditPayload } from "../features/chat/MessageEditBox";
 import { toAttachmentInputs } from "../features/chat/editorParts";
 import { badgeBeforeCaret, isMarkerOnlyTextNode, stepOverCaretMarker as stepSelectionOverCaretMarker } from "../features/chat/caretMarkerStep";
@@ -7902,6 +7907,7 @@ function SidebarSessionRow({
   const t = useT();
   const isActive = session.path === activeSessionPath;
   const isEditing = editingSession?.sessionPath === session.path;
+  const busyIndicator = sidebarSessionBusyIndicator(isPending, isStreaming);
   return (
     <div
       className={cn(
@@ -7922,12 +7928,18 @@ function SidebarSessionRow({
       }}
     >
       {/* Session rows are text-only (codex-ui): the two status cues sit in the indent
-          gutter so they never push the title sideways. */}
-      {isPending ? (
-        <Loader2 className="absolute left-3 size-[15px] animate-spin text-muted-foreground" aria-hidden="true" />
-      ) : isStreaming ? (
-        <Clock3 className="absolute left-3 size-3.5 animate-pulse text-muted-foreground" aria-label={t("sidebar.generating")} />
-      ) : null}
+          gutter so they never push the title sideways. The cue itself is ZCode's task-list
+          slot (a `Loader` that really spins, spun on this HTML wrapper rather than on the
+          SVG) - see `sidebarStreaming.ts` for why the animation may not move onto the icon. */}
+      {busyIndicator === "none" ? null : (
+        <span className={SIDEBAR_SESSION_BUSY_SLOT_CLASS}>
+          <Loader
+            className={SIDEBAR_SESSION_BUSY_ICON_CLASS}
+            aria-hidden={busyIndicator === "pending" ? "true" : undefined}
+            aria-label={busyIndicator === "streaming" ? t("sidebar.generating") : undefined}
+          />
+        </span>
+      )}
       {isEditing ? (
         <Input
           className="mr-1 ml-9 h-6 min-w-0 flex-1 px-1.5"
