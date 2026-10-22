@@ -5,9 +5,14 @@
  * → ../../../.pi/agent/packages/pi-monitor/，本机之外跑这些用例需要有那个目录。
  */
 import assert from "node:assert/strict";
-import test from "node:test";
 
-import {
+import { AGENT_PACKAGES_DIR, loadAgentModule, test } from "./agentPackageGuard.ts";
+
+type MonitorMetrics = typeof import("../../../.pi/agent/packages/pi-monitor/extensions/monitor/metrics.ts");
+const monitor = await loadAgentModule<MonitorMetrics>(
+	new URL("pi-monitor/extensions/monitor/metrics.ts", AGENT_PACKAGES_DIR),
+);
+const {
 	buildJsonReport,
 	buildMarkdownReport,
 	buildPanelLines,
@@ -29,7 +34,7 @@ import {
 	thresholdBreaches,
 	toolCallText,
 	truncateForLog,
-} from "../../../.pi/agent/packages/pi-monitor/extensions/monitor/metrics.ts";
+} = monitor ?? ({} as MonitorMetrics);
 
 // ---------------------------------------------------------------------------
 // 指标状态机
