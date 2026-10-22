@@ -109,8 +109,16 @@ function assertRefreshed(stderr) {
   );
 }
 
-/** 一台没有 node/python 的机器：判定只看这条 PATH，所以测试才能与开发机无关。 */
-const HOST_WITHOUT_RUNTIMES = "/usr/bin:/bin:/usr/sbin:/sbin";
+/**
+ * 一台没有 node/python 的机器：判定只看这条 PATH，所以测试才能与开发机无关。
+ *
+ * 必须是**空目录**，不能写成 "/usr/bin:/bin:/usr/sbin:/sbin"：Ubuntu 的 /usr/bin/python3 是真的
+ * 解释器，探测（`python3 -V`）会成功，于是“这台机器上没有 python”这个前提在 Linux 上不成立
+ * （2026-10-22 打包工作流上就是这么红的）；macOS 上那个 /usr/bin/python3 是 Xcode CLT 的占位桩，
+ * 探测失败 —— 旧写法只在 mac 上成立，不是因为 mac 真的没有 python。
+ */
+const HOST_WITHOUT_RUNTIMES = mkdtempSync(join(tmpdir(), "pi-empty-path-"));
+process.on("exit", () => rmSync(HOST_WITHOUT_RUNTIMES, { recursive: true, force: true }));
 
 test("机器上没有 node/python 时，bundled 启动会把整套 launcher 写出来（不再撞模块顶层 TDZ）", async (t) => {
   const agentDir = tempDir("pi-agent-bundled-");

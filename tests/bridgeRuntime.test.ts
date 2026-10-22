@@ -19,7 +19,11 @@ const {
   compareVersions,
   defaultTargetTriple,
   packageNameOf,
+  escapedSpecsFromProbe,
+  isInsideTree,
   renderPosixBridgeLauncher,
+  resolveNpmInvocation,
+  siblingNpmCliCandidates,
   staleInstalledPackages,
   versionFloor,
 } = await import(pathToFileURL(resolve(import.meta.dirname, "../scripts/lib/bridgeRuntime.mjs")).href);
@@ -351,4 +355,98 @@ test("the bridge build warns when the installed pi lags package.json", () => {
     [],
     "the checked-out repo must not build the bridge from a stale tree",
   );
+});
+
+// `npm install` 那句到底拿什么去起。Windows 上没有 npm_execpath 时旧代码会退化成裸 `npm`，
+// 而 `npm` 在 Windows 上是个 `.cmd` —— spawnSync(shell:false) 根本执行不了它，报出来还只有一句
+// 空消息（2026-10-22 CI 的 Windows slim 包）。所以这几条锁住"会去找真的 npm-cli.js"。
+test("npm_execpath 指向 cli.js 时用当前 node 跑它", () => {
+  const invocation = resolveNpmInvocation({
+    env: { npm_execpath: "/usr/local/lib/node_modules/npm/bin/npm-cli.js" },
+    execPath: "/usr/local/bin/node",
+  });
+  assert.deepEqual(invocation, {
+    command: "/usr/local/bin/node",
+    baseArgs: ["/usr/local/lib/node_modules/npm/bin/npm-cli.js"],
+    source: "npm_execpath",
+  });
+});
+
+test("npm_execpath 不是 .js（自带的 shell 包装）时直接执行它", () => {
+  const invocation = resolveNpmInvocation({ env: { npm_execpath: "/usr/local/bin/npm" }, execPath: "/usr/local/bin/node" });
+  assert.deepEqual(invocation, { command: "/usr/local/bin/npm", baseArgs: [], source: "npm_execpath" });
+});
+
+test("没有 npm_execpath 时找 node 旁边那份 npm-cli.js，且按平台用不同目录形状", () => {
+  const probed = [];
+  const exists = (path) => {
+    probed.push(path);
+    return true;
+  };
+
+  const win = resolveNpmInvocation({ env: {}, platform: "win32", execPath: "C:\\hostedtoolcache\\node\\bin\\node.exe", exists });
+  assert.equal(win.source, "npm-cli");
+  assert.equal(win.command, "C:\\hostedtoolcache\\node\\bin\\node.exe");
+  assert.deepEqual(probed, ["C:\\hostedtoolcache\\node\\bin\\node_modules\\npm\\bin\\npm-cli.js"]);
+
+  // POSIX：npm 在 <node>/../lib/node_modules/npm 里，而且 `..` 要被规范化掉。
+  assert.deepEqual(siblingNpmCliCandidates("/opt/hostedtoolcache/node/bin/node", "darwin"), [
+    "/opt/hostedtoolcache/node/lib/node_modules/npm/bin/npm-cli.js",
+  ]);
+  assert.deepEqual(siblingNpmCliCandidates("C:\\n\\node.exe", "win32"), ["C:\\n\\node_modules\\npm\\bin\\npm-cli.js"]);
+});
+
+test("调用方给的候选（内置运行时那份 npm）优先于 node 旁边那份", () => {
+  const chosen = [];
+  const invocation = resolveNpmInvocation({
+    env: {},
+    execPath: "/repo/node",
+    candidates: ["/repo/src-tauri/binaries/node-runtime/lib/node_modules/npm/bin/npm-cli.js"],
+    exists: (path) => {
+      chosen.push(path);
+      return true;
+    },
+  });
+  assert.equal(chosen[0], "/repo/src-tauri/binaries/node-runtime/lib/node_modules/npm/bin/npm-cli.js");
+  assert.equal(invocation.source, "npm-cli");
+});
+
+test("哪都找不到 npm 时退回 PATH，但调用方能看见这个事实（不能只剩一句空报错）", () => {
+  const invocation = resolveNpmInvocation({ env: {}, execPath: "/nowhere/node", exists: () => false });
+  assert.deepEqual(invocation, { command: "npm", baseArgs: [], source: "path" });
+});
+
+// 自解析探针的判定。旧代码拿 URL 的 pathname（`/D:/a/…`，前导斜杠 + 正斜杠）去跟树根
+// （`D:\a\…`）比字符串前缀，Windows 上 27 个依赖全被判成"跑出树外/缺失"，bridge:build 直接失败
+// （mac 上是好的，所以本地一直看不见）。这条用真实的 Windows 形状锁住它。
+test("探针输出里的 Windows 路径算在树里（不能拿 URL pathname 比字符串前缀）", () => {
+  const dir = "D:\\a\\Pi-Desktop\\Pi-Desktop\\src-tauri\\binaries\\bridge";
+  const output = [
+    "@earendil-works/pi-ai\tok\tD:\\a\\Pi-Desktop\\Pi-Desktop\\src-tauri\\binaries\\bridge\\node_modules\\@earendil-works\\pi-ai\\dist\\index.js",
+    "@earendil-works/pi-coding-agent\tok\tD:\\a\\Pi-Desktop\\Pi-Desktop\\src-tauri\\binaries\\bridge\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\index.js",
+  ].join("\r\n");
+  assert.deepEqual(escapedSpecsFromProbe(output, dir, "win32"), []);
+});
+
+test("探针里真跑出树外 / 没解析出来的要报出来", () => {
+  const dir = "/repo/src-tauri/binaries/bridge";
+  assert.deepEqual(
+    escapedSpecsFromProbe(
+      [
+        "left-pad\tok\t/repo/node_modules/left-pad/index.js",
+        "esbuild\tunresolved\tERR_MODULE_NOT_FOUND",
+        "jiti\tok\t/repo/src-tauri/binaries/bridge/node_modules/jiti/lib/jiti.cjs",
+      ].join("\n"),
+      dir,
+    ),
+    [
+      "left-pad -> outside /repo/node_modules/left-pad/index.js",
+      "esbuild -> unresolved ERR_MODULE_NOT_FOUND",
+    ],
+  );
+
+  // 同一条路径在 win32 flavor 下也要判得对（分隔符不一样）。
+  assert.equal(isInsideTree("D:\\b", "D:\\b\\node_modules\\x", "win32"), true);
+  assert.equal(isInsideTree("D:\\b", "D:\\bextra\\x", "win32"), false, "前缀相同但不是子目录");
+  assert.equal(isInsideTree("D:\\b", "C:\\b\\x", "win32"), false);
 });

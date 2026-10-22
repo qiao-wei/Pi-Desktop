@@ -28,8 +28,11 @@ import {
   bridgePackageManifest,
   collectBareImports,
   defaultTargetTriple,
+  escapedSpecsFromProbe,
   packageNameOf,
   renderPosixBridgeLauncher,
+  resolveNpmInvocation,
+  siblingNpmCliCandidates,
   staleInstalledPackages,
 } from "./lib/bridgeRuntime.mjs";
 import { findUnrelocatable } from "./lib/pythonRuntime.mjs";
@@ -44,6 +47,8 @@ const bridgeDir = join(binariesDir, "bridge");
 const launcherPath = join(binariesDir, "pi-desktop-server");
 const nodeRuntimeDir = join(binariesDir, "node-runtime");
 const bundledNode = join(nodeRuntimeDir, process.platform === "win32" ? "node.exe" : "bin/node");
+// 内置 runtime 里 npm 的位置与官方 Node 发行版一致，所以直接问那个「npm 就在 node 旁边」的推导。
+const bundledNpmCandidates = siblingNpmCliCandidates(bundledNode, process.platform);
 // The slim packaging mode ships no node-runtime, so the build-time verification of the bridge tree
 // runs on the build machine's own Node instead. Either way the tree is checked with a real Node;
 // which Node only matters for what PATH those checks are allowed to reach.
@@ -123,16 +128,21 @@ function declaredVersions() {
 }
 
 function runNpm(cwd) {
-  const npmCli = process.env.npm_execpath?.trim() || "npm";
-  const command = npmCli.endsWith(".js") ? process.execPath : npmCli;
-  const args = npmCli.endsWith(".js") ? [npmCli, "install", "--omit=dev", "--no-audit", "--no-fund"] : ["install", "--omit=dev", "--no-audit", "--no-fund"];
+  // 内置运行时里那份 npm 是第一个候选（bundled 模式下它一定在，且与将要跑 bridge 的解释器同一份）。
+  const invocation = resolveNpmInvocation({ candidates: bundledNpmCandidates });
+  const args = [...invocation.baseArgs, "install", "--omit=dev", "--no-audit", "--no-fund"];
   // An inherited global prefix (nvm, corepack, a previous app runtime) would redirect the install.
   const env = { ...process.env };
   delete env.npm_config_prefix;
   delete env.PREFIX;
-  const result = spawnSync(command, args, { cwd, env, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  if (result.status !== 0) {
-    throw new Error(`npm install failed for the bridge runtime:\n${result.stdout ?? ""}${result.stderr ?? ""}`);
+  const result = spawnSync(invocation.command, args, { cwd, env, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  if (result.error || result.status !== 0) {
+    // 命令与 spawn 的 error 也要写出来：spawn 本身失败时 stdout/stderr 都是空的，只打它们会留下一句
+    // 什么都没有的报错（Windows 上裸 `npm` 那次就是这样）。
+    throw new Error(
+      `npm install failed for the bridge runtime (${invocation.source}: ${[invocation.command, ...args].join(" ")}):\n` +
+        `${result.error ? `${result.error.message}\n` : ""}${result.stdout ?? ""}${result.stderr ?? ""}`,
+    );
   }
   return result.stdout ?? "";
 }
@@ -276,14 +286,16 @@ export function verifyBridgeSelfResolve({ node = verificationNode, dir = bridgeD
     mkdirSync(from, { recursive: true });
     const probe = join(from, ".pi-desktop-resolve-probe.mjs");
     const body = [
-      "import { pathToFileURL } from 'node:url';",
+      "import { fileURLToPath } from 'node:url';",
       "import { existsSync } from 'node:fs';",
       `const specs = ${JSON.stringify(specs)};`,
       "for (const spec of specs) {",
       "  try {",
       "    const url = import.meta.resolve(spec);",
       "    const target = url.startsWith('file:') ? new URL(url) : null;",
-      "    const file = target ? decodeURIComponent(target.pathname) : url;",
+      // `fileURLToPath` 而不是 `target.pathname`：Windows 上 pathname 是 `/D:/a/…`（前导斜杠 + 正斜杠），
+      // 拿它 existsSync 会一律 false、也跟树根拼不上，于是全部依赖都被当成“缺失”。
+      "    const file = target ? fileURLToPath(target) : url;",
       "    console.log(`${spec}\\t${existsSync(file) ? 'ok' : 'missing'}\\t${file}`);",
       "  } catch (error) {",
       "    console.log(`${spec}\\tunresolved\\t${error.code ?? error.message}`);",
@@ -305,12 +317,7 @@ export function verifyBridgeSelfResolve({ node = verificationNode, dir = bridgeD
     } finally {
       rmSync(probe, { force: true });
     }
-    for (const line of output.trim().split("\n")) {
-      const [spec, state, target] = line.split("\t");
-      if (state !== "ok" || !target.startsWith(`${dir}/`)) {
-        escaped.push(`${spec} -> ${state} ${target}`);
-      }
-    }
+    escaped.push(...escapedSpecsFromProbe(output, dir));
   }
   if (escaped.length) {
     throw new Error(

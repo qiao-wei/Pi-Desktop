@@ -1,0 +1,458 @@
+# Electron 出包：Actions 页面上点「Run workflow」触发。
+#
+# 默认值就是"一次点出全套"：mac arm64 + windows x64、bundled + slim 两种运行时模式、签名档位
+# release；但没有证书/凭证时 release 会自动按 local（ad-hoc）出包，不会让整轮红掉。填了 version
+# 才会在打完后把这些产物发到 GitHub Release（tag = v<version>）。
+#
+# 这一份只做一件事：把 `node scripts/pack.mjs --host electron …` 放进 CI 里跑。真正的规则（哪些
+# 组合不可能、签名档位是什么、缺公证凭证为什么必须先报错）都在仓库里那份 plan 里
+# （scripts/lib/packPlan.mjs、scripts/lib/macSigning.cjs）。工作流只多做一件 plan 管不了的事：
+# 把"手点按钮"和"Secret 没配"这两种现实接上 —— release 要 Apple 公证凭证 **和** 一张 Developer ID
+# 证书，缺任何一个就在计划阶段回落到 local 并打一条 ::warning::。直接敲 `--sign release` 的人仍然
+# 会被 pack 拦住并得到修复提示，那是另一条路，两边语义各自正确。
+#
+# Secret / Variable：
+#   * release 档：APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID（或 APPLE_API_KEY +
+#     APPLE_API_KEY_ID + APPLE_API_ISSUER）；另需 MACOS_CERTIFICATE（base64 的 .p12，单行）+
+#     MACOS_CERTIFICATE_PASSWORD。证书名可用 Variable PI_DESKTOP_SIGN_IDENTITY 覆盖。
+#   * version：发布作业用 GITHUB_TOKEN（自己声明了 contents: write），不用额外配。
+#   * 判定只看 Secret 有没有配：证书要是装在自建 runner 自己的钥匙串里（没给 MACOS_CERTIFICATE
+#     Secret），会被当成"缺证书"回落到 local —— 那种情况请把证书也塞进 Secret，或显式选 local。
+#
+# 三条必须知道的边界：
+#   * mac 目标只能在 macOS runner 上打（dmg / 签名 / 公证都绑 mac）；
+#   * bundled 模式不支持交叉（目标平台的 node/python 在构建机上跑不起来，无法验收）—— 所以每个
+#     架构都在自己的 runner 上原生构建：arm64 → macos-15，x64 → macos-15-intel；
+#   * sidecar 能力包门禁（sidecar:verify）在 CI 上是空转的：它读 ~/.pi/agent/settings.json，
+#     runner 上没有这个文件就跳过。别把它的绿灯当成"能力包已验证"。
+name: Package · Electron
+
+on:
+  # 「点按钮触发」就是它：Actions → Package · Electron → Run workflow。
+  workflow_dispatch:
+    inputs:
+      mac:
+        description: "macOS 架构（签名 + 公证只在 macOS 目标上生效）"
+        type: choice
+        default: arm64
+        options:
+          - arm64
+          - x64
+          - both
+          - none
+      windows:
+        description: "Windows 目标（x64；NSIS 安装包）"
+        type: choice
+        default: x64
+        options:
+          - x64
+          - none
+      # GitHub 的表单没有真正的多选框，boolean 就是那个勾选框：两个都勾 = 两种模式都打。
+      bundled:
+        description: "运行时模式 bundled：内嵌 Node 25 + CPython 3.13（首次下载约 100MB）"
+        type: boolean
+        default: true
+      slim:
+        description: "运行时模式 slim：内嵌 0 字节，要求用户机器自己有 Node 22+"
+        type: boolean
+        default: true
+      sign:
+        description: "macOS 签名档位：release = Developer ID 真签名 + 时间戳 + 公证（要 Apple 凭证 + 证书，缺了自动按 local 出包）；local = ad-hoc，本机自用"
+        type: choice
+        default: release
+        options:
+          - release
+          - local
+      version:
+        description: "版本号（如 1.2.3，留空 = 用仓库里的版本且不发布）：填了就写进包（app 版本 / 文件名）并在打完后发到 GitHub Release（tag v1.2.3）"
+        type: string
+        default: ""
+      run_tests:
+        description: "打包前在 ubuntu 上跑 npm test"
+        type: boolean
+        default: true
+
+# 同一个 ref 上重复点按钮时排队而不是互相踩（打包是长任务，取消半途会留下半成品）。
+concurrency:
+  group: package-electron-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ── 把表单变成矩阵 + 定签名档位 ─────────────────────────────────────────────
+  # 目标平台 × 运行时模式：两个模式都勾就是每个目标打两个包；一个都没勾/没选平台就报错，
+  # 而不是静默不跑。签名档位在这里定一次，所有 leg 用同一个值。
+  plan:
+    name: 规划要打哪些包
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+      sign: ${{ steps.plan.outputs.sign }}
+      sign_note: ${{ steps.plan.outputs.sign_note }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - id: plan
+        env:
+          MAC: ${{ inputs.mac }}
+          WINDOWS: ${{ inputs.windows }}
+          BUNDLED: ${{ inputs.bundled }}
+          SLIM: ${{ inputs.slim }}
+          SIGN: ${{ inputs.sign }}
+          VERSION: ${{ inputs.version }}
+          # 只用来判"release 档有没有条件"，不参与打包：真正的凭证检查在 pack 里
+          # （scripts/lib/macSigning.cjs，缺了会带修复提示退出）。
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+        run: |
+          node -e '
+            const out = require("node:fs").appendFileSync;
+            const env = process.env;
+            const has = (name) => String(env[name] ?? "").trim() !== "";
+            const emit = (lines) => out(env.GITHUB_OUTPUT, `${lines.join("\n")}\n`);
+
+            // ── 版本号（填了才发布）────────────────────────────────────────────
+            const version = String(env.VERSION ?? "").trim();
+            if (version && !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+              console.error(`pack: version="${version}" 不是合法版本号（要 1.2.3 或 1.2.3-rc.1 这种）`);
+              process.exit(1);
+            }
+
+            // ── 签名档位 ──────────────────────────────────────────────────────
+            // release 要两样东西：公证凭证（pack 自己也会查）**和**一张能签的证书 —— 没有证书时
+            // electron-builder 只会"跳过签名"，而公证必然失败，所以这里直接按 local 出包。
+            const notarizationReady =
+              (has("APPLE_ID") && (has("APPLE_APP_SPECIFIC_PASSWORD") || has("APPLE_PASSWORD")) && has("APPLE_TEAM_ID")) ||
+              (has("APPLE_API_KEY") && has("APPLE_API_KEY_ID") && has("APPLE_API_ISSUER"));
+            const certificateReady = has("MACOS_CERTIFICATE");
+            const wantedSign = (String(env.SIGN ?? "").trim().toLowerCase() || "release");
+            const missing = [];
+            if (!notarizationReady) missing.push("Apple 公证凭证");
+            if (!certificateReady) missing.push("Developer ID 证书（MACOS_CERTIFICATE）");
+            const degrade = wantedSign === "release" && missing.length > 0;
+            const sign = degrade ? "local" : wantedSign;
+            const signNote = degrade ? `缺 ${missing.join(" + ")}` : "";
+
+            // ── 运行时模式 ────────────────────────────────────────────────────
+            const modes = [];
+            if (env.BUNDLED === "true") modes.push("bundled");
+            if (env.SLIM === "true") modes.push("slim");
+            if (modes.length === 0) {
+              console.error("pack: 至少勾一个运行时模式（bundled / slim）");
+              process.exit(1);
+            }
+
+            // ── 目标平台 ──────────────────────────────────────────────────────
+            const targets = [];
+            const mac = env.MAC;
+            if (mac === "arm64" || mac === "both") {
+              targets.push({ runner: "macos-15", target: "mac", arch: "arm64", outdir: "mac-arm64" });
+            }
+            if (mac === "x64" || mac === "both") {
+              targets.push({ runner: "macos-15-intel", target: "mac", arch: "x64", outdir: "mac" });
+            }
+            if (env.WINDOWS === "x64") {
+              targets.push({ runner: "windows-latest", target: "windows", arch: "x64", outdir: "win-unpacked" });
+            }
+            if (targets.length === 0) {
+              console.error("pack: 至少选一个目标平台（macOS / Windows）");
+              process.exit(1);
+            }
+
+            const include = targets.flatMap((target) => modes.map((mode) => ({ ...target, mode })));
+            emit([
+              `count=${include.length}`,
+              `matrix=${JSON.stringify({ include })}`,
+              `sign=${sign}`,
+              `sign_note=${signNote}`,
+              `version=${version}`,
+              `tag=${version ? `v${version}` : ""}`,
+            ]);
+          '
+          cat "$GITHUB_OUTPUT"
+
+      # 档位与版本是这一单最容易被误判的两件事（"以为签了/以为发了"），所以单独念一遍，
+      # 回落时用 ::warning:: 让它在 run 页面上挂出来。
+      - name: 签名档位与版本
+        env:
+          WANTED: ${{ inputs.sign }}
+          EFFECTIVE: ${{ steps.plan.outputs.sign }}
+          NOTE: ${{ steps.plan.outputs.sign_note }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          MATRIX: ${{ steps.plan.outputs.matrix }}
+        run: |
+          node -e '
+            const legs = JSON.parse(process.env.MATRIX).include;
+            for (const leg of legs) console.log(`  将打：${leg.runner} · ${leg.target}/${leg.arch} · ${leg.mode}`);
+          '
+          echo "签名档位：请求 $WANTED → 实际 $EFFECTIVE"
+          if [ "$EFFECTIVE" != "$WANTED" ]; then
+            echo "::warning::签名档位从 $WANTED 回落到 $EFFECTIVE（$NOTE）—— 要真签名 + 公证就配上缺的那几项"
+          fi
+          if [ -n "$VERSION" ]; then
+            echo "版本：$VERSION，打完后发布 $TAG"
+          else
+            echo "版本：未填，用仓库里的版本，不发 Release"
+          fi
+
+  # ── 测试 ────────────────────────────────────────────────────────────────────
+  verify:
+    name: 测试（npm test）
+    if: ${{ inputs.run_tests }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "25"
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  # ── 出包 ────────────────────────────────────────────────────────────────────
+  package:
+    name: ${{ matrix.target }}/${{ matrix.arch }} · ${{ matrix.mode }} · 签名 ${{ matrix.target == 'mac' && needs.plan.outputs.sign || 'n/a' }}
+    needs: [plan, verify]
+    # verify 可能被 run_tests=false 跳过：skipped 不算失败。plan 失败时矩阵是空的，先看它的 result。
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.count != '0' && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      # 载荷镜像：留空就用仓库里的默认值（npmmirror）。IP 到不了 npmmirror 时在仓库 Variables 里
+      # 指到上游即可：PI_DESKTOP_NODE_DIST_MIRROR=https://nodejs.org/dist
+      # PI_DESKTOP_PYTHON_DIST_MIRROR=https://github.com/astral-sh/python-build-standalone/releases/download
+      PI_DESKTOP_NODE_DIST_MIRROR: ${{ vars.PI_DESKTOP_NODE_DIST_MIRROR }}
+      PI_DESKTOP_PYTHON_DIST_MIRROR: ${{ vars.PI_DESKTOP_PYTHON_DIST_MIRROR }}
+      # npm/Electron 走镜像时再加（留空 = 默认）：
+      # ELECTRON_MIRROR: ${{ vars.ELECTRON_MIRROR }}
+      # ELECTRON_BUILDER_BINARIES_MIRROR: ${{ vars.ELECTRON_BUILDER_BINARIES_MIRROR }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "25"
+          cache: npm
+
+      # Electron 与 electron-builder 的下载缓存：每次 100MB+ 地重下 Electron zip / nsis，缓存后
+      # 只在 lockfile 变化时重下。路径是这两个工具自己的约定，不随我们改。
+      - name: 缓存 Electron / electron-builder 下载（macOS）
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-dl-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-dl-${{ runner.os }}-${{ matrix.arch }}-
+
+      - name: 缓存 Electron / electron-builder 下载（Windows）
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: electron-dl-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-dl-${{ runner.os }}-${{ matrix.arch }}-
+
+      # node:build 在 win32 目标上用 `unzip` 解 node 的 zip（runtimePayloads.mjs），而 Windows 镜像
+      # 的软件清单里只有 7-Zip —— 没有 unzip。必须是一个真的 `unzip.exe`：Node 在 Windows 上
+      # `spawnSync("unzip", …)` 是 shell:false，CreateProcess 只会补 `.exe`，`.cmd`/`.bat` 的 shim
+      # 既不被搜到、还会被 Node 直接拒掉。所以兜底走 Chocolatey 的 unzip（Info-ZIP）。
+      - name: 确保 unzip 可用（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Get-Command unzip -ErrorAction SilentlyContinue) { Write-Host "unzip 已在 PATH"; exit 0 }
+
+          $gitBin = "C:\Program Files\Git\usr\bin"
+          if (Test-Path (Join-Path $gitBin "unzip.exe")) {
+            Write-Host "用 Git for Windows 自带的 unzip：$gitBin"
+            $gitBin | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+            exit 0
+          }
+
+          Write-Host "镜像里没有 unzip，用 Chocolatey 装一个"
+          choco install unzip -y --no-progress --limit-output
+
+          $chocoBin = "C:\ProgramData\chocolatey\bin"
+          $chocoBin | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          if (-not (Test-Path (Join-Path $chocoBin "unzip.exe"))) { throw "choco 装完仍找不到 $chocoBin\unzip.exe" }
+          Write-Host "unzip 就位：$chocoBin\unzip.exe"
+
+      - name: 安装依赖
+        run: npm ci
+
+      # 填了版本号就写进 package.json：electron-builder 的 app 版本、CFBundleShortVersionString、
+      # dmg / NSIS 安装包的文件名都读它（Release 的 tag 用的是同一个值）。留空则保持仓库里的版本。
+      # 必须在打包之前、npm ci 之后：npm ci 只校验 lockfile，之后这里不再回头跑 root 的 npm ci。
+      - name: 写入版本号
+        if: needs.plan.outputs.version != ''
+        run: |
+          npm pkg set version=${{ needs.plan.outputs.version }}
+          echo "打包版本：$(node -p "require('./package.json').version")"
+
+      # release 档要在 runner 的钥匙串里有一张 Developer ID 证书：没有它 electron-builder 只会
+      # "跳过签名"，而紧接着的公证必然失败。计划阶段已经确认凭证与证书都在，这里才真导入。
+      # MACOS_CERTIFICATE 是 base64 的 .p12，必须单行（`base64 -i cert.p12 | pbcopy`）。
+      # 只对 mac 目标做：Windows 的签名是另一套工具链，不在这个档位表里。
+      - name: 导入签名证书（macOS · release）
+        if: matrix.target == 'mac' && needs.plan.outputs.sign == 'release'
+        shell: bash
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          p12="$RUNNER_TEMP/certificate.p12"
+          printf '%s' "$MACOS_CERTIFICATE" | openssl base64 -d -A -out "$p12"
+          security create-keychain -p "" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "" "$keychain"
+          security import "$p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm -f "$p12"
+          security find-identity -v -p codesigning "$keychain"
+
+      # 出包入口自己会念出这单的档位、目标三元组和步骤；`--sign`/`--mode` 只从命令行来，
+      # 所以这里不需要（也不该）在 env 里塞 PI_DESKTOP_SIGN。
+      - name: 打包
+        env:
+          # 凭证只挂在这一步：npm ci（含各依赖的 postinstall）不该看见 Apple 凭证。
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          # 换证书名时用仓库 Variable 覆盖（local 档永远是 ad-hoc，覆盖不了）。
+          PI_DESKTOP_SIGN_IDENTITY: ${{ vars.PI_DESKTOP_SIGN_IDENTITY }}
+        run: node scripts/pack.mjs --host electron --target ${{ matrix.target }} --arch ${{ matrix.arch }} --mode ${{ matrix.mode }} --sign ${{ needs.plan.outputs.sign }}
+
+      # 签名自洽只看三样：Identifier = CFBundleIdentifier、Signature（local 档必须是 adhoc，不能是
+      # Electron 自带包那种 linker-signed）、有 Sealed Resources。release 档额外要求 TeamIdentifier。
+      - name: 验收签名（macOS）
+        if: matrix.target == 'mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="dist-electron/${{ matrix.outdir }}/Pi Desktop.app"
+          report="$RUNNER_TEMP/codesign.txt"
+          codesign -dv --verbose=2 "$app" 2>&1 | tee "$report"
+          codesign --verify --strict --verbose=2 "$app"
+          grep -q '^Identifier=com.pi.desktop$' "$report"
+          grep -q '^Sealed Resources' "$report"
+          if [ "${{ needs.plan.outputs.sign }}" = "release" ]; then
+            grep -qE '^TeamIdentifier=[A-Z0-9]+$' "$report"
+          else
+            grep -q '^Signature=adhoc$' "$report"
+          fi
+          echo "签名自洽：$(grep -E '^(Identifier|Signature|TeamIdentifier)=' "$report" | tr '\n' ' ')"
+
+      # .app 目录直接上传会丢符号链接和执行位，签名就废了；ditto 保留一切（含 xattr）。
+      - name: 打包 .app（macOS）
+        if: matrix.target == 'mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -e 'console.log(require("./package.json").version)')
+          ditto -c -k --sequesterRsrc --keepParent \
+            "dist-electron/${{ matrix.outdir }}/Pi Desktop.app" \
+            "dist-electron/Pi-Desktop-${version}-${{ matrix.arch }}.app.zip"
+          ls -lh dist-electron
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-desktop-electron-${{ matrix.target }}-${{ matrix.arch }}-${{ matrix.mode }}-${{ needs.plan.outputs.sign }}
+          path: |
+            dist-electron/*.dmg
+            dist-electron/*.exe
+            dist-electron/*.zip
+            dist-electron/*.blockmap
+            dist-electron/*.yml
+            dist-electron/builder-*.yaml
+          if-no-files-found: error
+          retention-days: 14
+
+  # ── 发布（填了 version 才走这里）─────────────────────────────────────────────
+  # 不用 electron-builder 自己那套 publish：它按 leg 各发一次、要 GH_TOKEN、还牵着 git tag 的语义，
+  # 而这里本来就把产物收在 artifact 里。改成：把所有 leg 的产物汇总，一条 Release 发出去。
+  release:
+    name: 发布 ${{ needs.plan.outputs.tag }}
+    needs: [plan, package]
+    if: ${{ needs.plan.result == 'success' && needs.plan.outputs.version != '' && needs.package.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # 建 tag + Release 要写权限；工作流级是只读，所以这里单独声明。
+      contents: write
+    steps:
+      # gh 要先解析"当前仓库"：它走 git remote，runner 上不 checkout 就没有 .git，连 `gh release view`
+      # 都会以 `failed to run git: fatal: not a git repository` 收场（2026-10-22 第一次就是这么红的）。
+      # tag 建在哪个 commit 由下面的 --target $GITHUB_SHA 决定，不依赖 HEAD。
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          # 不 merge：每个 leg 一个子目录，目录名里带着 target/arch/mode，下面靠它区分同名产物。
+          path: artifacts
+
+      - name: 汇总产物
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          for dir in artifacts/*/; do
+            [ -d "$dir" ] || continue
+            # 目录名形如 pi-desktop-electron-mac-arm64-slim-release
+            mode=$(basename "$dir" | sed -E 's/^pi-desktop-electron-.+-(bundled|slim)-[^-]+$/\1/')
+            case "$mode" in
+              bundled | slim) ;;
+              *) echo "::error::没从 artifact 目录名里读出运行时模式：$(basename "$dir")"; exit 1 ;;
+            esac
+            for file in "$dir"*.dmg "$dir"*.exe "$dir"*.zip; do
+              [ -f "$file" ] || continue
+              base=$(basename "$file")
+              # 同一条 Release 里不能有同名资源：bundled 与 slim 会产出同名的 dmg / NSIS 安装包
+              # （文件名里没有模式），所以第二个开始补上模式后缀。blockmap / latest*.yml 这类
+              # 更新元数据不进 Release（它们是按渠道的，留在 workflow artifact 里）。
+              if [ -e "release-assets/$base" ]; then
+                stem=${base%.*}
+                base="${stem}-${mode}.${base##*.}"
+              fi
+              cp "$file" "release-assets/$base"
+            done
+          done
+          ls -lh release-assets
+          [ -n "$(ls -A release-assets)" ] || { echo "::error::没有任何产物可以发布"; exit 1; }
+
+      - name: 发布
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::$TAG 已经存在：换个版本号，或先删掉那条 Release"
+            exit 1
+          fi
+          # --target 显式指到这一次运行的 commit：gh 默认会把 tag 建在默认分支的头上。
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "Pi Desktop $TAG" --generate-notes release-assets/*

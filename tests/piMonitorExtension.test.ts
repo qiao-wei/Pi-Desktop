@@ -8,9 +8,15 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import test, { type TestContext } from "node:test";
+import type { TestContext } from "node:test";
 
-import monitorFactory from "../../../.pi/agent/packages/pi-monitor/extensions/monitor/index.ts";
+import { AGENT_PACKAGES_DIR, loadAgentModule, test } from "./agentPackageGuard.ts";
+
+type MonitorExtension = typeof import("../../../.pi/agent/packages/pi-monitor/extensions/monitor/index.ts");
+const monitorPackage = await loadAgentModule<MonitorExtension>(
+	new URL("pi-monitor/extensions/monitor/index.ts", AGENT_PACKAGES_DIR),
+);
+const monitorFactory = monitorPackage?.default;
 
 type Handler = (event: any, ctx: any) => Promise<unknown> | unknown;
 

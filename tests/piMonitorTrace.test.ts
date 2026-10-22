@@ -5,16 +5,21 @@
  * 以及各种上限（条数 / 单块字数 / 总体积）不能把页面撑爆。
  */
 import assert from "node:assert/strict";
-import test from "node:test";
 
-import {
+import { AGENT_PACKAGES_DIR, loadAgentModule, test } from "./agentPackageGuard.ts";
+
+type MonitorTrace = typeof import("../../../.pi/agent/packages/pi-monitor/extensions/monitor/trace.ts");
+const monitor = await loadAgentModule<MonitorTrace>(
+	new URL("pi-monitor/extensions/monitor/trace.ts", AGENT_PACKAGES_DIR),
+);
+const {
 	buildTrace,
 	capText,
 	errorSummary,
 	toolArgsText,
 	TRACE_LIMITS,
 	traceToMarkdown,
-} from "../../../.pi/agent/packages/pi-monitor/extensions/monitor/trace.ts";
+} = monitor ?? ({} as MonitorTrace);
 
 function messageEntry(id: string, timestamp: string, message: Record<string, unknown>, parentId: string | null = null) {
 	return { type: "message", id, parentId, timestamp, message };

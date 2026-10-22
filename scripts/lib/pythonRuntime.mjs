@@ -121,13 +121,18 @@ export function parseShebang(text) {
  * `.exe` suffix, so a payload prepared for win32 has `bin\node.exe` where POSIX has `bin/node` -
  * both spellings count, otherwise a correct Windows payload looks like a host dependency.
  */
-export function hasInTreeInterpreter(runtimeDir, name, extraDirs = []) {
+export function hasInTreeInterpreter(runtimeDir, name, extraDirs = [], platform = process.platform) {
   if (!name) {
     return false;
   }
   const roots = [runtimeDir, ...(Array.isArray(extraDirs) ? extraDirs : [])].filter(Boolean);
   const dirs = roots.flatMap((root) => [root, join(root, "bin"), join(root, "Scripts"), join(root, "sbin")]);
-  const names = process.platform === "win32" || /\.exe$/i.test(name) ? [name] : [name, `${name}.exe`];
+  // 认不认 `.exe` 要按**目标**平台判，不能按构建机。以前这里读 `process.platform`：在 Windows 上打
+  // win32 包时，它只找没有扩展名的 `node`，而载荷里是 `node.exe` → npm 自带的 12 个
+  // `#!/usr/bin/env node` 全被判成"要宿主装 node"，node:build 直接失败（2026-10-22 CI 实测）。
+  // win32 目标上只认 `.exe`（那个平台不认无扩展名的可执行文件），其他目标两者都认。
+  const base = String(name).replace(/\.exe$/i, "");
+  const names = platform === "win32" ? [`${base}.exe`] : [base, `${base}.exe`];
   return dirs.some((dir) =>
     names.some((candidate) => {
       try {
@@ -140,7 +145,7 @@ export function hasInTreeInterpreter(runtimeDir, name, extraDirs = []) {
 }
 
 /** Reason this shebang needs a host/build-machine interpreter, or null if safe. */
-export function shebangProblem(shebang, scriptPath, runtimeDir, interpreterDirs = []) {
+export function shebangProblem(shebang, scriptPath, runtimeDir, interpreterDirs = [], platform = process.platform) {
   if (!shebang) {
     return null;
   }
@@ -154,7 +159,7 @@ export function shebangProblem(shebang, scriptPath, runtimeDir, interpreterDirs 
     // hard dependency on a host install. The interpreter may live in a sibling
     // directory of the same bundle (a JS tree shipped next to the node runtime),
     // which is what `interpreterDirs` declares.
-    return hasInTreeInterpreter(runtimeDir, named, interpreterDirs) ? null : `/usr/bin/env ${named}`;
+    return hasInTreeInterpreter(runtimeDir, named, interpreterDirs, platform) ? null : `/usr/bin/env ${named}`;
   }
   const { interpreter } = shebang;
   if (SYSTEM_SHELLS.has(interpreter) || !LANGUAGE_INTERPRETER.test(interpreter)) {
@@ -313,7 +318,7 @@ export function findUnrelocatable(runtimeDir, options = {}) {
 
     if (isScriptDir(path, runtimeDir)) {
       const shebang = shebangOf(path);
-      const detail = shebang ? shebangProblem(shebang, path, runtimeDir, options.interpreterDirs ?? []) : null;
+      const detail = shebang ? shebangProblem(shebang, path, runtimeDir, options.interpreterDirs ?? [], platform) : null;
       if (detail) {
         classify({ kind: "interpreter-shebang", path, detail });
         continue;
