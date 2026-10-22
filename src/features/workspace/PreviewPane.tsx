@@ -154,16 +154,27 @@ export function PreviewPane({
       ) : null}
 
       {/* 两种正文都在这一层滚：它高度确定，所以横向滚动条贴在可见区底边（和 ZCode 的
-          `overflow: scroll` 一致），而不是跑去找不到。 */}
+          `overflow: scroll` 一致），而不是跑去找不到。
+          `mr-[18px]` 是右边缘那条沟（和头部同一个 18px，2026-10-12 用户反馈贴边太挤）：
+          这里**不能**用 `pr-*` —— overflow 裁到的是 **padding box**，溢出的长行照样画进
+          padding 区（实测离边 9px 处命中的仍是代码容器）；`mr-*` 是把滚动视口本身缩窄，
+          裁边跟着往里挪，静止时也就真的能看到沟。 */}
       {!error && showPatch && diff?.patch ? (
-        <div className="min-h-0 flex-1 overflow-auto pt-1 pb-3">
-          <DiffViewer patch={diff.patch} />
+        <div className="mr-[18px] min-h-0 flex-1 overflow-auto pt-1 pb-3">
+          {/* 两侧全文一起给：服务端读得到时 diff 会画成带「N 行未改动」上下文的富渲染，
+              读不到（超大文件）就退回落差补丁，见 DiffViewer 的两条路。 */}
+          <DiffViewer
+            patch={diff.patch}
+            beforeContent={diff.beforeContent}
+            afterContent={diff.afterContent}
+            path={subject.path}
+            themeMode={themeMode}
+          />
         </div>
       ) : null}
 
       {!error && showText && content ? (
-        <div className="min-h-0 flex-1 overflow-hidden pt-1 pb-3">
-          {/* 横向/纵向滚动都交给 CodeViewer 自己那层（和 ZCode 一样只留一个滚动容器）。 */}
+        <div className="mr-[18px] min-h-0 flex-1 overflow-auto pt-1 pb-3">
           <CodeViewer code={content.text ?? ""} path={subject.path} themeMode={themeMode} />
         </div>
       ) : null}

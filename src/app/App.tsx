@@ -1,6 +1,5 @@
 import {
   Activity,
-  Blocks,
   AlertTriangle,
   Archive,
   Bell,
@@ -17,7 +16,6 @@ import {
   FileUp,
   Clock3,
   Folder,
-  FolderTree,
   FolderOpen,
   Mic,
   Moon,
@@ -146,12 +144,15 @@ import { worktreeSessionBadgeKind } from "../shared/sessionWorktree";
 import { createAttachmentHoverGate } from "../shared/attachmentHoverGate";
 import {
   SidebarArchiveIcon,
+  SidebarFileTreeIcon,
   SidebarFolderIcon,
   SidebarFolderOpenIcon,
   SidebarMessageIcon,
   SidebarMonitorIcon,
+  SidebarMoreIcon,
   SidebarNewSessionIcon,
   SidebarPinIcon,
+  SidebarSkillsIcon,
 } from "../components/sidebarIcons";
 import {
   SIDEBAR_PROJECT_CARD_HEIGHT,
@@ -727,13 +728,13 @@ export function App() {
    * 面板此刻可能是收起的、或者窄屏下抽屉是关着的 —— 那样点一行看起来就像没反应，
    * 所以这里要随手把面板打开（和标题栏那个开关同一套窄屏判断）。
    */
-  function openWorkspacePreview(path: string, source: WorkspaceDiffSource) {
+  function openWorkspacePreview(path: string, source: WorkspaceDiffSource, base?: string) {
     if (window.innerWidth <= 920) {
       setShowPanel(true);
     } else {
       setRightPanelCollapsed(false);
     }
-    panelTabs.openDiff({ path, source });
+    panelTabs.openDiff({ path, source, base });
   }
 
   /** 在右面板里看某个文件的正文（文件树单击、右键「查看文件内容」）。 */
@@ -3373,8 +3374,9 @@ export function App() {
                 sessionPath={visibleSessionPath}
                 isRefreshing={projectGit.isRefreshing}
                 activePath={activeFileTabPath}
+                themeMode={theme}
                 onRefresh={() => void projectGit.refresh()}
-                onOpenDiff={openWorkspacePreview}
+                onOpenDiff={(path, source, base) => openWorkspacePreview(path, source, base)}
                 onOpenContent={openWorkspaceContent}
                 onOpenInIde={(path) => void projectGit.openFile(path)}
               />
@@ -7845,33 +7847,11 @@ function ProjectSidebar({
                     34px apart. 24px (`size-6`) with no gap between them leaves 4px per side, so
                     the two glyphs sit ~8px apart and read as a single group. */}
                 <div className={cn("absolute top-1/2 right-1 flex -translate-y-1/2 items-center", sidebarHoverActionClass, project.pinned && "opacity-100")}>
-                  {/* 文件树（左栏）与技能/包（弹窗）的入口挂在项目条目上 —— ZCode 的布局。 */}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    disabled={sidebarLock.locked}
-                    className={cn("size-6", sidebarLock.lockClass)}
-                    onClick={() => onOpenProjectFileTree(project.id)}
-                    aria-label={t("sidebar.filesNav")}
-                    title={t("sidebar.filesNav")}
-                    data-project-files-nav={project.id}
-                  >
-                    <FolderTree className="size-[17px]" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    disabled={sidebarLock.locked}
-                    className={cn("size-6", sidebarLock.lockClass)}
-                    onClick={() => onOpenProjectCapabilities(project.id)}
-                    aria-label={t("sidebar.projectCapabilitiesNav")}
-                    title={t("sidebar.projectCapabilitiesNav")}
-                    data-project-capabilities-nav={project.id}
-                  >
-                    <Blocks className="size-[17px]" />
-                  </Button>
+                  {/* 动作簇的顺序与图标都对齐 ZCode 的项目行（`ProjectNodeContent.tsx`
+                      `data-testid="virtual-project-actions"`）：**「…」在最左**，然后才是各个动作，
+                      主要动作（新建）在最右。图标全部走 `sidebarIcons` 那一族（24 格 / 1.7 描边 /
+                      16px）——之前用 lucide 的 FolderTree/Blocks（17-18px、描边 2）混在同排里，
+                      明显比旁边的 codex 图标又粗又大。 */}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -7883,7 +7863,7 @@ function ProjectSidebar({
                         aria-label={t("sidebar.projectMenu")}
                         title={t("sidebar.projectMenu")}
                       >
-                        <MoreHorizontal className="size-[18px]" />
+                        <SidebarMoreIcon size={16} />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-56">
@@ -7920,6 +7900,34 @@ function ProjectSidebar({
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
+                  {/* 文件树（左栏）与技能/包（弹窗）的入口挂在项目条目上 —— ZCode 的文件树
+                      入口也在项目行上（他们的 `ListTree`），语义图标照抄。 */}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={sidebarLock.locked}
+                    className={cn("size-6", sidebarLock.lockClass)}
+                    onClick={() => onOpenProjectFileTree(project.id)}
+                    aria-label={t("sidebar.filesNav")}
+                    title={t("sidebar.filesNav")}
+                    data-project-files-nav={project.id}
+                  >
+                    <SidebarFileTreeIcon size={16} />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={sidebarLock.locked}
+                    className={cn("size-6", sidebarLock.lockClass)}
+                    onClick={() => onOpenProjectCapabilities(project.id)}
+                    aria-label={t("sidebar.projectCapabilitiesNav")}
+                    title={t("sidebar.projectCapabilitiesNav")}
+                    data-project-capabilities-nav={project.id}
+                  >
+                    <SidebarSkillsIcon size={16} />
+                  </Button>
                   {/* 一次点击就建普通会话（原来的手感）。worktree 是「这条会话跑在隔离检出里」，
                       必须在建会话之前定下来（会话文件头里的 cwd 就是那时写进去的），所以不放在
                       composer 里做事后开关：按住 ⌥/Alt 点击走 worktree，另一个发现入口在项目 ⋯ 菜单里。 */}

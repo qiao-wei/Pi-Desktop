@@ -776,3 +776,73 @@ test("分支文件清单：未暂存/已暂存不走这条路（porcelain 已经
   assert.match(listing.summary, /no file list of its own/);
   assert.equal(calls.length, 0, "一次 git 都不该跑");
 });
+
+test("分支文件清单：numstat 的行数归到对应文件（行上要显示 +N −M）", async () => {
+  const { exec, calls } = fakeExecFile((args) => {
+    if (args[0] === "rev-parse") {
+      return { ok: true, stdout: "origin/main\n" };
+    }
+    if (args[0] === "merge-base") {
+      return { ok: true, stdout: "abc123\n" };
+    }
+    if (args[0] === "diff" && args.includes("--numstat")) {
+      // 二进制文件那两个字段是 `-`（→ 0/0）；重命名记录把计数归到新路径。
+      return {
+        ok: true,
+        stdout: `12\t3\tsrc/a.ts\0-\t-\tassets/logo.png\0`,
+      };
+    }
+    if (args[0] === "diff") {
+      return { ok: true, stdout: `M\0src/a.ts\0M\0src/untouched.ts\0M\0assets/logo.png\0` };
+    }
+    return { ok: false, code: 1, stdout: "", stderr: "unexpected" };
+  });
+
+  const listing = await listSourceFiles({ cwd: "/repo", source: "branch", execImpl: exec });
+
+  assert.deepEqual(
+    listing.files.map((file) => [file.path, file.added, file.removed]),
+    [
+      ["src/a.ts", 12, 3],
+      ["src/untouched.ts", 0, 0],
+      ["assets/logo.png", 0, 0],
+    ],
+  );
+  // 两条 diff 都以分叉点做底座，而且都在只读白名单里。
+  const diffCalls = calls.filter((call) => call.args[0] === "diff");
+  assert.equal(diffCalls.length, 2);
+  for (const call of diffCalls) {
+    assert.ok(call.args.includes("abc123"), `diff 少了分叉点: ${call.args.join(" ")}`);
+    assert.ok(isReadOnlyGitArgs(call.args), `只读白名单外的参数: ${call.args.join(" ")}`);
+  }
+  assert.ok(
+    diffCalls.some((call) => call.args.includes("--name-status")),
+    "清单本身仍走 name-status（状态字母靠它）",
+  );
+});
+
+test("分支文件清单：numstat 失败不算列不出来，只是没有统计", async () => {
+  const { exec } = fakeExecFile((args) => {
+    if (args[0] === "rev-parse") {
+      return { ok: true, stdout: "origin/main\n" };
+    }
+    if (args[0] === "merge-base") {
+      return { ok: true, stdout: "abc123\n" };
+    }
+    if (args[0] === "diff" && args.includes("--numstat")) {
+      return { ok: false, code: 128, stdout: "", stderr: "fatal: bad revision\n" };
+    }
+    if (args[0] === "diff") {
+      return { ok: true, stdout: `M\0src/a.ts\0` };
+    }
+    return { ok: false, code: 1, stdout: "", stderr: "unexpected" };
+  });
+
+  const listing = await listSourceFiles({ cwd: "/repo", source: "branch", execImpl: exec });
+
+  assert.equal(listing.summary, "", "文件清单是准的，不能被统计的失败拉成不可用");
+  assert.deepEqual(
+    listing.files.map((file) => [file.path, file.added, file.removed]),
+    [["src/a.ts", 0, 0]],
+  );
+});

@@ -140,6 +140,62 @@ export function canRenderWorkspaceDiffPatch(diff: WorkspaceDiff | null): boolean
 }
 
 /**
+ * 富渲染（`MultiFileDiff`：能画「N 行未改动」上下文的那个）的两条上限，和 ZCode 同值
+ * （`MAX_RICH_DIFF_FULL_CONTENT_CHAR_COUNT` / `..._LINE_COUNT`）。
+ *
+ * 为什么要有：富渲染要**同步比较整篇文件**（不是只看补丁里那几个 hunk），几十万字符的文件
+ * 会在点开那一帧把主线程占住（ZCode 的 GitPane 在真机上量到过点击后 600ms+ 的长任务）。
+ * 超了不是不画，而是退回落差补丁：hunk 少了上下文，但点开是即时的。
+ */
+export const MAX_RICH_DIFF_FULL_CONTENT_CHARS = 180_000;
+export const MAX_RICH_DIFF_FULL_CONTENT_LINES = 1_200;
+
+/** 逻辑行数（末尾换行不算多一行；空内容算 0 行）。 */
+export function countDiffContentLines(content: unknown): number {
+  if (typeof content !== "string" || content === "") {
+    return 0;
+  }
+
+  let lines = 1;
+  for (let index = 0; index < content.length; index += 1) {
+    if (content.charCodeAt(index) === 10) {
+      lines += 1;
+    }
+  }
+
+  return content.endsWith("\n") ? lines - 1 : lines;
+}
+
+/**
+ * 这一份 diff 能不能走富渲染。
+ *
+ * 两侧全文必须**一起**有（只有一侧说明服务端没读完整，拿它当空文件会把整篇画成增/删），
+ * 且总字符数与最大行数都在上限内。判断放在 `shared/` 是因为它是渲染层与数据获取之间
+ * 的纯规则：写错了的表现是「点开一个大文件就卡死」，值得被 `node --test` 直接钉住。
+ */
+export function canRenderRichWorkspaceDiff(
+  diff: { beforeContent?: string | null; afterContent?: string | null } | null | undefined,
+): diff is { beforeContent: string; afterContent: string } {
+  if (!diff) {
+    return false;
+  }
+
+  const { beforeContent, afterContent } = diff;
+  if (typeof beforeContent !== "string" || typeof afterContent !== "string") {
+    return false;
+  }
+
+  if (beforeContent.length + afterContent.length > MAX_RICH_DIFF_FULL_CONTENT_CHARS) {
+    return false;
+  }
+
+  return (
+    Math.max(countDiffContentLines(beforeContent), countDiffContentLines(afterContent)) <=
+    MAX_RICH_DIFF_FULL_CONTENT_LINES
+  );
+}
+
+/**
  * 两次请求说的是不是同一个「文件 + 来源 + base」。
  *
  * 用来决定「重新拉时要不要先清空」：同一个文件把上一次的内容继续挂在屏上，等新数据回来再换
@@ -167,11 +223,17 @@ export function sameWorkspaceDiffSubject(
 /**
  * 分支对比下的一个文件行。和服务端 `parseNameStatusZ` 的输出一一对应；
  * `origPath` 只有重命名/复制才有（渲染层要用 `旧 → 新` 说清改名）。
+ *
+ * `added` / `removed` 是这一份差异里的行数（服务端 `git diff --numstat`）：改动清单要在
+ * 行上就显示 `+N −M`，和 ZCode 的 review 面板一致 —— 没有它，用户得逐个点开才知道哪个文件
+ * 动得多。数不出来（二进制、git 报错）时是 0/0，这一档渲染成「不显示统计」而不是「0 行」。
  */
 export interface WorkspaceChangedFile {
   path: string;
   origPath: string;
   status: GitFileStatus;
+  added: number;
+  removed: number;
 }
 
 /** 某个来源下的改动文件清单（目前只有 branch 需要向服务端要）。 */
@@ -238,6 +300,9 @@ export function normalizeChangedFilesResponse(
       path,
       origPath: typeof row.origPath === "string" ? row.origPath : "",
       status: isGitFileStatus(row.status) ? row.status : "modified",
+      added: typeof row.added === "number" && Number.isFinite(row.added) && row.added > 0 ? row.added : 0,
+      removed:
+        typeof row.removed === "number" && Number.isFinite(row.removed) && row.removed > 0 ? row.removed : 0,
     });
   }
 

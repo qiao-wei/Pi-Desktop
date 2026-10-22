@@ -19,7 +19,7 @@ import { readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { isInsidePath } from "./localMedia.mjs";
-import { parsePorcelainV2, runReadOnlyGit } from "./gitInfo.mjs";
+import { parseNumstat, parsePorcelainV2, runReadOnlyGit } from "./gitInfo.mjs";
 import { dropProjectPiLinkEntries } from "./worktreePiLink.mjs";
 
 /**
@@ -421,12 +421,23 @@ export async function listSourceFiles({
 
   // 分叉点拿不到就退回上游本身：`git diff <upstream>` 也成立（只是会把上游自己的新提交算成“删除”）。
   const from = (await resolveMergeBase(project, resolvedBase, options)) || resolvedBase;
-  const result = await runReadOnlyGit(project, ["diff", "--name-status", "-z", from], options);
+  // 清单和行数是同一次比较的两个切面，一起要：行上的 `+N −M` 由 numstat 给。
+  // numstat 失败不算「列不出来」—— 文件清单本身还是准的，只是没有统计（渲染成不显示统计）。
+  const [result, numstat] = await Promise.all([
+    runReadOnlyGit(project, ["diff", "--name-status", "-z", from], options),
+    runReadOnlyGit(project, ["diff", "--numstat", "-z", from], options),
+  ]);
   if (!result.ok || result.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
     return { source: normalized, base: from, files: [], summary: gitFailureText(result) };
   }
 
-  return { source: normalized, base: from, files: parseNameStatusZ(result.stdout), summary: "" };
+  const counts = numstat.ok ? parseNumstat(numstat.stdout) : new Map();
+  const files = parseNameStatusZ(result.stdout).map((file) => {
+    const lines = counts.get(file.path);
+    return lines ? { ...file, added: lines.added, removed: lines.removed } : file;
+  });
+
+  return { source: normalized, base: from, files, summary: "" };
 }
 
 /**

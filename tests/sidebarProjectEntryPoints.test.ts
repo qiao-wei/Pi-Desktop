@@ -45,8 +45,41 @@ test("项目行上有「文件」和「技能/包」两个入口，各接各的 
   // 无障碍名 + 悬停提示（图标按钮没有文字，靠这两个）。
   assert.match(sidebar, /aria-label=\{t\("sidebar\.filesNav"\)\}/);
   assert.match(sidebar, /aria-label=\{t\("sidebar\.projectCapabilitiesNav"\)\}/);
-  // 和同一行上的其它按钮一样，锁定时跟着禁用。
-  assert.match(sidebar, /data-project-files-nav=\{project\.id\}[\s\S]{0,400}?sidebarLock\.lockClass/);
+  // 和同一行上的其它按钮一样，锁定时跟着禁用（同一段里 class 与锁定 class 成对出现）。
+  assert.match(
+    sidebar,
+    /className=\{cn\("size-6", sidebarLock\.lockClass\)\}[\s\S]{0,400}?data-project-files-nav=\{project\.id\}/,
+  );
+  assert.match(
+    sidebar,
+    /className=\{cn\("size-6", sidebarLock\.lockClass\)\}[\s\S]{0,400}?data-project-capabilities-nav=\{project\.id\}/,
+  );
+});
+
+test("动作簇的图标是一族 16px 画法，且顺序对齐 ZCode", () => {
+  const sidebar = topLevelFunctionSource("ProjectSidebar");
+  const rowStart = sidebar.indexOf('"group relative"');
+  assert.notEqual(rowStart, -1, "project row markup changed");
+  // 到这一行的 `</section>` 为止（别用第一个 `</section>`：侧栏里前面还有别的 section）。
+  const cluster = sidebar.slice(sidebar.indexOf("sidebarHoverActionClass", rowStart), sidebar.indexOf("</section>", rowStart));
+
+  // 图标全部来自 `sidebarIcons`（24 格 / 1.7 描边），尺寸统一 16px：
+  // 之前这里混了 lucide 的 FolderTree（17px）和 Blocks（17px）——同排里只有它们又粗又大。
+  for (const icon of ["SidebarMoreIcon", "SidebarFileTreeIcon", "SidebarSkillsIcon", "SidebarNewSessionIcon"]) {
+    // 用字符串比对：`{16}` 放进 RegExp 会被当成量词（`e{16}` = 十六个 e）。
+    assert.ok(cluster.includes(`<${icon} size={16} />`), `${icon} 要用 16px 的族谱画法`);
+  }
+  assert.doesNotMatch(cluster, /<FolderTree|<Blocks|MoreHorizontal/, "不许再混 lucide 的看家图标");
+
+  // 顺序照 ZCode 的项目行（`ProjectNodeContent.tsx` 的 virtual-project-actions）：
+  // 「…」在最左，动作按次要→主要排，新建会话在最右。
+  const order = ["SidebarMoreIcon", "data-project-files-nav", "data-project-capabilities-nav", "SidebarNewSessionIcon"];
+  const positions = order.map((token) => cluster.indexOf(token));
+  assert.deepEqual(
+    positions,
+    [...positions].sort((a, b) => a - b),
+    `动作簇顺序应为 ${order.join(" → ")}`,
+  );
 });
 
 test("文件树在左侧栏里，本体只有一份（App 组好整块传进来）", () => {
@@ -81,6 +114,18 @@ test("技能/包弹窗里放的是那个共享面板，且一次只有一个", (
   assert.equal(countOccurrences(appSource, "<ProjectCapabilitiesPanel"), 1, "面板的 call site 只许有一处");
   assert.match(appSource, /open=\{Boolean\(capabilitiesDialogProjectId\)\}/);
   assert.match(appSource, /onOpenChange=\{\(next\) => \{[\s\S]{0,120}?setCapabilitiesDialogProjectId\(""\)/);
+});
+
+test("新加的两个图标画在侧栏同一套族谱上（不是另一个图标族）", () => {
+  const icons = readFileSync(new URL("../src/components/sidebarIcons.tsx", import.meta.url), "utf8");
+  // ZCode 的「文件树」是 lucide `ListTree`、「技能」是 `WandSparkles`：路径照抄，
+  // 但外壳用 `Svg()`（24 格 + strokeWidth 1.7），否则又变成两种笔画混排。
+  assert.match(icons, /export function SidebarFileTreeIcon/);
+  assert.match(icons, /d="M3 6v4c0 1\.1\.9 2 2 2h3"/);
+  assert.match(icons, /export function SidebarSkillsIcon/);
+  assert.match(icons, /m21\.64 3\.64-1\.28-1\.28a1\.21 1\.21 0 0 0-1\.72 0L2\.36 18\.64/);
+  assert.match(icons, /export function SidebarMoreIcon/);
+  assert.match(icons, /strokeWidth=\{1\.7\}/);
 });
 
 test("两个入口的文案 key 在 zh / en 两包都有", () => {

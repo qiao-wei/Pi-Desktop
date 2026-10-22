@@ -54,6 +54,61 @@ export function SidebarNewSessionIcon(props: IconProps) {
   );
 }
 
+/**
+ * codex-ui `Ellipsis` — 三个点。
+ *
+ * 点用「描边圆」而不是实心圆：r=1 + 1.7 描边在小尺寸下正好糊成一个实心点，
+ * 和 lucide / codex-ui 的 `Ellipsis` 观感一致（实心 r=1 在 16px 下只有 0.8px，显得比旁边
+ * 那一族图标都轻）。
+ */
+export function SidebarMoreIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="5" cy="12" r="1" />
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="19" cy="12" r="1" />
+    </Svg>
+  );
+}
+
+/**
+ * 「显示文件树」——ZCode 用的就是 `ListTree`（`ProjectNodeContent.tsx` 的 files 动作、
+ * `TaskListItem` 的 `git.action.showTree`），路径照抄 lucide，但按上面这套族谱的构造画
+ * （24 格 / 1.7 描边 / 16px），免得又变成「同排里只有这两个图标又粗又大」。
+ */
+export function SidebarFileTreeIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M21 12h-8" />
+      <path d="M21 6H8" />
+      <path d="M21 18h-8" />
+      <path d="M3 6v4c0 1.1.9 2 2 2h3" />
+      <path d="M3 10v6c0 1.1.9 2 2 2h3" />
+    </Svg>
+  );
+}
+
+/**
+ * 「技能与包」——ZCode 里 skills 的语义图标是 `WandSparkles`（`quickPickCommandIcons.tsx`
+ * 的 `skills`、`PluginStoreDetailView` 的 skill 段），路径同样照抄 lucide。
+ * ZCode 的项目行没有这个入口（他们的 skills 在设置里），是我们按这里的功能补的，
+ * 画法保持一致就不会显得是外来户。
+ */
+export function SidebarSkillsIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72" />
+      <path d="m14 7 3 3" />
+      <path d="M5 6v4" />
+      <path d="M19 14v4" />
+      <path d="M10 2v2" />
+      <path d="M7 8H3" />
+      <path d="M21 16h-4" />
+      <path d="M11 3H9" />
+    </Svg>
+  );
+}
+
 /** codex-ui `Archive` — lidded box with the handle dash. */
 export function SidebarArchiveIcon(props: IconProps) {
   return (

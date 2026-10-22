@@ -105,14 +105,17 @@ export function CodeViewer({
   );
 
   return (
+    // `w-max min-w-full`：内容比面板宽时把外层滚动容器撑开（滚动条才贴得住面板底边），
+    // 比面板窄时仍铺满。右边缘的那条沟在宿主（PreviewPane 的滚动视口）上，不在这里：
+    // 加在内容里的话长行静止时仍然顶到窗口边缘。
     <div
-      className="h-full w-full overflow-auto"
+      className="min-h-full w-max min-w-full"
       style={style}
       data-code-viewer=""
       data-language={language}
       data-code-path={codePreviewLeaf(path) || undefined}
     >
-      <DiffsFile file={file} options={options} className="min-h-full w-full" />
+      <DiffsFile file={file} options={options} className="min-h-full w-max" />
     </div>
   );
 }

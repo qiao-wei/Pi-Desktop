@@ -6,37 +6,42 @@ import { useT } from "@/i18n/react";
 import {
   gitChangeTotals,
   gitHeadLabel,
-  gitStatusLabelKey,
-  gitStatusLetter,
-  gitStatusLetterClass,
   groupGitFiles,
   isGitClean,
   type GitFileChange,
-  type GitFileStatus,
   type GitInfo,
 } from "@/shared/gitStatusBadge";
 import { cn } from "@/lib/utils";
 import {
   buildWorkspaceChangedFilesQuery,
+  buildWorkspaceDiffQuery,
   normalizeChangedFilesResponse,
+  normalizeWorkspaceDiffResponse,
   WORKSPACE_DIFF_SOURCES,
   type WorkspaceChangedFile,
   type WorkspaceDiffSource,
 } from "@/shared/workspaceDiff";
 
-import { FileRowMenu } from "@/components/FileRowMenu";
+import { ChangeCard, type ChangeDiffState } from "./ChangeCard";
 
 /**
- * 右面板的「改动」视图。
+ * 右面板的「改动」视图 —— **照 ZCode 的 Review / GitPane 做**：一张清单，行本身就是开关，
+ * 点开就在行下面就地展开这份文件的 diff（不再「点一行 → 另开一张标签页」）。
  *
- * 和 git 徽标里那份的关系：**这里是完整的 review 面**（宽、按来源切、能跳预览），徽标那份是
- * 一眼摘要 + 提交入口。提交是写操作，留在徽标里（用户已经熟悉那个位置），两边不重复。
+ * 为什么改成就地展开（2026-10-21 用户按 ZCode 的截图反馈）：review 是**扫**的动作 ——
+ * 从上往下过一遍文件，遇到可疑的展开看两眼、收起，视线和滚动位置都不离开列表。每点一个
+ * 文件都要换一张标签页，扫十个文件就会攒十张标签页，回头还得一张张关。
+ * 「在标签页里打开 / 看正文 / 用 IDE 打开」这几条仍然留着，走行上的右键菜单。
+ *
+ * 和 git 徽标里那份的关系：**这里是完整的 review 面**（宽、按来源切、能就地看 diff），
+ * 徽标那份是一眼摘要 + 提交入口。提交是写操作，留在徽标里（用户已经熟悉那个位置），两边不重复。
  *
  * 来源切换只说清「现在看的是哪一份差异」：
  * - 未暂存 = 工作区 ↔ index（含未跟踪），来源列表直接用 porcelain 的分组；
  * - 已暂存 = index ↔ HEAD；
  * - 对比分支 = 工作区 ↔ 上游分叉点（含已提交但未推送的部分），这一份 porcelain 看不到，
- *   所以按需向 `/api/projects/git/files` 要（切到这一档才请求）。
+ *   所以按需向 `/api/projects/git/files` 要（切到这一档才请求），连 base 一起记下来 ——
+ *   展开某一行时要把同一个 base 交给 diff 请求，否则服务端解不出基准。
  */
 
 /** chip 上的短文案：`git.source.*` 那几个是「描述」（预览头部用），chip 里放不下。 */
@@ -48,6 +53,11 @@ function sourceChipLabelKey(source: WorkspaceDiffSource): string {
     return "rightPanel.gitSourceBranch";
   }
   return "git.group.unstaged";
+}
+
+/** 一份 diff 的缓存键：来源不同就是两份不同的东西，同一个文件也要各存一份。 */
+function changeDiffKey(source: WorkspaceDiffSource, path: string): string {
+  return `${source}:${path}`;
 }
 
 function SourceChips({
@@ -86,76 +96,32 @@ function SourceChips({
   );
 }
 
-function ChangeRow({
-  path,
-  origPath,
-  status,
-  isActive,
-  onOpenDiff,
-  onOpenContent,
-  onOpenInIde,
-}: {
-  path: string;
-  origPath: string;
-  status: GitFileStatus;
-  /** 这个文件正开在面板的某个 tab 里（列表里的选中态）。 */
-  isActive: boolean;
-  onOpenDiff: (path: string) => void;
-  onOpenContent: (path: string) => void;
-  onOpenInIde: (path: string) => void;
-}) {
-  const t = useT();
-
-  const row = (
-    <button
-      type="button"
-      onClick={() => onOpenDiff(path)}
-      className={cn(
-        "flex w-full items-center gap-2 rounded-[var(--app-radius-chip)] px-2 py-[3px] text-left text-[12px] hover:bg-accent/60",
-        isActive && "bg-accent text-accent-foreground",
-      )}
-      title={`${origPath ? `${origPath} → ${path}` : path} · ${t("git.openDiffHint")}`}
-      data-change-path={path}
-      data-change-active={isActive ? "" : undefined}
-    >
-      <span
-        className={cn("w-3 shrink-0 text-center font-mono text-[11px]", gitStatusLetterClass(status))}
-        title={t(gitStatusLabelKey(status))}
-      >
-        {gitStatusLetter(status)}
-      </span>
-      <span className="min-w-0 flex-1 truncate">{path}</span>
-    </button>
-  );
-
-  return (
-    <FileRowMenu
-      path={path}
-      hasChanges
-      hasContent={status !== "deleted"}
-      onOpenContent={onOpenContent}
-      onOpenDiff={onOpenDiff}
-      onOpenInIde={onOpenInIde}
-    >
-      {row}
-    </FileRowMenu>
-  );
-}
-
 function ChangeGroup({
   title,
   files,
   activePath,
-  onOpenDiff,
+  expandedPath,
+  diffByKey,
+  source,
+  themeMode,
+  onToggle,
+  onRetry,
   onOpenContent,
+  onOpenDiffInTab,
   onOpenInIde,
 }: {
   title: string;
   files: (GitFileChange | WorkspaceChangedFile)[];
-  /** 当前打开在 tab 里的文件路径（列表里的选中态）。 */
+  /** 当前打开在标签页里的文件路径（列表里的选中态）。 */
   activePath: string;
-  onOpenDiff: (path: string) => void;
+  expandedPath: string;
+  diffByKey: Record<string, ChangeDiffState>;
+  source: WorkspaceDiffSource;
+  themeMode: "light" | "dark";
+  onToggle: (path: string) => void;
+  onRetry: (path: string) => void;
   onOpenContent: (path: string) => void;
+  onOpenDiffInTab: (path: string) => void;
   onOpenInIde: (path: string) => void;
 }) {
   if (files.length === 0) {
@@ -166,14 +132,21 @@ function ChangeGroup({
     <div className="pb-1">
       <div className="px-2 pb-0.5 pt-1 text-[11px] font-medium text-muted-foreground">{title}</div>
       {files.map((file) => (
-        <ChangeRow
+        <ChangeCard
           key={file.path}
           path={file.path}
           origPath={file.origPath}
           status={file.status}
+          added={file.added}
+          removed={file.removed}
           isActive={file.path === activePath}
-          onOpenDiff={onOpenDiff}
+          isExpanded={file.path === expandedPath}
+          diffState={diffByKey[changeDiffKey(source, file.path)] ?? null}
+          themeMode={themeMode}
+          onToggle={onToggle}
+          onRetry={onRetry}
           onOpenContent={onOpenContent}
+          onOpenDiffInTab={onOpenDiffInTab}
           onOpenInIde={onOpenInIde}
         />
       ))}
@@ -187,6 +160,7 @@ export function GitPane({
   sessionPath,
   isRefreshing,
   activePath,
+  themeMode,
   onRefresh,
   onOpenDiff,
   onOpenContent,
@@ -198,11 +172,13 @@ export function GitPane({
   projectId: string;
   sessionPath: string;
   isRefreshing: boolean;
-  /** 当前打开在 tab 里的文件路径（列表里的选中态）。 */
+  /** 当前打开在标签页里的文件路径（列表里的选中态）。 */
   activePath: string;
+  /** 就地展开的 diff 也要过 shiki，明暗档跟着应用主题（和预览标签页同一个来源）。 */
+  themeMode: "light" | "dark";
   onRefresh: () => void;
-  /** 看某份来源的改动（进预览视图）。 */
-  onOpenDiff: (path: string, source: WorkspaceDiffSource) => void;
+  /** 在**标签页**里看某份来源的改动（行上的右键菜单；就地展开见 onToggle）。 */
+  onOpenDiff: (path: string, source: WorkspaceDiffSource, base?: string) => void;
   /** 看文件正文。 */
   onOpenContent: (path: string) => void;
   onOpenInIde: (path: string) => void;
@@ -211,8 +187,18 @@ export function GitPane({
   const [source, setSource] = useState<WorkspaceDiffSource>("unstaged");
   const [branchFiles, setBranchFiles] = useState<WorkspaceChangedFile[]>([]);
   const [branchSummary, setBranchSummary] = useState("");
+  /** 「对比分支」这一档的基准（服务端解出的 merge-base）：展开某个文件时要原样交回去。 */
+  const [branchBase, setBranchBase] = useState("");
   const [isLoadingBranch, setIsLoadingBranch] = useState(false);
   const branchSequence = useRef(0);
+
+  /** 现在展开着哪一行（一次只展开一张：再点一行就把上一张收起来）。 */
+  const [expandedPath, setExpandedPath] = useState("");
+  const [diffByKey, setDiffByKey] = useState<Record<string, ChangeDiffState>>({});
+  /** 在途 diff 请求的序号：同一个文件连点两下、或边读边换来源，迟到的响应不许写回来。 */
+  const diffSequence = useRef(0);
+  const expandedPathRef = useRef(expandedPath);
+  expandedPathRef.current = expandedPath;
 
   const grouped = useMemo(() => groupGitFiles(info?.files ?? []), [info]);
 
@@ -240,15 +226,18 @@ export function GitPane({
       const parsed = normalizeChangedFilesResponse(raw);
       if (!parsed) {
         setBranchFiles([]);
+        setBranchBase("");
         setBranchSummary(t("git.diff.unavailable"));
         return;
       }
 
       setBranchFiles(parsed.files);
+      setBranchBase(parsed.base);
       setBranchSummary(parsed.summary);
     } catch (error) {
       if (sequence === branchSequence.current) {
         setBranchFiles([]);
+        setBranchBase("");
         setBranchSummary(error instanceof Error ? error.message : String(error));
       }
     } finally {
@@ -265,6 +254,126 @@ export function GitPane({
       void loadBranchFiles();
     }
   }, [source, info, loadBranchFiles]);
+
+  /** 当前这一档要显示的文件（未暂存那一档把未跟踪合在一起，和原来一致）。 */
+  const visibleFiles = useMemo<(GitFileChange | WorkspaceChangedFile)[]>(() => {
+    if (!info) {
+      return [];
+    }
+    if (source === "staged") {
+      return grouped.staged;
+    }
+    if (source === "unstaged") {
+      return [...grouped.unstaged, ...grouped.untracked];
+    }
+    return branchFiles;
+  }, [branchFiles, grouped, info, source]);
+
+  const visiblePathsRef = useRef<Set<string>>(new Set());
+  visiblePathsRef.current = new Set(visibleFiles.map((file) => file.path));
+  /** 清单指纹：刷新/换来源后清单变了就重读展开着的那一份（换内容不换身份）。 */
+  const visiblePathsKey = visibleFiles.map((file) => file.path).join("\n");
+
+  /**
+   * 读一份 diff（原地展开用）。
+   *
+   * **不缓存**（和预览标签页同一条取舍）：agent 每轮都可能再改同一个文件，缓存下来的 diff
+   * 就成了上一轮的。只按「来源 + 路径」存一份在屏数据，用来避免收起再展开时闪白。
+   * 换来源时那一份全丢掉：另一档的差异绝不是同一份东西。
+   */
+  const loadDiff = useCallback(
+    async (path: string) => {
+      const key = changeDiffKey(source, path);
+      const sequence = diffSequence.current + 1;
+      diffSequence.current = sequence;
+      setDiffByKey((current) => ({
+        ...current,
+        [key]: { isLoading: true, diff: current[key]?.diff ?? null, error: "" },
+      }));
+
+      try {
+        const raw = await fetchJson<unknown>(
+          buildWorkspaceDiffQuery({
+            projectId,
+            sessionPath,
+            path,
+            source,
+            // 分支来源必须带 base：服务端要靠它解 merge-base，少了它直接报错。
+            base: source === "branch" ? branchBase : undefined,
+          }),
+        );
+        if (diffSequence.current !== sequence) {
+          return;
+        }
+
+        const parsed = normalizeWorkspaceDiffResponse(raw);
+        if (!parsed) {
+          setDiffByKey((current) => ({
+            ...current,
+            [key]: { isLoading: false, diff: null, error: t("git.diff.loadFailed", { reason: String(raw) }) },
+          }));
+          return;
+        }
+
+        setDiffByKey((current) => ({ ...current, [key]: { isLoading: false, diff: parsed, error: "" } }));
+      } catch (error) {
+        if (diffSequence.current !== sequence) {
+          return;
+        }
+        setDiffByKey((current) => ({
+          ...current,
+          [key]: { isLoading: false, diff: null, error: error instanceof Error ? error.message : String(error) },
+        }));
+      }
+    },
+    [branchBase, projectId, sessionPath, source, t],
+  );
+
+  // 换来源：在屏的那一份全作废（另一档的差异不是同一份东西），在途响应也一并失效。
+  useEffect(() => {
+    diffSequence.current += 1;
+    setDiffByKey({});
+  }, [source]);
+
+  // 清单变了（刷新 / 换来源 / 分支 base 解出来）：重读展开着的那一份；那一行没了就收起。
+  useEffect(() => {
+    const path = expandedPathRef.current;
+    if (!path) {
+      return;
+    }
+    if (source === "branch" && !branchBase) {
+      return;
+    }
+    if (!visiblePathsRef.current.has(path)) {
+      setExpandedPath("");
+      return;
+    }
+    void loadDiff(path);
+  }, [branchBase, loadDiff, source, visiblePathsKey]);
+
+  const toggleChange = useCallback(
+    (path: string) => {
+      const isOpen = expandedPathRef.current === path;
+      setExpandedPath(isOpen ? "" : path);
+      if (!isOpen) {
+        void loadDiff(path);
+      }
+    },
+    [loadDiff],
+  );
+
+  const retryChange = useCallback(
+    (path: string) => {
+      void loadDiff(path);
+    },
+    [loadDiff],
+  );
+
+  const branchBaseForTab = source === "branch" ? branchBase : undefined;
+  const openDiffInTab = useCallback(
+    (path: string) => onOpenDiff(path, source, branchBaseForTab),
+    [branchBaseForTab, onOpenDiff, source],
+  );
 
   const totals = info ? gitChangeTotals(info) : { added: 0, removed: 0 };
   const retryBranch = useCallback(() => {
@@ -322,18 +431,30 @@ export function GitPane({
               <ChangeGroup
                 title={t("git.group.unstaged")}
                 activePath={activePath}
+                expandedPath={expandedPath}
+                diffByKey={diffByKey}
+                source={source}
+                themeMode={themeMode}
                 files={grouped.unstaged}
-                onOpenDiff={(path) => onOpenDiff(path, "unstaged")}
+                onToggle={toggleChange}
+                onRetry={retryChange}
                 onOpenContent={onOpenContent}
+                onOpenDiffInTab={openDiffInTab}
                 onOpenInIde={onOpenInIde}
               />
               <ChangeGroup
                 title={t("git.group.untracked")}
                 // 未跟踪文件也走 unstaged：服务端会合成一份「整篇新增」的补丁（和徽标一致）。
                 activePath={activePath}
+                expandedPath={expandedPath}
+                diffByKey={diffByKey}
+                source={source}
+                themeMode={themeMode}
                 files={grouped.untracked}
-                onOpenDiff={(path) => onOpenDiff(path, "unstaged")}
+                onToggle={toggleChange}
+                onRetry={retryChange}
                 onOpenContent={onOpenContent}
+                onOpenDiffInTab={openDiffInTab}
                 onOpenInIde={onOpenInIde}
               />
               {grouped.unstaged.length === 0 ? (
@@ -350,9 +471,15 @@ export function GitPane({
             <ChangeGroup
               title={t("git.group.staged")}
               activePath={activePath}
+              expandedPath={expandedPath}
+              diffByKey={diffByKey}
+              source={source}
+              themeMode={themeMode}
               files={grouped.staged}
-              onOpenDiff={(path) => onOpenDiff(path, "staged")}
+              onToggle={toggleChange}
+              onRetry={retryChange}
               onOpenContent={onOpenContent}
+              onOpenDiffInTab={openDiffInTab}
               onOpenInIde={onOpenInIde}
             />
           )
@@ -386,9 +513,15 @@ export function GitPane({
               <ChangeGroup
                 title={t("git.source.branch")}
                 activePath={activePath}
+                expandedPath={expandedPath}
+                diffByKey={diffByKey}
+                source={source}
+                themeMode={themeMode}
                 files={branchFiles}
-                onOpenDiff={(path) => onOpenDiff(path, "branch")}
+                onToggle={toggleChange}
+                onRetry={retryChange}
                 onOpenContent={onOpenContent}
+                onOpenDiffInTab={openDiffInTab}
                 onOpenInIde={onOpenInIde}
               />
             ) : null}
