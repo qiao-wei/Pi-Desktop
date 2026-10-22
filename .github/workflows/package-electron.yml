@@ -406,6 +406,11 @@ jobs:
       # 建 tag + Release 要写权限；工作流级是只读，所以这里单独声明。
       contents: write
     steps:
+      # gh 要先解析"当前仓库"：它走 git remote，runner 上不 checkout 就没有 .git，连 `gh release view`
+      # 都会以 `failed to run git: fatal: not a git repository` 收场（2026-10-22 第一次就是这么红的）。
+      # tag 建在哪个 commit 由下面的 --target $GITHUB_SHA 决定，不依赖 HEAD。
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           # 不 merge：每个 leg 一个子目录，目录名里带着 target/arch/mode，下面靠它区分同名产物。
