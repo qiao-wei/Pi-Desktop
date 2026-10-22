@@ -20,6 +20,8 @@ const {
   defaultTargetTriple,
   packageNameOf,
   renderPosixBridgeLauncher,
+  resolveNpmInvocation,
+  siblingNpmCliCandidates,
   staleInstalledPackages,
   versionFloor,
 } = await import(pathToFileURL(resolve(import.meta.dirname, "../scripts/lib/bridgeRuntime.mjs")).href);
@@ -351,4 +353,63 @@ test("the bridge build warns when the installed pi lags package.json", () => {
     [],
     "the checked-out repo must not build the bridge from a stale tree",
   );
+});
+
+// `npm install` 那句到底拿什么去起。Windows 上没有 npm_execpath 时旧代码会退化成裸 `npm`，
+// 而 `npm` 在 Windows 上是个 `.cmd` —— spawnSync(shell:false) 根本执行不了它，报出来还只有一句
+// 空消息（2026-10-22 CI 的 Windows slim 包）。所以这几条锁住"会去找真的 npm-cli.js"。
+test("npm_execpath 指向 cli.js 时用当前 node 跑它", () => {
+  const invocation = resolveNpmInvocation({
+    env: { npm_execpath: "/usr/local/lib/node_modules/npm/bin/npm-cli.js" },
+    execPath: "/usr/local/bin/node",
+  });
+  assert.deepEqual(invocation, {
+    command: "/usr/local/bin/node",
+    baseArgs: ["/usr/local/lib/node_modules/npm/bin/npm-cli.js"],
+    source: "npm_execpath",
+  });
+});
+
+test("npm_execpath 不是 .js（自带的 shell 包装）时直接执行它", () => {
+  const invocation = resolveNpmInvocation({ env: { npm_execpath: "/usr/local/bin/npm" }, execPath: "/usr/local/bin/node" });
+  assert.deepEqual(invocation, { command: "/usr/local/bin/npm", baseArgs: [], source: "npm_execpath" });
+});
+
+test("没有 npm_execpath 时找 node 旁边那份 npm-cli.js，且按平台用不同目录形状", () => {
+  const probed = [];
+  const exists = (path) => {
+    probed.push(path);
+    return true;
+  };
+
+  const win = resolveNpmInvocation({ env: {}, platform: "win32", execPath: "C:\\hostedtoolcache\\node\\bin\\node.exe", exists });
+  assert.equal(win.source, "npm-cli");
+  assert.equal(win.command, "C:\\hostedtoolcache\\node\\bin\\node.exe");
+  assert.deepEqual(probed, ["C:\\hostedtoolcache\\node\\bin\\node_modules\\npm\\bin\\npm-cli.js"]);
+
+  // POSIX：npm 在 <node>/../lib/node_modules/npm 里，而且 `..` 要被规范化掉。
+  assert.deepEqual(siblingNpmCliCandidates("/opt/hostedtoolcache/node/bin/node", "darwin"), [
+    "/opt/hostedtoolcache/node/lib/node_modules/npm/bin/npm-cli.js",
+  ]);
+  assert.deepEqual(siblingNpmCliCandidates("C:\\n\\node.exe", "win32"), ["C:\\n\\node_modules\\npm\\bin\\npm-cli.js"]);
+});
+
+test("调用方给的候选（内置运行时那份 npm）优先于 node 旁边那份", () => {
+  const chosen = [];
+  const invocation = resolveNpmInvocation({
+    env: {},
+    execPath: "/repo/node",
+    candidates: ["/repo/src-tauri/binaries/node-runtime/lib/node_modules/npm/bin/npm-cli.js"],
+    exists: (path) => {
+      chosen.push(path);
+      return true;
+    },
+  });
+  assert.equal(chosen[0], "/repo/src-tauri/binaries/node-runtime/lib/node_modules/npm/bin/npm-cli.js");
+  assert.equal(invocation.source, "npm-cli");
+});
+
+test("哪都找不到 npm 时退回 PATH，但调用方能看见这个事实（不能只剩一句空报错）", () => {
+  const invocation = resolveNpmInvocation({ env: {}, execPath: "/nowhere/node", exists: () => false });
+  assert.deepEqual(invocation, { command: "npm", baseArgs: [], source: "path" });
 });
