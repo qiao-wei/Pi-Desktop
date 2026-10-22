@@ -19,6 +19,8 @@ const {
   compareVersions,
   defaultTargetTriple,
   packageNameOf,
+  escapedSpecsFromProbe,
+  isInsideTree,
   renderPosixBridgeLauncher,
   resolveNpmInvocation,
   siblingNpmCliCandidates,
@@ -412,4 +414,39 @@ test("调用方给的候选（内置运行时那份 npm）优先于 node 旁边�
 test("哪都找不到 npm 时退回 PATH，但调用方能看见这个事实（不能只剩一句空报错）", () => {
   const invocation = resolveNpmInvocation({ env: {}, execPath: "/nowhere/node", exists: () => false });
   assert.deepEqual(invocation, { command: "npm", baseArgs: [], source: "path" });
+});
+
+// 自解析探针的判定。旧代码拿 URL 的 pathname（`/D:/a/…`，前导斜杠 + 正斜杠）去跟树根
+// （`D:\a\…`）比字符串前缀，Windows 上 27 个依赖全被判成"跑出树外/缺失"，bridge:build 直接失败
+// （mac 上是好的，所以本地一直看不见）。这条用真实的 Windows 形状锁住它。
+test("探针输出里的 Windows 路径算在树里（不能拿 URL pathname 比字符串前缀）", () => {
+  const dir = "D:\\a\\Pi-Desktop\\Pi-Desktop\\src-tauri\\binaries\\bridge";
+  const output = [
+    "@earendil-works/pi-ai\tok\tD:\\a\\Pi-Desktop\\Pi-Desktop\\src-tauri\\binaries\\bridge\\node_modules\\@earendil-works\\pi-ai\\dist\\index.js",
+    "@earendil-works/pi-coding-agent\tok\tD:\\a\\Pi-Desktop\\Pi-Desktop\\src-tauri\\binaries\\bridge\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\index.js",
+  ].join("\r\n");
+  assert.deepEqual(escapedSpecsFromProbe(output, dir, "win32"), []);
+});
+
+test("探针里真跑出树外 / 没解析出来的要报出来", () => {
+  const dir = "/repo/src-tauri/binaries/bridge";
+  assert.deepEqual(
+    escapedSpecsFromProbe(
+      [
+        "left-pad\tok\t/repo/node_modules/left-pad/index.js",
+        "esbuild\tunresolved\tERR_MODULE_NOT_FOUND",
+        "jiti\tok\t/repo/src-tauri/binaries/bridge/node_modules/jiti/lib/jiti.cjs",
+      ].join("\n"),
+      dir,
+    ),
+    [
+      "left-pad -> outside /repo/node_modules/left-pad/index.js",
+      "esbuild -> unresolved ERR_MODULE_NOT_FOUND",
+    ],
+  );
+
+  // 同一条路径在 win32 flavor 下也要判得对（分隔符不一样）。
+  assert.equal(isInsideTree("D:\\b", "D:\\b\\node_modules\\x", "win32"), true);
+  assert.equal(isInsideTree("D:\\b", "D:\\bextra\\x", "win32"), false, "前缀相同但不是子目录");
+  assert.equal(isInsideTree("D:\\b", "C:\\b\\x", "win32"), false);
 });

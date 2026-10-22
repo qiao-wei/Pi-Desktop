@@ -250,3 +250,49 @@ export function staleInstalledPackages({ declared = {}, installed = {} } = {}) {
   }
   return stale;
 }
+
+/** `file` 是不是在 `dir` 里面（分隔符与 flavor 都按给定平台算）。 */
+export function isInsideTree(dir, file, platform = process.platform) {
+  const path = platform === "win32" ? win32 : posix;
+  const relative = path.relative(path.resolve(dir), path.resolve(file));
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+/**
+ * 解析自解析探针（`build-bridge-runtime.mjs` 的 `verifyBridgeSelfResolve`）的一行输出：
+ * `<spec>\t<state>\t<target>`。返回需要报出来的描述，东西好好落在树里就返回 null。
+ *
+ * 判"落在树里"**不能**拿 URL 的 `pathname` 与宿主路径比字符串：Windows 上 `file:///D:/a/…` 的
+ * pathname 是 `/D:/a/…`（多一个前导斜杠、而且是正斜杠），树根却是 `D:\a\…` —— 前缀永远不匹配，
+ * 于是 27 个依赖全被判成"跑出树外/缺失"，Windows 上 bridge:build 直接失败（2026-10-22 CI，mac 上是好的）。
+ * 修法是两头都补：探针侧用 `fileURLToPath` 拿真路径，判定侧用 `relative` 而不是字符串前缀。
+ */
+export function resolveProbeVerdict({ spec, state, target, dir, platform = process.platform }) {
+  if (state !== "ok") {
+    return `${spec} -> ${state} ${target}`;
+  }
+  if (!isInsideTree(dir, target, platform)) {
+    return `${spec} -> outside ${target}`;
+  }
+  return null;
+}
+
+/** 探针的整体输出 → 要报出来的条目。逐行 trim：Windows 的输出可能带 CR。 */
+export function escapedSpecsFromProbe(output, dir, platform = process.platform) {
+  const escaped = [];
+  for (const raw of String(output ?? "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) {
+      continue;
+    }
+    const [spec, state, target = ""] = line.split("\t");
+    if (!spec || !state) {
+      continue;
+    }
+    const verdict = resolveProbeVerdict({ spec, state, target, dir, platform });
+    if (verdict) {
+      escaped.push(verdict);
+    }
+  }
+  return escaped;
+}
