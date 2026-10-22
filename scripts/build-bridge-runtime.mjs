@@ -28,6 +28,7 @@ import {
   bridgePackageManifest,
   collectBareImports,
   defaultTargetTriple,
+  escapedSpecsFromProbe,
   packageNameOf,
   renderPosixBridgeLauncher,
   resolveNpmInvocation,
@@ -285,14 +286,16 @@ export function verifyBridgeSelfResolve({ node = verificationNode, dir = bridgeD
     mkdirSync(from, { recursive: true });
     const probe = join(from, ".pi-desktop-resolve-probe.mjs");
     const body = [
-      "import { pathToFileURL } from 'node:url';",
+      "import { fileURLToPath } from 'node:url';",
       "import { existsSync } from 'node:fs';",
       `const specs = ${JSON.stringify(specs)};`,
       "for (const spec of specs) {",
       "  try {",
       "    const url = import.meta.resolve(spec);",
       "    const target = url.startsWith('file:') ? new URL(url) : null;",
-      "    const file = target ? decodeURIComponent(target.pathname) : url;",
+      // `fileURLToPath` 而不是 `target.pathname`：Windows 上 pathname 是 `/D:/a/…`（前导斜杠 + 正斜杠），
+      // 拿它 existsSync 会一律 false、也跟树根拼不上，于是全部依赖都被当成“缺失”。
+      "    const file = target ? fileURLToPath(target) : url;",
       "    console.log(`${spec}\\t${existsSync(file) ? 'ok' : 'missing'}\\t${file}`);",
       "  } catch (error) {",
       "    console.log(`${spec}\\tunresolved\\t${error.code ?? error.message}`);",
@@ -314,12 +317,7 @@ export function verifyBridgeSelfResolve({ node = verificationNode, dir = bridgeD
     } finally {
       rmSync(probe, { force: true });
     }
-    for (const line of output.trim().split("\n")) {
-      const [spec, state, target] = line.split("\t");
-      if (state !== "ok" || !target.startsWith(`${dir}/`)) {
-        escaped.push(`${spec} -> ${state} ${target}`);
-      }
-    }
+    escaped.push(...escapedSpecsFromProbe(output, dir));
   }
   if (escaped.length) {
     throw new Error(
