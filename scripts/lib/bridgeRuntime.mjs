@@ -10,7 +10,58 @@
  * deterministic, exactly like the terminal CLI.
  */
 
+import { existsSync } from "node:fs";
+import { posix, win32 } from "node:path";
+
 const BARE_IMPORT = /(?:^|\n)\s*(?:import|export)[^"']*?from\s*"([a-z@][^"]*)"|require\("([a-z@][^"]*)"\)/g;
+
+/**
+ * 怎么起那句 `npm install`。
+ *
+ * 首选 npm 自己给的 `npm_execpath`（`npm run …` 会设它）。没有它时**不能**直接退化成裸 `npm`：
+ * Windows 上 `npm` 是个 `.cmd`，而这里用的是 `spawnSync(…, {shell:false})` —— CreateProcess 只会
+ * 补 `.exe`，spawn 直接失败，报出来是一句「npm install failed for the bridge runtime:」后面什么都
+ * 没有（2026-10-22 CI 的 Windows slim 包就是这么红的）。
+ *
+ * 所以退一步去找**真的存在**的 npm-cli.js：调用方给的候选（比如内置运行时里那份），然后是官方
+ * Node 发行版里「npm 就在 node 旁边」的位置（POSIX 是 `<node>/../lib/node_modules/npm`，Windows 是
+ * `<node>/node_modules/npm`；setup-node / nvm / brew / 官方安装包都是这个形状）。
+ */
+export function resolveNpmInvocation({
+  env = process.env,
+  platform = process.platform,
+  execPath = process.execPath,
+  candidates = [],
+  exists = existsSync,
+} = {}) {
+  const declared = String(env.npm_execpath ?? "").trim();
+  if (declared) {
+    // npm 给的是 cli.js 的路径（要用 node 跑）；但 dev 下也可能是那个 shell 包装，那就直接执行它。
+    return declared.endsWith(".js")
+      ? { command: execPath, baseArgs: [declared], source: "npm_execpath" }
+      : { command: declared, baseArgs: [], source: "npm_execpath" };
+  }
+  for (const cli of [...candidates, ...siblingNpmCliCandidates(execPath, platform)]) {
+    if (exists(cli)) {
+      return { command: execPath, baseArgs: [cli], source: "npm-cli" };
+    }
+  }
+  // 最后手段：PATH 里的 `npm`。POSIX 上它是带 shebang 的脚本，能直接 exec；Windows 上仍然不行，
+  // 所以调用方必须把命令与 spawn 的 error 写进报错里，不能只打 stdout/stderr。
+  return { command: "npm", baseArgs: [], source: "path" };
+}
+
+/**
+ * 官方 Node 发行版里 npm 相对于 node 的位置（Windows 与 POSIX 的目录形状不一样）。
+ *
+ * 用 `win32` / `posix` 两个 flavor 而不是宿主的 `join`：这样给出的永远是**那个平台**的形状，
+ * 在 mac 上也测得动 win32 那条分支（就为这个踩过一次：拿宿主 flavor 拼 win32 路径会当成文件名）。
+ */
+export function siblingNpmCliCandidates(execPath = process.execPath, platform = process.platform) {
+  return platform === "win32"
+    ? [win32.resolve(win32.dirname(execPath), "node_modules", "npm", "bin", "npm-cli.js")]
+    : [posix.resolve(posix.dirname(execPath), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js")];
+}
 
 /** Every bare (non-relative, non-builtin) specifier the given sources import. */
 export function collectBareImports(sources) {

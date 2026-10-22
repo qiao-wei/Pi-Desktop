@@ -13,6 +13,12 @@
 // The macOS signing tier is likewise resolved in one place (`scripts/lib/macSigning.cjs`) and only
 // carried over here — 以前这块是"钥匙串里恰好有什么证书"决定的，产物会静默变成另一个档位。
 // 为什么这个 wrapper 是 CJS：electron-builder 只支持同步加载配置，所以档位表也必须是 CJS。
+//
+// `publish: null`（写在 electron-builder.json 里）是同一类声明：electron-builder 会从 git remote
+// 认出 GitHub 仓库，于是**在 CI 里**自己去走发布流程要 GH_TOKEN（本地不触发，所以只在 Actions 上
+// 炸："GitHub Personal Access Token is not set"，而包其实已经打完了）。我们的产物由
+// upload-artifact 上传，不经过 GitHub Releases，所以显式关掉 —— `null` 是 schema 认的"明确不发布"，
+// 与“没配置”（= 自动探测）不是一回事。
 
 const base = require("./electron-builder.json");
 const { resolveMacSigning } = require("../scripts/lib/macSigning.cjs");

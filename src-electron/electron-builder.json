@@ -15,6 +15,7 @@
   "npmRebuild": false,
   "nodeGypRebuild": false,
   "asar": true,
+  "publish": null,
   "extraResources": [
     {
       "from": "dist",

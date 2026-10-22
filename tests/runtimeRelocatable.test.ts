@@ -87,6 +87,27 @@ function problems(runtimeDir, platform = "darwin") {
   return findUnrelocatable(runtimeDir, { platform, forbidden: FORBIDDEN });
 }
 
+test("win32 载荷里 `#!/usr/bin/env node` 认得 node.exe（扩展名按目标平台判，不看构建机）", () =>
+  fixture(({ runtimeDir }) => {
+    // node 的 win32 载荷就是这个形状：解释器在根目录且带 .exe，而 npm 自己的 CLI 在
+    // node_modules/npm/bin/ 里、shebang 写的是 `#!/usr/bin/env node`。
+    writeFile(join(runtimeDir, "node.exe"), "MZ", 0o755);
+    const npmCli = join(runtimeDir, "node_modules", "npm", "bin", "npm-cli.js");
+    writeFile(npmCli, "#!/usr/bin/env node\n", 0o644);
+
+    // 旧实现按 process.platform 判：在 Windows 上只找没有扩展名的 `node` → 这 12 个（真实载荷里
+    // 就是 12 个）shebang 全被判成"要宿主装 node"，node:build 直接失败（2026-10-22 CI）。
+    assert.deepEqual(problems(runtimeDir, "win32"), []);
+    verifyRuntimeRelocatable(runtimeDir, { platform: "win32", forbidden: FORBIDDEN });
+
+    // 反例：真没有解释器时才该报出来（这时确实"要宿主装 node"）。
+    rmSync(join(runtimeDir, "node.exe"));
+    assert.ok(
+      problems(runtimeDir, "win32").some((problem) => problem.kind === "interpreter-shebang"),
+      "缺 node.exe 时必须报 interpreter-shebang",
+    );
+  }));
+
 test("platform comes from the target triple, not the build host", () => {
   assert.equal(platformForTarget("aarch64-apple-darwin"), "darwin");
   assert.equal(platformForTarget("x86_64-unknown-linux-gnu"), "linux");
