@@ -216,14 +216,53 @@ jobs:
           node-version: "25"
           cache: npm
       - run: npm ci
+      # 便宜的先跑：lint 0.3s，测试 25s。行数上限与 hook 规则由 .oxlintrc.json 守，
+      # 它的上限来自 architecture/policy.json（见 tests/lintGate.test.ts）。
+      - run: npm run lint
       - run: npm test
+
+  # ── 端到端（真桥 + 真渲染进程 + 假模型端点）───────────────────────────────────
+  #
+  # 与 verify 的分工：`npm test` 是 2,100+ 条 node 级测试；这里真起 `server/index.mjs`、
+  # 真起 vite、真开浏览器，只把**模型端点**换成脚本化的假服务（见 e2e/README.md）。
+  # 白屏、装配点写错、协议不匹配没提示这类问题只有这一层能发现 —— 它上线第一天就抓到了
+  # B1 拆分里两处把 Map/对象当函数转发的 500（node 级测试全都看不见）。
+  #
+  # 用 github 的 ubuntu runner + 官方 chromium（`--with-deps` 连系统库一起装）。
+  # `PI_DESKTOP_E2E_SHELL=0`：外壳冒烟要开 Electron 窗口，headless runner 上要 xvfb 且
+  # 常要 `--no-sandbox`；它在本地/有显示的环境跑（见 e2e/README.md），CI 里只跑浏览器那三条。
+  e2e:
+    name: e2e（真桥 + 假模型端点）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "25"
+          cache: npm
+      - run: npm ci
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+        env:
+          PI_DESKTOP_E2E_SHELL: "0"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: e2e/.report/
+          retention-days: 7
 
   # ── 出包 ────────────────────────────────────────────────────────────────────
   package:
     name: ${{ matrix.target }}/${{ matrix.arch }} · ${{ matrix.mode }} · 签名 ${{ matrix.target == 'mac' && needs.plan.outputs.sign || 'n/a' }}
-    needs: [plan, verify]
-    # 测试必须先成功（verify 不再可跳过）。plan 失败时矩阵是空的，所以先看它的 result。
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.count != '0' && needs.verify.result == 'success' }}
+    needs: [plan, verify, e2e]
+    # 测试与端到端都必须先成功（两者都不再有开关可跳过）。plan 失败时矩阵是空的，所以先看它的 result。
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.count != '0' && needs.verify.result == 'success' && needs.e2e.result == 'success' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:

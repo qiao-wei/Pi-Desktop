@@ -23,17 +23,30 @@ import { appSource as readAppSource } from "./lib/appSource.ts";
 
 const appSourceText = readAppSource();
 const serverSource = bridgeSource();
-const hookSource = readFileSync(new URL("../src/features/chat/usePiDesktopApp.ts", import.meta.url), "utf8");
+const hookSource = readFileSync(
+  new URL("../src/features/chat/usePiDesktopApp.ts", import.meta.url),
+  "utf8",
+);
 
 /* ------------------------------- 服务端接入 ------------------------------- */
 
 test("the three built-in extensions from pi 0.99 are registered", () => {
+  // 正向断言看整棵桥树：这些工厂现在住在 server/runtimeDomain.mjs（按域拆文件后入口里没有了）。
   assert.match(serverSource, /createCodemodeExtension\(\)/);
   assert.match(serverSource, /createToolSearchExtension\(\)/);
   assert.match(serverSource, /createMcpExtension\(\)/);
   // All of them must land in the same extensionFactories list as the Desktop runtime extension.
-  const factoryStart = serverSource.indexOf("extensionFactories: [");
-  const factories = serverSource.slice(factoryStart, factoryStart + 1200);
+  // 取**那个函数体**而不是「第一个 extensionFactories: [」：桥里不止一处这样的列表
+  // （`createRuntime` 里那个是空的），按字面量找会命中错的那个。
+  // 取**注册这三个内置扩展的那一处** `extensionFactories`：桥里还有别的同名列表（其中一个是空的），
+  // 所以锚在 `createCodemodeExtension()` 上往下取一段，而不是「第一个 extensionFactories: [」。
+  const at = serverSource.indexOf("createCodemodeExtension()");
+  const factories = serverSource.slice(Math.max(0, at - 900), at + 900);
+  assert.match(
+    factories,
+    /extensionFactories: \[/,
+    "三个内置扩展要和 Desktop runtime 扩展落在同一个列表里",
+  );
   assert.match(factories, /createCodemodeExtension\(\)/);
   assert.match(factories, /createMcpExtension\(\)/);
 });
@@ -42,7 +55,7 @@ test("桌面端不再替用户默认打开 codemode：这块设置完全交给 p
   // 行为契约：桥里没有硬编码的 `+codemode`，也不 applyOverrides defaultTools。
   // 开关走「设置 → 个性化」和「编辑项目」，写的是 pi 自己的 settings 文件，
   // 默认值和合并规则由 pi 说了算（逐例对照见 tests/toolSettings.test.ts）。
-  assert.doesNotMatch(serverSource, /"\+codemode"/);
+  assert.doesNotMatch(serverSource, /"\+codemode"/); // 负向断言看整棵树：哪一层都不许硬编码
   assert.doesNotMatch(serverSource, /defaultTools: \[/);
   assert.match(serverSource, /readToolSettingsSnapshot\(/);
   assert.match(serverSource, /applyToolToggle\(/);
@@ -62,7 +75,13 @@ function freshDefaultTools(settings: Record<string, unknown>): string[] | undefi
 
 test("新装的 agent 目录里 codemode 是关的（不写 defaultTools = 内建四件套）", () => {
   assert.equal(freshDefaultTools({ theme: "dark" }), undefined);
-  assert.deepEqual(freshDefaultTools({ defaultTools: ["+codemode"] }), ["read", "bash", "edit", "write", "codemode"]);
+  assert.deepEqual(freshDefaultTools({ defaultTools: ["+codemode"] }), [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "codemode",
+  ]);
   assert.deepEqual(freshDefaultTools({ defaultTools: ["read", "bash"] }), ["read", "bash"]);
 });
 
@@ -144,7 +163,13 @@ test("the chat hook exposes MCP actions against the five endpoints", () => {
   ]) {
     assert.ok(hookSource.includes(endpoint), `hook 没打到 ${endpoint}`);
   }
-  for (const name of ["saveMcpServer", "removeMcpServer", "inspectMcpServer", "readMcpServerDetail", "parseMcpImport"]) {
+  for (const name of [
+    "saveMcpServer",
+    "removeMcpServer",
+    "inspectMcpServer",
+    "readMcpServerDetail",
+    "parseMcpImport",
+  ]) {
     assert.match(hookSource, new RegExp(`\\b${name},`), `hook 没导出 ${name}`);
   }
 });
@@ -205,7 +230,11 @@ test("both language packs carry the MCP copy", () => {
   for (const key of keys) {
     assert.ok(key in en, `英文包缺 key: ${key}`);
   }
-  for (const key of ["capability.section.mcp", "capability.context.noMcp", "capability.delete.mcpTitle"]) {
+  for (const key of [
+    "capability.section.mcp",
+    "capability.context.noMcp",
+    "capability.delete.mcpTitle",
+  ]) {
     assert.ok(key in zh, `中文包缺 key: ${key}`);
     assert.ok(key in en, `英文包缺 key: ${key}`);
   }

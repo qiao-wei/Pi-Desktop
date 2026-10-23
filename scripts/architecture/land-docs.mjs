@@ -25,6 +25,11 @@ const PLAN = [
     ".wiki/output/adr-001-layered-architecture-and-protocols.md",
     "docs/adr/ADR-001-layered-architecture-and-protocols.md",
   ],
+  [
+    ".wiki/output/adr-002-protocol-version-and-compatibility.md",
+    "docs/adr/ADR-002-protocol-version-and-compatibility.md",
+  ],
+  [".wiki/output/adr-003-debt-ratchet-policy.md", "docs/adr/ADR-003-debt-ratchet-policy.md"],
 ];
 
 let missing = 0;

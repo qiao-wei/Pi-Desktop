@@ -53,9 +53,16 @@ function fakeExecFile(plan) {
   const calls = [];
   const exec = (command, args, options, callback) => {
     calls.push({ command, args, options });
-    const result = plan(args, options) ?? { ok: false, code: 1, stdout: "", stderr: "unexpected git call" };
+    const result = plan(args, options) ?? {
+      ok: false,
+      code: 1,
+      stdout: "",
+      stderr: "unexpected git call",
+    };
     setImmediate(() => {
-      const error = result.ok ? null : Object.assign(new Error("git failed"), { code: result.code ?? 1, killed: false });
+      const error = result.ok
+        ? null
+        : Object.assign(new Error("git failed"), { code: result.code ?? 1, killed: false });
       callback(error, result.stdout ?? "", result.stderr ?? "");
     });
   };
@@ -99,13 +106,18 @@ test("只读白名单放行本模块真正用到的 argv，拒绝一切写命令
 
 test("runReadOnlyGit 在拼参数阶段就挡下写命令（不会真的 spawn）", async () => {
   const { exec, calls } = fakeExecFile(() => ({ ok: true, stdout: "" }));
-  await assert.rejects(() => runReadOnlyGit("/tmp", ["commit", "-m", "x"], { execImpl: exec }), /non read-only/);
+  await assert.rejects(
+    () => runReadOnlyGit("/tmp", ["commit", "-m", "x"], { execImpl: exec }),
+    /non read-only/,
+  );
   assert.equal(calls.length, 0, "被拒绝的命令不应产生任何子进程调用");
 });
 
 test("runReadOnlyGit 把 cwd 放在 spawn 选项里，不拼进 argv", async () => {
   const { exec, calls } = fakeExecFile(() => ({ ok: true, stdout: "true\n" }));
-  await runReadOnlyGit("/tmp/my project", ["rev-parse", "--is-inside-work-tree"], { execImpl: exec });
+  await runReadOnlyGit("/tmp/my project", ["rev-parse", "--is-inside-work-tree"], {
+    execImpl: exec,
+  });
 
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].args, ["rev-parse", "--is-inside-work-tree"]);
@@ -160,7 +172,12 @@ test("解析变更条目：普通修改 / 已暂存 / 重命名 / 未跟踪 / �
   ]);
 
   assert.deepEqual(
-    entries.map((entry) => [entry.path, entry.indexStatus, entry.worktreeStatus, entry.origPath ?? ""]),
+    entries.map((entry) => [
+      entry.path,
+      entry.indexStatus,
+      entry.worktreeStatus,
+      entry.origPath ?? "",
+    ]),
     [
       ["src/app.ts", ".", "M", ""],
       ["src/staged file.ts", "M", ".", ""],
@@ -179,16 +196,24 @@ test("解析变更条目：头信息块不会被当成文件", () => {
 /* ------------------------------------------------------------------ numstat */
 
 test("解析 numstat：普通文件、二进制、含空格路径", () => {
-  const counts = parseNumstat("3\t1\tsrc/app.ts\u0000-\t-\tlogo.png\u00001\t0\tsrc/a file.ts\u0000");
+  const counts = parseNumstat(
+    "3\t1\tsrc/app.ts\u0000-\t-\tlogo.png\u00001\t0\tsrc/a file.ts\u0000",
+  );
 
   assert.deepEqual(counts.get("src/app.ts"), { added: 3, removed: 1 });
-  assert.deepEqual(counts.get("logo.png"), { added: 0, removed: 0 }, "二进制文件算 0/0，不能把 '-' 变成 NaN");
+  assert.deepEqual(
+    counts.get("logo.png"),
+    { added: 0, removed: 0 },
+    "二进制文件算 0/0，不能把 '-' 变成 NaN",
+  );
   assert.deepEqual(counts.get("src/a file.ts"), { added: 1, removed: 0 });
 });
 
 test("解析 numstat：重命名记录把计数归到新路径", () => {
   // 真格式：`<added>\t<removed>\t\u0000<旧路径>\u0000<新路径>`
-  const counts = parseNumstat("0\t0\t\u0000src/old-name.ts\u0000src/new-name.ts\u00002\t1\tsrc/other.ts\u0000");
+  const counts = parseNumstat(
+    "0\t0\t\u0000src/old-name.ts\u0000src/new-name.ts\u00002\t1\tsrc/other.ts\u0000",
+  );
 
   assert.deepEqual(counts.get("src/new-name.ts"), { added: 0, removed: 0 });
   assert.deepEqual(counts.get("src/other.ts"), { added: 2, removed: 1 });
@@ -206,12 +231,22 @@ test("汇总：状态分类、暂存标记、总数、按路径排序", () => {
     "? zz.md",
     "u UU N... 100644 100644 100644 100644 ggg hhh iii src/conflict.ts",
   ]);
-  const counts = parseNumstat("3\t1\tsrc/b.ts\u00001\t0\tsrc/a.ts\u00000\t0\t\u0000src/gone.ts\u0000src/renamed.ts\u0000");
+  const counts = parseNumstat(
+    "3\t1\tsrc/b.ts\u00001\t0\tsrc/a.ts\u00000\t0\t\u0000src/gone.ts\u0000src/renamed.ts\u0000",
+  );
 
   const summary = summarizeChanges(entries, counts);
 
   assert.deepEqual(
-    summary.files.map((file) => [file.path, file.status, file.staged, file.untracked, file.conflicted, file.added, file.removed]),
+    summary.files.map((file) => [
+      file.path,
+      file.status,
+      file.staged,
+      file.untracked,
+      file.conflicted,
+      file.added,
+      file.removed,
+    ]),
     [
       ["src/a.ts", "modified", true, false, false, 1, 0],
       ["src/b.ts", "modified", false, false, false, 3, 1],
@@ -245,11 +280,20 @@ test("解析 upstream track 与分支列表", () => {
   assert.deepEqual(parseUpstreamTrack(""), { ahead: 0, behind: 0, gone: false });
   assert.deepEqual(parseUpstreamTrack("[gone]"), { ahead: 0, behind: 0, gone: true });
 
-  const branches = parseBranches("*\tmain\torigin/main\t[ahead 2, behind 1]\n \tfeature\torigin/feature\t[gone]\n \tlocal-only\t\t\n");
+  const branches = parseBranches(
+    "*\tmain\torigin/main\t[ahead 2, behind 1]\n \tfeature\torigin/feature\t[gone]\n \tlocal-only\t\t\n",
+  );
 
   assert.deepEqual(branches, [
     { name: "main", current: true, upstream: "origin/main", ahead: 2, behind: 1, gone: false },
-    { name: "feature", current: false, upstream: "origin/feature", ahead: 0, behind: 0, gone: true },
+    {
+      name: "feature",
+      current: false,
+      upstream: "origin/feature",
+      ahead: 0,
+      behind: 0,
+      gone: true,
+    },
     { name: "local-only", current: false, upstream: "", ahead: 0, behind: 0, gone: false },
   ]);
 });
@@ -272,7 +316,9 @@ const REPO_STATUS = [
   "src/old-name.ts",
   "? notes.md",
 ].join("\u0000");
-const REPO_NUMSTAT = ["3\t1\tsrc/app.ts", "0\t0\t", "src/old-name.ts", "src/new-name.ts"].join("\u0000");
+const REPO_NUMSTAT = ["3\t1\tsrc/app.ts", "0\t0\t", "src/old-name.ts", "src/new-name.ts"].join(
+  "\u0000",
+);
 const REPO_BRANCHES = "*\tmain\torigin/main\t[ahead 2, behind 1]\n \tfeature\torigin/feature\t\n";
 
 /** 一个"装了 git 的正常仓库"的命令计划。 */
@@ -344,14 +390,25 @@ test("正常仓库：分支、上游、领先/落后、改动明细与总数", a
   assert.equal(info.removed, 1);
   assert.deepEqual(info.branches, [
     { name: "main", current: true, upstream: "origin/main", ahead: 2, behind: 1, gone: false },
-    { name: "feature", current: false, upstream: "origin/feature", ahead: 0, behind: 0, gone: false },
+    {
+      name: "feature",
+      current: false,
+      upstream: "origin/feature",
+      ahead: 0,
+      behind: 0,
+      gone: false,
+    },
   ]);
 
   // 只读路径只能出现白名单里的子命令（外加 --version 探测）。
   for (const call of calls) {
     assert.equal(call.command, "git");
     if (call.args[0] !== "--version") {
-      assert.equal(isReadOnlyGitArgs(call.args), true, `读路径里出现了非只读命令: ${call.args.join(" ")}`);
+      assert.equal(
+        isReadOnlyGitArgs(call.args),
+        true,
+        `读路径里出现了非只读命令: ${call.args.join(" ")}`,
+      );
     }
   }
 });
@@ -370,22 +427,34 @@ test("托管 worktree 的共享 .pi 链不进徽标 / 提交列表：软链剔�
       const key = args.join(" ");
       if (key === "--version") return { ok: true, stdout: VERSION_LINE };
       if (key === "rev-parse --is-inside-work-tree") return { ok: true, stdout: "true\n" };
-      if (key === "status --porcelain=v2 --branch -z --untracked-files=normal") return { ok: true, stdout: `${status}\u0000` };
+      if (key === "status --porcelain=v2 --branch -z --untracked-files=normal")
+        return { ok: true, stdout: `${status}\u0000` };
       if (key === "diff HEAD --numstat -z") return { ok: true, stdout: "\u0000" };
       if (key.startsWith("for-each-ref")) return { ok: true, stdout: "" };
       return { ok: false, code: 1, stdout: "", stderr: "unexpected" };
     });
 
     const info = await readGitInfo(worktree, { execImpl: exec });
-    assert.deepEqual(info.files.map((file) => file.path), ["notes.md"], "共享链不进徽标");
+    assert.deepEqual(
+      info.files.map((file) => file.path),
+      ["notes.md"],
+      "共享链不进徽标",
+    );
     const changed = await readChangedEntries(worktree, { execImpl: exec });
-    assert.deepEqual(changed.entries.map((entry) => entry.path), ["notes.md"], "共享链不进提交列表");
+    assert.deepEqual(
+      changed.entries.map((entry) => entry.path),
+      ["notes.md"],
+      "共享链不进提交列表",
+    );
 
     // 分支自带的真实 .pi（不是软链）里真有改动时必须保留。
     rmSync(join(worktree, ".pi"), { force: true });
     mkdirSync(join(worktree, ".pi"));
     const plain = await readGitInfo(worktree, { execImpl: exec });
-    assert.deepEqual(plain.files.map((file) => file.path), [".pi", "notes.md"]);
+    assert.deepEqual(
+      plain.files.map((file) => file.path),
+      [".pi", "notes.md"],
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -404,7 +473,12 @@ test("空仓库（还没有第一个 commit）：退回索引/工作区 diff，�
           "? x.txt",
         ].join("\u0000"),
       },
-      "diff HEAD --numstat -z": { ok: false, code: 128, stdout: "", stderr: "fatal: ambiguous argument 'HEAD'\n" },
+      "diff HEAD --numstat -z": {
+        ok: false,
+        code: 128,
+        stdout: "",
+        stderr: "fatal: ambiguous argument 'HEAD'\n",
+      },
       "diff --numstat -z": { ok: true, stdout: "4\t0\tworktree.ts\u0000" },
       "diff --cached --numstat -z": { ok: true, stdout: "7\t2\tstaged.ts\u0000" },
     }),
@@ -427,7 +501,12 @@ test("空仓库（还没有第一个 commit）：退回索引/工作区 diff，�
 });
 
 test("没装 git 时不会去探测项目路径（也不会误报成 isRepo=false + 初始化按钮）", async () => {
-  const { exec, calls } = fakeExecFile(() => ({ ok: false, code: "ENOENT", stdout: "", stderr: "" }));
+  const { exec, calls } = fakeExecFile(() => ({
+    ok: false,
+    code: "ENOENT",
+    stdout: "",
+    stderr: "",
+  }));
   await readGitInfo("/tmp/anything", { execImpl: exec });
 
   assert.equal(calls.length, 1);
@@ -437,7 +516,10 @@ test("没装 git 时不会去探测项目路径（也不会误报成 isRepo=fals
 /* ------------------------------------------------------------------ initGitRepo */
 
 test("initGitRepo 在项目目录里跑 `git init`", async () => {
-  const { exec, calls } = fakeExecFile(() => ({ ok: true, stdout: "Initialized empty Git repository in /tmp/repo/.git/\n" }));
+  const { exec, calls } = fakeExecFile(() => ({
+    ok: true,
+    stdout: "Initialized empty Git repository in /tmp/repo/.git/\n",
+  }));
 
   await initGitRepo("/tmp/repo", { execImpl: exec });
 
@@ -447,7 +529,12 @@ test("initGitRepo 在项目目录里跑 `git init`", async () => {
 });
 
 test("initGitRepo 失败时把 git 的 stderr 当原因抛出", async () => {
-  const { exec } = fakeExecFile(() => ({ ok: false, code: 128, stdout: "", stderr: "fatal: cannot mkdir\n" }));
+  const { exec } = fakeExecFile(() => ({
+    ok: false,
+    code: 128,
+    stdout: "",
+    stderr: "fatal: cannot mkdir\n",
+  }));
 
   await assert.rejects(() => initGitRepo("/tmp/repo", { execImpl: exec }), /fatal: cannot mkdir/);
   await assert.rejects(() => initGitRepo("", { execImpl: exec }), /without a project folder/);
@@ -485,17 +572,25 @@ test("分支名安全校验：正常名字放行，选项/控制字符挡下", (
 });
 
 test("识别未知子命令（老 git 没 switch）", () => {
-  assert.equal(isUnknownGitSubcommand("git: 'switch' is not a git command. See 'git --help'.\n"), true);
+  assert.equal(
+    isUnknownGitSubcommand("git: 'switch' is not a git command. See 'git --help'.\n"),
+    true,
+  );
   assert.equal(isUnknownGitSubcommand("error: Your local changes would be overwritten\n"), false);
   assert.equal(isUnknownGitSubcommand(""), false);
 });
 
 test("switchGitBranch：切到本地已有分支", async () => {
-  const { exec, calls } = fakeExecFile(switchPlan({ "switch feature": { ok: true, stdout: "Switched to branch 'feature'\n" } }));
+  const { exec, calls } = fakeExecFile(
+    switchPlan({ "switch feature": { ok: true, stdout: "Switched to branch 'feature'\n" } }),
+  );
 
   await switchGitBranch("/tmp/repo", "feature", { execImpl: exec });
 
-  assert.deepEqual(writeCalls(calls).map((call) => call.args), [["switch", "feature"]]);
+  assert.deepEqual(
+    writeCalls(calls).map((call) => call.args),
+    [["switch", "feature"]],
+  );
   assert.equal(writeCalls(calls)[0].options.cwd, "/tmp/repo");
 });
 
@@ -510,30 +605,46 @@ test("switchGitBranch：目标就是当前分支时一条写命令都不发", as
 
 test("switchGitBranch：分支不存在 / 名字不合法 → 写命令根本不出门", async () => {
   const unknown = fakeExecFile(switchPlan());
-  await assert.rejects(() => switchGitBranch("/tmp/repo", "nope", { execImpl: unknown.exec }), /Unknown branch: nope/);
+  await assert.rejects(
+    () => switchGitBranch("/tmp/repo", "nope", { execImpl: unknown.exec }),
+    /Unknown branch: nope/,
+  );
   assert.equal(writeCalls(unknown.calls).length, 0);
 
   const unsafe = fakeExecFile(switchPlan());
-  await assert.rejects(() => switchGitBranch("/tmp/repo", "--force", { execImpl: unsafe.exec }), /Invalid branch name/);
+  await assert.rejects(
+    () => switchGitBranch("/tmp/repo", "--force", { execImpl: unsafe.exec }),
+    /Invalid branch name/,
+  );
   assert.equal(unsafe.calls.length, 0, "名字不合法时连探测都不需要");
 
-  await assert.rejects(() => switchGitBranch("", "main", { execImpl: unknown.exec }), /without a project folder/);
+  await assert.rejects(
+    () => switchGitBranch("", "main", { execImpl: unknown.exec }),
+    /without a project folder/,
+  );
 });
 
 test("switchGitBranch：老 git 没有 switch 时退回 checkout", async () => {
   const { exec, calls } = fakeExecFile(
     switchPlan({
-      "switch feature": { ok: false, code: 1, stderr: "git: 'switch' is not a git command. See 'git --help'.\n" },
+      "switch feature": {
+        ok: false,
+        code: 1,
+        stderr: "git: 'switch' is not a git command. See 'git --help'.\n",
+      },
       "checkout feature": { ok: true, stderr: "Switched to branch 'feature'\n" },
     }),
   );
 
   await switchGitBranch("/tmp/repo", "feature", { execImpl: exec });
 
-  assert.deepEqual(writeCalls(calls).map((call) => call.args), [
-    ["switch", "feature"],
-    ["checkout", "feature"],
-  ]);
+  assert.deepEqual(
+    writeCalls(calls).map((call) => call.args),
+    [
+      ["switch", "feature"],
+      ["checkout", "feature"],
+    ],
+  );
 });
 
 test("switchGitBranch：git 拒绝切换（本地改动会被覆盖）时把原文抛出，不退回 checkout", async () => {
@@ -548,14 +659,27 @@ test("switchGitBranch：git 拒绝切换（本地改动会被覆盖）时把原�
     }),
   );
 
-  await assert.rejects(() => switchGitBranch("/tmp/repo", "feature", { execImpl: exec }), /would be overwritten by checkout/);
-  assert.deepEqual(writeCalls(calls).map((call) => call.args), [["switch", "feature"]], "只有 unknown subcommand 才退回 checkout");
+  await assert.rejects(
+    () => switchGitBranch("/tmp/repo", "feature", { execImpl: exec }),
+    /would be overwritten by checkout/,
+  );
+  assert.deepEqual(
+    writeCalls(calls).map((call) => call.args),
+    [["switch", "feature"]],
+    "只有 unknown subcommand 才退回 checkout",
+  );
 });
 /* ------------------------------------------------------------------ createGitBranch */
 
 test("createGitBranch：从当前 HEAD 新建并切过去（只发一条写命令）", async () => {
   const { exec, calls } = fakeExecFile(
-    switchPlan({ "switch -c feature/x": { ok: true, stdout: "", stderr: "Switched to a new branch 'feature/x'\n" } }),
+    switchPlan({
+      "switch -c feature/x": {
+        ok: true,
+        stdout: "",
+        stderr: "Switched to a new branch 'feature/x'\n",
+      },
+    }),
   );
 
   await createGitBranch("/tmp/repo", "feature/x", { execImpl: exec });
@@ -574,38 +698,67 @@ test("createGitBranch：重名 / 名字不合法 / 没有项目目录 → 写命
     () => createGitBranch("/tmp/repo", "feature", { execImpl: existing.exec }),
     /Branch already exists: feature/,
   );
-  assert.equal(writeCalls(existing.calls).length, 0, "已存在的分支不能当新建目标（更不允许隐式切过去）");
+  assert.equal(
+    writeCalls(existing.calls).length,
+    0,
+    "已存在的分支不能当新建目标（更不允许隐式切过去）",
+  );
 
   const unsafe = fakeExecFile(switchPlan());
-  await assert.rejects(() => createGitBranch("/tmp/repo", "-D", { execImpl: unsafe.exec }), /Invalid branch name/);
-  await assert.rejects(() => createGitBranch("/tmp/repo", "   ", { execImpl: unsafe.exec }), /Invalid branch name/);
+  await assert.rejects(
+    () => createGitBranch("/tmp/repo", "-D", { execImpl: unsafe.exec }),
+    /Invalid branch name/,
+  );
+  await assert.rejects(
+    () => createGitBranch("/tmp/repo", "   ", { execImpl: unsafe.exec }),
+    /Invalid branch name/,
+  );
   assert.equal(unsafe.calls.length, 0, "名字不合法时连探测都不需要");
 
-  await assert.rejects(() => createGitBranch("", "feature", { execImpl: existing.exec }), /without a project folder/);
+  await assert.rejects(
+    () => createGitBranch("", "feature", { execImpl: existing.exec }),
+    /without a project folder/,
+  );
 });
 
 test("createGitBranch：老 git 没有 switch 时退回 checkout -b", async () => {
   const { exec, calls } = fakeExecFile(
     switchPlan({
-      "switch -c topic": { ok: false, code: 1, stderr: "git: 'switch' is not a git command. See 'git --help'.\n" },
+      "switch -c topic": {
+        ok: false,
+        code: 1,
+        stderr: "git: 'switch' is not a git command. See 'git --help'.\n",
+      },
       "checkout -b topic": { ok: true, stderr: "Switched to a new branch 'topic'\n" },
     }),
   );
 
   await createGitBranch("/tmp/repo", "topic", { execImpl: exec });
 
-  assert.deepEqual(writeCalls(calls).map((call) => call.args), [
-    ["switch", "-c", "topic"],
-    ["checkout", "-b", "topic"],
-  ]);
+  assert.deepEqual(
+    writeCalls(calls).map((call) => call.args),
+    [
+      ["switch", "-c", "topic"],
+      ["checkout", "-b", "topic"],
+    ],
+  );
 });
 
 test("createGitBranch：git 自己拒绝（ref 名不合法）时把原文抛出，不退回 checkout", async () => {
   const { exec, calls } = fakeExecFile(
-    switchPlan({ "switch -c bad..name": { ok: false, code: 128, stderr: "fatal: 'bad..name' is not a valid branch name\n" } }),
+    switchPlan({
+      "switch -c bad..name": {
+        ok: false,
+        code: 128,
+        stderr: "fatal: 'bad..name' is not a valid branch name\n",
+      },
+    }),
   );
 
-  await assert.rejects(() => createGitBranch("/tmp/repo", "bad..name", { execImpl: exec }), /not a valid branch name/);
+  await assert.rejects(
+    () => createGitBranch("/tmp/repo", "bad..name", { execImpl: exec }),
+    /not a valid branch name/,
+  );
   assert.deepEqual(
     writeCalls(calls).map((call) => call.args),
     [["switch", "-c", "bad..name"]],
@@ -621,7 +774,9 @@ function branchWriteCalls(calls) {
 }
 
 test("renameGitBranch：给当前分支改名只发一条 `git branch -m`，旧名字不进 argv", async () => {
-  const { exec, calls } = fakeExecFile(switchPlan({ "branch -m feature/x": { ok: true, stdout: "" } }));
+  const { exec, calls } = fakeExecFile(
+    switchPlan({ "branch -m feature/x": { ok: true, stdout: "" } }),
+  );
 
   await renameGitBranch("/tmp/repo", "feature/x", { execImpl: exec });
 
@@ -636,27 +791,48 @@ test("renameGitBranch：给当前分支改名只发一条 `git branch -m`，旧�
 test("renameGitBranch：同名是空操作；重名 / 非法 / 没目录 → 写命令根本不出门", async () => {
   const same = fakeExecFile(switchPlan());
   await renameGitBranch("/tmp/repo", "main", { execImpl: same.exec });
-  assert.equal(branchWriteCalls(same.calls).length, 0, "改成和当前分支同名不必发写命令（git 自己也是空操作）");
+  assert.equal(
+    branchWriteCalls(same.calls).length,
+    0,
+    "改成和当前分支同名不必发写命令（git 自己也是空操作）",
+  );
 
   const existing = fakeExecFile(switchPlan());
   await assert.rejects(
     () => renameGitBranch("/tmp/repo", "feature", { execImpl: existing.exec }),
     /Branch already exists: feature/,
   );
-  assert.equal(branchWriteCalls(existing.calls).length, 0, "已存在的名字不能当目标（git 也会拒绝）");
+  assert.equal(
+    branchWriteCalls(existing.calls).length,
+    0,
+    "已存在的名字不能当目标（git 也会拒绝）",
+  );
 
   const unsafe = fakeExecFile(switchPlan());
-  await assert.rejects(() => renameGitBranch("/tmp/repo", "-D", { execImpl: unsafe.exec }), /Invalid branch name/);
-  await assert.rejects(() => renameGitBranch("/tmp/repo", "   ", { execImpl: unsafe.exec }), /Invalid branch name/);
+  await assert.rejects(
+    () => renameGitBranch("/tmp/repo", "-D", { execImpl: unsafe.exec }),
+    /Invalid branch name/,
+  );
+  await assert.rejects(
+    () => renameGitBranch("/tmp/repo", "   ", { execImpl: unsafe.exec }),
+    /Invalid branch name/,
+  );
   assert.equal(unsafe.calls.length, 0, "名字不合法时连探测都不需要");
 
-  await assert.rejects(() => renameGitBranch("", "topic", { execImpl: existing.exec }), /without a project folder/);
+  await assert.rejects(
+    () => renameGitBranch("", "topic", { execImpl: existing.exec }),
+    /without a project folder/,
+  );
 });
 
 test("renameGitBranch：游离 HEAD 被 git 拒绝时把原文抛出", async () => {
   const { exec, calls } = fakeExecFile(
     switchPlan({
-      "branch -m topic": { ok: false, code: 128, stderr: "fatal: cannot rename the current branch while not on any.\n" },
+      "branch -m topic": {
+        ok: false,
+        code: 128,
+        stderr: "fatal: cannot rename the current branch while not on any.\n",
+      },
     }),
   );
 
@@ -664,14 +840,19 @@ test("renameGitBranch：游离 HEAD 被 git 拒绝时把原文抛出", async () 
     () => renameGitBranch("/tmp/repo", "topic", { execImpl: exec }),
     /cannot rename the current branch while not on any/,
   );
-  assert.deepEqual(branchWriteCalls(calls).map((call) => call.args), [["branch", "-m", "topic"]]);
+  assert.deepEqual(
+    branchWriteCalls(calls).map((call) => call.args),
+    [["branch", "-m", "topic"]],
+  );
 });
 
 /* ------------------------------------------------------------------ deleteGitBranch */
 
 test("deleteGitBranch：删一个已有本地分支只发一条 `git branch -d --`", async () => {
   const { exec, calls } = fakeExecFile(
-    switchPlan({ "branch -d -- feature": { ok: true, stdout: "Deleted branch feature (was 1234567).\n" } }),
+    switchPlan({
+      "branch -d -- feature": { ok: true, stdout: "Deleted branch feature (was 1234567).\n" },
+    }),
   );
 
   await deleteGitBranch("/tmp/repo", "feature", { execImpl: exec });
@@ -693,15 +874,27 @@ test("deleteGitBranch：当前分支 / 不认识的分支 / 非法名字 / 没�
   assert.equal(branchWriteCalls(current.calls).length, 0, "HEAD 所在的分支不能删（git 也会拒绝）");
 
   const unknown = fakeExecFile(switchPlan());
-  await assert.rejects(() => deleteGitBranch("/tmp/repo", "nope", { execImpl: unknown.exec }), /Unknown branch: nope/);
+  await assert.rejects(
+    () => deleteGitBranch("/tmp/repo", "nope", { execImpl: unknown.exec }),
+    /Unknown branch: nope/,
+  );
   assert.equal(branchWriteCalls(unknown.calls).length, 0, "目标必须是本地分支列表里的名字");
 
   const unsafe = fakeExecFile(switchPlan());
-  await assert.rejects(() => deleteGitBranch("/tmp/repo", "-D", { execImpl: unsafe.exec }), /Invalid branch name/);
-  await assert.rejects(() => deleteGitBranch("/tmp/repo", "   ", { execImpl: unsafe.exec }), /Invalid branch name/);
+  await assert.rejects(
+    () => deleteGitBranch("/tmp/repo", "-D", { execImpl: unsafe.exec }),
+    /Invalid branch name/,
+  );
+  await assert.rejects(
+    () => deleteGitBranch("/tmp/repo", "   ", { execImpl: unsafe.exec }),
+    /Invalid branch name/,
+  );
   assert.equal(unsafe.calls.length, 0, "名字不合法时连探测都不需要");
 
-  await assert.rejects(() => deleteGitBranch("", "feature", { execImpl: unknown.exec }), /without a project folder/);
+  await assert.rejects(
+    () => deleteGitBranch("", "feature", { execImpl: unknown.exec }),
+    /without a project folder/,
+  );
 });
 
 test("deleteGitBranch：未合并分支被 git 拒绝时把原文抛出（不降级成 -D）", async () => {
@@ -716,7 +909,10 @@ test("deleteGitBranch：未合并分支被 git 拒绝时把原文抛出（不降
     }),
   );
 
-  await assert.rejects(() => deleteGitBranch("/tmp/repo", "feature", { execImpl: exec }), /not fully merged/);
+  await assert.rejects(
+    () => deleteGitBranch("/tmp/repo", "feature", { execImpl: exec }),
+    /not fully merged/,
+  );
   assert.deepEqual(
     branchWriteCalls(calls).map((call) => call.args),
     [["branch", "-d", "--", "feature"]],
@@ -728,7 +924,13 @@ test("deleteGitBranch：未合并分支被 git 拒绝时把原文抛出（不降
 
 const SYNC_STATUS_ARGS = ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"];
 const syncHeader = (...chunks) => chunks.join("\u0000");
-const SYNC_MAIN = syncHeader("# branch.oid abc123", "# branch.head main", "# branch.upstream origin/main", "# branch.ab +1 -0", "");
+const SYNC_MAIN = syncHeader(
+  "# branch.oid abc123",
+  "# branch.head main",
+  "# branch.upstream origin/main",
+  "# branch.ab +1 -0",
+  "",
+);
 const SYNC_NO_UPSTREAM = syncHeader("# branch.oid abc123", "# branch.head feature/x", "");
 const SYNC_DETACHED = syncHeader("# branch.oid abc123", "# branch.head (detached)", "");
 const SYNC_UNBORN = syncHeader("# branch.oid (initial)", "# branch.head main", "");
@@ -751,7 +953,9 @@ function syncPlan({ header = SYNC_MAIN, remotes = "origin\n", overrides = {} } =
 }
 
 function pushMergeCalls(calls) {
-  return calls.filter((call) => ["push", "fetch", "merge"].includes(call.args[0])).map((call) => call.args);
+  return calls
+    .filter((call) => ["push", "fetch", "merge"].includes(call.args[0]))
+    .map((call) => call.args);
 }
 
 test("upstreamRemoteName：从上游名取远端名（没有 / 时原样返回，让远端列表去校验）", () => {
@@ -771,7 +975,10 @@ test("pushGitBranch：有上游时直接 `git push`，不读远端列表", async
   const output = await pushGitBranch("/tmp/repo", { execImpl: exec });
 
   assert.equal(output, "To github.com:x/y.git");
-  assert.deepEqual(calls.map((call) => call.args), [SYNC_STATUS_ARGS, ["push"]]);
+  assert.deepEqual(
+    calls.map((call) => call.args),
+    [SYNC_STATUS_ARGS, ["push"]],
+  );
   assert.equal(calls.at(-1).options.cwd, "/tmp/repo");
   assert.equal(calls.at(-1).options.timeout, GIT_NETWORK_TIMEOUT_MS, "网络操作用更长的超时");
 });
@@ -786,7 +993,10 @@ test("pushGitBranch：没有上游时关联 origin，`push -u <remote> <branch>`
 
   await pushGitBranch("/tmp/repo", { execImpl: exec });
 
-  assert.deepEqual(calls.map((call) => call.args), [SYNC_STATUS_ARGS, ["remote"], ["push", "-u", "origin", "feature/x"]]);
+  assert.deepEqual(
+    calls.map((call) => call.args),
+    [SYNC_STATUS_ARGS, ["remote"], ["push", "-u", "origin", "feature/x"]],
+  );
 });
 
 test("pushGitBranch：没有 origin 时退到唯一的那个远端", async () => {
@@ -805,27 +1015,50 @@ test("pushGitBranch：没有 origin 时退到唯一的那个远端", async () =>
 
 test("pushGitBranch：没有远端 / 游离 HEAD / 空仓库 → 一条 push 都不发", async () => {
   const noRemote = fakeExecFile(syncPlan({ header: SYNC_NO_UPSTREAM, remotes: "" }));
-  await assert.rejects(() => pushGitBranch("/tmp/repo", { execImpl: noRemote.exec }), /No git remote configured/);
+  await assert.rejects(
+    () => pushGitBranch("/tmp/repo", { execImpl: noRemote.exec }),
+    /No git remote configured/,
+  );
   assert.deepEqual(pushMergeCalls(noRemote.calls), [], "没有远端时根本不该尝试 push");
 
   const detached = fakeExecFile(syncPlan({ header: SYNC_DETACHED }));
-  await assert.rejects(() => pushGitBranch("/tmp/repo", { execImpl: detached.exec }), /detached HEAD/);
+  await assert.rejects(
+    () => pushGitBranch("/tmp/repo", { execImpl: detached.exec }),
+    /detached HEAD/,
+  );
   assert.deepEqual(pushMergeCalls(detached.calls), []);
   assert.equal(detached.calls.length, 1, "游离 HEAD 连远端列表都不用读");
 
   const unborn = fakeExecFile(syncPlan({ header: SYNC_UNBORN }));
-  await assert.rejects(() => pushGitBranch("/tmp/repo", { execImpl: unborn.exec }), /without commits/);
+  await assert.rejects(
+    () => pushGitBranch("/tmp/repo", { execImpl: unborn.exec }),
+    /without commits/,
+  );
   assert.deepEqual(pushMergeCalls(unborn.calls), []);
 
-  await assert.rejects(() => pushGitBranch("", { execImpl: noRemote.exec }), /without a project folder/);
+  await assert.rejects(
+    () => pushGitBranch("", { execImpl: noRemote.exec }),
+    /without a project folder/,
+  );
 });
 
 test("pushGitBranch：git 拒绝（需要认证 / 非快进）时把原文抛出", async () => {
   const { exec } = fakeExecFile(
-    syncPlan({ overrides: { push: { ok: false, code: 128, stderr: "fatal: could not read Username for 'https://github.com'\n" } } }),
+    syncPlan({
+      overrides: {
+        push: {
+          ok: false,
+          code: 128,
+          stderr: "fatal: could not read Username for 'https://github.com'\n",
+        },
+      },
+    }),
   );
 
-  await assert.rejects(() => pushGitBranch("/tmp/repo", { execImpl: exec }), /could not read Username/);
+  await assert.rejects(
+    () => pushGitBranch("/tmp/repo", { execImpl: exec }),
+    /could not read Username/,
+  );
 });
 
 test("pullGitBranch：先 fetch 远端再 `merge --no-edit <upstream>`", async () => {
@@ -841,35 +1074,64 @@ test("pullGitBranch：先 fetch 远端再 `merge --no-edit <upstream>`", async (
   const output = await pullGitBranch("/tmp/repo", { execImpl: exec });
 
   assert.equal(output, "Already up to date.");
-  assert.deepEqual(calls.map((call) => call.args), [SYNC_STATUS_ARGS, ["remote"], ["fetch", "origin"], ["merge", "--no-edit", "origin/main"]]);
+  assert.deepEqual(
+    calls.map((call) => call.args),
+    [SYNC_STATUS_ARGS, ["remote"], ["fetch", "origin"], ["merge", "--no-edit", "origin/main"]],
+  );
   assert.equal(calls[2].options.timeout, GIT_NETWORK_TIMEOUT_MS, "fetch 是网络操作");
 });
 
 test("pullGitBranch：没有上游 / 远端不存在 / 游离 HEAD → 一条 fetch/merge 都不发", async () => {
   const noUpstream = fakeExecFile(syncPlan({ header: SYNC_NO_UPSTREAM }));
-  await assert.rejects(() => pullGitBranch("/tmp/repo", { execImpl: noUpstream.exec }), /no upstream branch to merge/);
+  await assert.rejects(
+    () => pullGitBranch("/tmp/repo", { execImpl: noUpstream.exec }),
+    /no upstream branch to merge/,
+  );
   assert.deepEqual(pushMergeCalls(noUpstream.calls), [], "没有上游时连远端列表都不用读");
   assert.equal(noUpstream.calls.length, 1);
 
   const unknownRemote = fakeExecFile(syncPlan({ remotes: "gitlab\n" }));
-  await assert.rejects(() => pullGitBranch("/tmp/repo", { execImpl: unknownRemote.exec }), /Unknown remote: origin/);
+  await assert.rejects(
+    () => pullGitBranch("/tmp/repo", { execImpl: unknownRemote.exec }),
+    /Unknown remote: origin/,
+  );
   assert.deepEqual(pushMergeCalls(unknownRemote.calls), []);
 
   const detached = fakeExecFile(syncPlan({ header: SYNC_DETACHED }));
-  await assert.rejects(() => pullGitBranch("/tmp/repo", { execImpl: detached.exec }), /detached HEAD/);
+  await assert.rejects(
+    () => pullGitBranch("/tmp/repo", { execImpl: detached.exec }),
+    /detached HEAD/,
+  );
   assert.deepEqual(pushMergeCalls(detached.calls), []);
 
   const unborn = fakeExecFile(syncPlan({ header: SYNC_UNBORN }));
-  await assert.rejects(() => pullGitBranch("/tmp/repo", { execImpl: unborn.exec }), /before the first commit/);
+  await assert.rejects(
+    () => pullGitBranch("/tmp/repo", { execImpl: unborn.exec }),
+    /before the first commit/,
+  );
   assert.deepEqual(pushMergeCalls(unborn.calls), []);
 
-  await assert.rejects(() => pullGitBranch("", { execImpl: noUpstream.exec }), /without a project folder/);
+  await assert.rejects(
+    () => pullGitBranch("", { execImpl: noUpstream.exec }),
+    /without a project folder/,
+  );
 });
 
 test("pullGitBranch：fetch 失败就不 merge；合并冲突把 git 原文抛出", async () => {
-  const fetchFails = fakeExecFile(syncPlan({ overrides: { "fetch origin": { ok: false, code: 128, stderr: "fatal: unable to access\n" } } }));
-  await assert.rejects(() => pullGitBranch("/tmp/repo", { execImpl: fetchFails.exec }), /unable to access/);
-  assert.deepEqual(pushMergeCalls(fetchFails.calls), [["fetch", "origin"]], "fetch 失败后不应继续 merge");
+  const fetchFails = fakeExecFile(
+    syncPlan({
+      overrides: { "fetch origin": { ok: false, code: 128, stderr: "fatal: unable to access\n" } },
+    }),
+  );
+  await assert.rejects(
+    () => pullGitBranch("/tmp/repo", { execImpl: fetchFails.exec }),
+    /unable to access/,
+  );
+  assert.deepEqual(
+    pushMergeCalls(fetchFails.calls),
+    [["fetch", "origin"]],
+    "fetch 失败后不应继续 merge",
+  );
 
   const conflict = fakeExecFile(
     syncPlan({
@@ -878,17 +1140,24 @@ test("pullGitBranch：fetch 失败就不 merge；合并冲突把 git 原文抛�
         "merge --no-edit origin/main": {
           ok: false,
           code: 1,
-          stderr: "CONFLICT (content): Merge conflict in src/app.ts\nAutomatic merge failed; fix conflicts and then commit the result.\n",
+          stderr:
+            "CONFLICT (content): Merge conflict in src/app.ts\nAutomatic merge failed; fix conflicts and then commit the result.\n",
         },
       },
     }),
   );
-  await assert.rejects(() => pullGitBranch("/tmp/repo", { execImpl: conflict.exec }), /Merge conflict in src\/app\.ts/);
+  await assert.rejects(
+    () => pullGitBranch("/tmp/repo", { execImpl: conflict.exec }),
+    /Merge conflict in src\/app\.ts/,
+  );
 });
 
 test("isMergeConflict：只认「产生冲突」的输出，不把别的失败当冲突", () => {
   assert.equal(isMergeConflict("CONFLICT (content): Merge conflict in a.ts\n"), true);
-  assert.equal(isMergeConflict("Automatic merge failed; fix conflicts and then commit the result.\n"), true);
+  assert.equal(
+    isMergeConflict("Automatic merge failed; fix conflicts and then commit the result.\n"),
+    true,
+  );
   assert.equal(isMergeConflict("error: Your local changes would be overwritten\n"), false);
   assert.equal(isMergeConflict(""), false);
 });
@@ -916,12 +1185,20 @@ function mergeCalls(calls) {
 
 test("mergeGitBranchInto：把选中的本地分支 `merge --no-edit` 进当前分支", async () => {
   const { exec, calls } = fakeExecFile(
-    mergePlan({ overrides: { "merge --no-edit feature": { ok: true, stdout: "Merge made by the 'ort' strategy.\n" } } }),
+    mergePlan({
+      overrides: {
+        "merge --no-edit feature": { ok: true, stdout: "Merge made by the 'ort' strategy.\n" },
+      },
+    }),
   );
 
   const result = await mergeGitBranchInto("/tmp/repo", "feature", { execImpl: exec });
 
-  assert.deepEqual(result, { branch: "feature", conflict: false, output: "Merge made by the 'ort' strategy." });
+  assert.deepEqual(result, {
+    branch: "feature",
+    conflict: false,
+    output: "Merge made by the 'ort' strategy.",
+  });
   assert.deepEqual(mergeCalls(calls), [["merge", "--no-edit", "feature"]]);
   assert.equal(calls.at(-1).options.cwd, "/tmp/repo");
 });
@@ -933,7 +1210,8 @@ test("mergeGitBranchInto：冲突是正常结局，返回 conflict:true 而不�
         "merge --no-edit feature": {
           ok: false,
           code: 1,
-          stderr: "CONFLICT (content): Merge conflict in src/app.ts\nAutomatic merge failed; fix conflicts and then commit the result.\n",
+          stderr:
+            "CONFLICT (content): Merge conflict in src/app.ts\nAutomatic merge failed; fix conflicts and then commit the result.\n",
         },
       },
     }),
@@ -950,36 +1228,62 @@ test("mergeGitBranchInto：非冲突的失败仍然抛错（脏树被拒）", as
   const { exec } = fakeExecFile(
     mergePlan({
       overrides: {
-        "merge --no-edit feature": { ok: false, code: 1, stderr: "error: Your local changes to the following files would be overwritten by merge\n" },
+        "merge --no-edit feature": {
+          ok: false,
+          code: 1,
+          stderr:
+            "error: Your local changes to the following files would be overwritten by merge\n",
+        },
       },
     }),
   );
 
-  await assert.rejects(() => mergeGitBranchInto("/tmp/repo", "feature", { execImpl: exec }), /would be overwritten by merge/);
+  await assert.rejects(
+    () => mergeGitBranchInto("/tmp/repo", "feature", { execImpl: exec }),
+    /would be overwritten by merge/,
+  );
 });
 
 test("mergeGitBranchInto：当前分支 / 不存在的分支 / 非法名字 / 游离 HEAD → 一条 merge 都不发", async () => {
   const self = fakeExecFile(mergePlan());
-  await assert.rejects(() => mergeGitBranchInto("/tmp/repo", "main", { execImpl: self.exec }), /into itself/);
+  await assert.rejects(
+    () => mergeGitBranchInto("/tmp/repo", "main", { execImpl: self.exec }),
+    /into itself/,
+  );
   assert.deepEqual(mergeCalls(self.calls), []);
 
   const unknown = fakeExecFile(mergePlan());
-  await assert.rejects(() => mergeGitBranchInto("/tmp/repo", "nope", { execImpl: unknown.exec }), /Unknown branch: nope/);
+  await assert.rejects(
+    () => mergeGitBranchInto("/tmp/repo", "nope", { execImpl: unknown.exec }),
+    /Unknown branch: nope/,
+  );
   assert.deepEqual(mergeCalls(unknown.calls), []);
 
   const unsafe = fakeExecFile(mergePlan());
-  await assert.rejects(() => mergeGitBranchInto("/tmp/repo", "--force", { execImpl: unsafe.exec }), /Invalid branch name/);
+  await assert.rejects(
+    () => mergeGitBranchInto("/tmp/repo", "--force", { execImpl: unsafe.exec }),
+    /Invalid branch name/,
+  );
   assert.equal(unsafe.calls.length, 0, "名字不合法时连 status 都不用读");
 
   const detached = fakeExecFile(mergePlan({ header: SYNC_DETACHED }));
-  await assert.rejects(() => mergeGitBranchInto("/tmp/repo", "feature", { execImpl: detached.exec }), /detached HEAD/);
+  await assert.rejects(
+    () => mergeGitBranchInto("/tmp/repo", "feature", { execImpl: detached.exec }),
+    /detached HEAD/,
+  );
   assert.deepEqual(mergeCalls(detached.calls), []);
 
   const unborn = fakeExecFile(mergePlan({ header: SYNC_UNBORN }));
-  await assert.rejects(() => mergeGitBranchInto("/tmp/repo", "feature", { execImpl: unborn.exec }), /before the first commit/);
+  await assert.rejects(
+    () => mergeGitBranchInto("/tmp/repo", "feature", { execImpl: unborn.exec }),
+    /before the first commit/,
+  );
   assert.deepEqual(mergeCalls(unborn.calls), []);
 
-  await assert.rejects(() => mergeGitBranchInto("", "feature", { execImpl: self.exec }), /without a project folder/);
+  await assert.rejects(
+    () => mergeGitBranchInto("", "feature", { execImpl: self.exec }),
+    /without a project folder/,
+  );
 });
 
 test("readConflictContext：列出冲突文件并读出带冲突标记的内容，非冲突直接报错", async () => {
@@ -993,19 +1297,32 @@ test("readConflictContext：列出冲突文件并读出带冲突标记的内容�
       "# branch.head main",
       "u UU N... 100644 100644 100644 100644 ggg hhh iii src/app.ts",
     ].join("\u0000")}\u0000`;
-    const { exec } = fakeExecFile((args) => (args[0] === "status" ? { ok: true, stdout: status } : { ok: false, code: 1, stderr: "unexpected" }));
+    const { exec } = fakeExecFile((args) =>
+      args[0] === "status"
+        ? { ok: true, stdout: status }
+        : { ok: false, code: 1, stderr: "unexpected" },
+    );
 
     const context = await readConflictContext(repo, { execImpl: exec });
     assert.equal(context.branch, "main");
     assert.equal(context.cwd, repo);
-    assert.deepEqual(context.files.map((file) => file.path), ["src/app.ts"]);
+    assert.deepEqual(
+      context.files.map((file) => file.path),
+      ["src/app.ts"],
+    );
     assert.equal(context.files[0].text, conflictedText);
     assert.equal(context.files[0].truncated, false);
     assert.equal(context.skipped, 0);
 
     const clean = fakeExecFile(() => ({ ok: true, stdout: "# branch.head main\u0000" }));
-    await assert.rejects(() => readConflictContext(repo, { execImpl: clean.exec }), /No merge conflicts/);
-    await assert.rejects(() => readConflictContext("", { execImpl: exec }), /without a project folder/);
+    await assert.rejects(
+      () => readConflictContext(repo, { execImpl: clean.exec }),
+      /No merge conflicts/,
+    );
+    await assert.rejects(
+      () => readConflictContext("", { execImpl: exec }),
+      /without a project folder/,
+    );
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -1021,7 +1338,11 @@ test("readConflictContext：超过上限的冲突文件只列前 MAX_CONFLICT_FI
       entries.push(`u UU N... 100644 100644 100644 100644 ggg hhh iii ${path}`);
     }
     const status = `${entries.join("\u0000")}\u0000`;
-    const { exec } = fakeExecFile((args) => (args[0] === "status" ? { ok: true, stdout: status } : { ok: false, code: 1, stderr: "unexpected" }));
+    const { exec } = fakeExecFile((args) =>
+      args[0] === "status"
+        ? { ok: true, stdout: status }
+        : { ok: false, code: 1, stderr: "unexpected" },
+    );
 
     const context = await readConflictContext(repo, { execImpl: exec });
     assert.equal(context.files.length, MAX_CONFLICT_FILES);
@@ -1083,7 +1404,10 @@ test("commitGitChanges：修改过的文件不用 add，未跟踪文件先 add �
   const { exec, calls } = fakeExecFile(
     commitPlan({
       "add -- notes.md": { ok: true, stdout: "" },
-      "commit -m fix: 头部徽标 -- notes.md src/app.ts": { ok: true, stdout: "[main abc1234] fix: 头部徽标\n 2 files changed\n" },
+      "commit -m fix: 头部徽标 -- notes.md src/app.ts": {
+        ok: true,
+        stdout: "[main abc1234] fix: 头部徽标\n 2 files changed\n",
+      },
     }),
   );
 
@@ -1096,16 +1420,24 @@ test("commitGitChanges：修改过的文件不用 add，未跟踪文件先 add �
   assert.match(output, /\[main abc1234\]/);
   // 部分提交自己就取工作区内容，不需要也不应该对已跟踪的文件先 add。
   assert.deepEqual(writeArgs(calls, "add "), [["add", "--", "notes.md"]]);
-  assert.deepEqual(writeArgs(calls, COMMIT_RECORD), [["commit", "-m", "fix: 头部徽标", "--", "notes.md", "src/app.ts"]]);
+  assert.deepEqual(writeArgs(calls, COMMIT_RECORD), [
+    ["commit", "-m", "fix: 头部徽标", "--", "notes.md", "src/app.ts"],
+  ]);
   assert.equal(calls[1].options.cwd, "/tmp/repo");
 });
 
 test("commitGitChanges：只选已跟踪的文件时一条 add 都不发（不碰别人暂存的东西）", async () => {
   const { exec, calls } = fakeExecFile(
-    commitPlan({ "commit -m only-tracked -- src/app.ts": { ok: true, stdout: "[main abc] only-tracked\n" } }),
+    commitPlan({
+      "commit -m only-tracked -- src/app.ts": { ok: true, stdout: "[main abc] only-tracked\n" },
+    }),
   );
 
-  await commitGitChanges("/tmp/repo", { message: "only-tracked", paths: ["src/app.ts"] }, { execImpl: exec });
+  await commitGitChanges(
+    "/tmp/repo",
+    { message: "only-tracked", paths: ["src/app.ts"] },
+    { execImpl: exec },
+  );
 
   assert.equal(writeArgs(calls, "add ").length, 0);
 });
@@ -1115,37 +1447,69 @@ test("commitGitChanges：只传新路径也会带上重命名的旧路径，且�
     commitPlan({
       "commit -m rename -- src/new.ts src/old.ts": { ok: true, stdout: "[main abc] rename\n" },
       // 对已暂存的重命名再 add 会以 "pathspec did not match" fatal，实测过，所以必须不出现。
-      "add -- src/new.ts": { ok: false, code: 128, stdout: "", stderr: "fatal: pathspec 'src/new.ts' did not match\n" },
+      "add -- src/new.ts": {
+        ok: false,
+        code: 128,
+        stdout: "",
+        stderr: "fatal: pathspec 'src/new.ts' did not match\n",
+      },
     }),
   );
 
-  await commitGitChanges("/tmp/repo", { message: "rename", paths: ["src/new.ts"] }, { execImpl: exec });
+  await commitGitChanges(
+    "/tmp/repo",
+    { message: "rename", paths: ["src/new.ts"] },
+    { execImpl: exec },
+  );
 
   assert.equal(writeArgs(calls, "add ").length, 0);
-  assert.deepEqual(writeArgs(calls, COMMIT_RECORD), [["commit", "-m", "rename", "--", "src/new.ts", "src/old.ts"]]);
+  assert.deepEqual(writeArgs(calls, COMMIT_RECORD), [
+    ["commit", "-m", "rename", "--", "src/new.ts", "src/old.ts"],
+  ]);
 });
 
 test("commitGitChanges：路径不在 status 里 / 是冲突文件 / 信息为空 → 一条写命令都不发", async () => {
   const notChanged = fakeExecFile(commitPlan());
   await assert.rejects(
-    () => commitGitChanges("/tmp/repo", { message: "x", paths: ["src/secret.env"] }, { execImpl: notChanged.exec }),
+    () =>
+      commitGitChanges(
+        "/tmp/repo",
+        { message: "x", paths: ["src/secret.env"] },
+        { execImpl: notChanged.exec },
+      ),
     /Not a changed file: src\/secret.env/,
   );
   assert.equal(writeArgs(notChanged.calls, COMMIT_UPDATE).length, 0);
 
   const conflicted = fakeExecFile(commitPlan());
   await assert.rejects(
-    () => commitGitChanges("/tmp/repo", { message: "x", paths: ["src/conflict.ts"] }, { execImpl: conflicted.exec }),
+    () =>
+      commitGitChanges(
+        "/tmp/repo",
+        { message: "x", paths: ["src/conflict.ts"] },
+        { execImpl: conflicted.exec },
+      ),
     /Resolve conflicts before committing/,
   );
   assert.equal(writeArgs(conflicted.calls, COMMIT_UPDATE).length, 0);
 
   const emptyMessage = fakeExecFile(commitPlan());
-  await assert.rejects(() => commitGitChanges("/tmp/repo", { message: "  ", paths: ["notes.md"] }, { execImpl: emptyMessage.exec }), /required/);
+  await assert.rejects(
+    () =>
+      commitGitChanges(
+        "/tmp/repo",
+        { message: "  ", paths: ["notes.md"] },
+        { execImpl: emptyMessage.exec },
+      ),
+    /required/,
+  );
   assert.equal(emptyMessage.calls.length, 0, "信息不合法时连 status 都不需要读");
 
   const emptyPaths = fakeExecFile(commitPlan());
-  await assert.rejects(() => commitGitChanges("/tmp/repo", { message: "x", paths: [] }, { execImpl: emptyPaths.exec }), /at least one file/);
+  await assert.rejects(
+    () => commitGitChanges("/tmp/repo", { message: "x", paths: [] }, { execImpl: emptyPaths.exec }),
+    /at least one file/,
+  );
   assert.equal(emptyPaths.calls.length, 0);
 });
 
@@ -1159,7 +1523,12 @@ test("commitGitChanges：托管 worktree 的共享 .pi 链永远不可提交", a
     symlinkSync(project, join(worktree, ".pi"), "dir");
     const linked = ["# branch.head main", "? .pi", "? notes.md"].join("\u0000");
     const { exec, calls } = fakeExecFile(
-      commitPlan({ "status --porcelain=v2 --branch -z --untracked-files=normal": { ok: true, stdout: `${linked}\u0000` } }),
+      commitPlan({
+        "status --porcelain=v2 --branch -z --untracked-files=normal": {
+          ok: true,
+          stdout: `${linked}\u0000`,
+        },
+      }),
     );
 
     await assert.rejects(
@@ -1184,10 +1553,15 @@ test("commitGitChanges：托管 worktree 的共享 .pi 链永远不可提交", a
 
 test("commitGitChanges：git 拒绝时抛原文，add 失败就不会走到 commit", async () => {
   const { exec, calls } = fakeExecFile(
-    commitPlan({ "add -- notes.md": { ok: false, code: 1, stderr: "error: unable to index file 'notes.md'\n" } }),
+    commitPlan({
+      "add -- notes.md": { ok: false, code: 1, stderr: "error: unable to index file 'notes.md'\n" },
+    }),
   );
 
-  await assert.rejects(() => commitGitChanges("/tmp/repo", { message: "x", paths: ["notes.md"] }, { execImpl: exec }), /unable to index file/);
+  await assert.rejects(
+    () => commitGitChanges("/tmp/repo", { message: "x", paths: ["notes.md"] }, { execImpl: exec }),
+    /unable to index file/,
+  );
   assert.equal(writeArgs(calls, COMMIT_RECORD).length, 0, "add 失败后不能继续 commit");
 
   const identity = fakeExecFile(
@@ -1200,7 +1574,12 @@ test("commitGitChanges：git 拒绝时抛原文，add 失败就不会走到 comm
     }),
   );
   await assert.rejects(
-    () => commitGitChanges("/tmp/repo", { message: "x", paths: ["src/app.ts"] }, { execImpl: identity.exec }),
+    () =>
+      commitGitChanges(
+        "/tmp/repo",
+        { message: "x", paths: ["src/app.ts"] },
+        { execImpl: identity.exec },
+      ),
     /Please tell me who you are/,
   );
 });

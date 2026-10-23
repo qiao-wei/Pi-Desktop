@@ -1,5 +1,5 @@
 import { t } from "../../i18n/index.ts";
-import type { ModelSummary } from "../../types";
+
 import type {
   CostDraft,
   CostRatesDraft,
@@ -10,6 +10,32 @@ import type {
   ModelCostRates,
   ModelProviderRow,
 } from "./customModelsApi";
+import {
+  THINKING_LEVELS,
+  emptyThinkingLevels,
+  thinkingLevelsFromMap,
+  buildThinkingLevelMap,
+  THINKING_VALUE_MAX,
+} from "./thinkingLevelDraft.ts";
+import type { ThinkingLevel, ThinkingLevelDraftMap } from "./thinkingLevelDraft.ts";
+// 调用点一个字都不用改：这些名字继续从 customModelForm 出得去（值 + 类型分开 re-export）。
+export {
+  THINKING_LEVELS,
+  emptyThinkingLevels,
+  thinkingLevelsFromMap,
+  buildThinkingLevelMap,
+  THINKING_VALUE_MAX,
+};
+export type { ThinkingLevel, ThinkingLevelDraftMap };
+import {
+  prettifyModelId,
+  modelKey,
+  buildComposerModelOptions,
+  groupComposerOptionsByProvider,
+} from "./composerModelOptions.ts";
+import type { ComposerModelOption, ComposerModelGroup } from "./composerModelOptions.ts";
+export { prettifyModelId, modelKey, buildComposerModelOptions, groupComposerOptionsByProvider };
+export type { ComposerModelOption, ComposerModelGroup };
 
 /**
  * 自定义模型表单/列表的纯规则。
@@ -35,46 +61,6 @@ export const PRICE_FIELDS = [
   { key: "cacheRead", labelKey: "models.price.cacheRead" },
   { key: "cacheWrite", labelKey: "models.price.cacheWrite" },
 ] as const satisfies ReadonlyArray<{ key: keyof ModelCostRates; labelKey: string }>;
-
-/** pi 的思考档位全集（与桥 THINKING_LEVELS 同序同值）；编辑弹窗用它渲染档位映射表。 */
-export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
-
-export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
-
-/**
- * 档位映射草稿：每档一个字符串，**留空 = 该档不存在**（落盘 `null`）。
- * 填的值就是选中该档时发给端点的 effort —— 可以和档位同名，也可以改名（high → xhigh）。
- * pi 那边「未声明的档」只有两种效果：基础档按同名放行、xhigh/max 算不支持，都能用这两个状态表达。
- */
-export type ThinkingLevelDraftMap = Record<ThinkingLevel, string>;
-
-export function emptyThinkingLevels(): ThinkingLevelDraftMap {
-  return Object.fromEntries(
-    THINKING_LEVELS.map((level) => [level, level === "xhigh" || level === "max" ? "" : level]),
-  ) as ThinkingLevelDraftMap;
-}
-
-/** 桥下发的档位表 → 草稿；null/缺失都显示成空框（= 该档不存在）。 */
-export function thinkingLevelsFromMap(map?: Record<string, string | null>): ThinkingLevelDraftMap {
-  const draft = emptyThinkingLevels();
-  for (const level of THINKING_LEVELS) {
-    const value = map?.[level];
-    draft[level] = value === null || value === undefined ? "" : String(value);
-  }
-  return draft;
-}
-
-/** 草稿 → 落盘映射表：七档全写（空 = `null`），所见即所发。 */
-export function buildThinkingLevelMap(draft: ThinkingLevelDraftMap): Record<string, string | null> {
-  const map: Record<string, string | null> = {};
-  for (const level of THINKING_LEVELS) {
-    map[level] = draft[level]?.trim() ? draft[level].trim() : null;
-  }
-  return map;
-}
-
-/** 档位值的字符集：就是个 effort 名，不接受空白/控制字符（桥也会再拦一次）。 */
-export const THINKING_VALUE_MAX = 40;
 
 /**
  * 列表端点按 api 类型分派：OpenAI 兼容是 `GET {base}/models` + Bearer，
@@ -281,147 +267,6 @@ export function formatTokenCount(value: number | undefined): string {
 
 function trimZero(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
-/** `qwen3.7-plus` -> `Qwen3.7 Plus`，和桥的 `prettifyModelId` 同规则。 */
-export function prettifyModelId(id: string): string {
-  return String(id ?? "")
-    .split(/[-_ ]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-export function modelKey(provider: string, model: string): string {
-  return `${provider}/${model}`;
-}
-
-export interface ComposerModelOption {
-  key: string;
-  provider: string;
-  model: string;
-  /** 下拉里的主标题。 */
-  label: string;
-  /** 副标题：供应商名，自定义行用它区分同名模型。 */
-  detail: string;
-  custom: boolean;
-  available: boolean;
-}
-
-/**
- * 输入框旁的可切换模型列表。
- *
- * 内置目录有几百个模型，全塞进下拉框等于没有列表，所以这里只放：
- * 用户自己加的模型（永远放，缺 key 也要放，否则刚加完就找不到）+ 已经配好鉴权的内置模型
- * + 当前会话正在用的那个（可能既不是自定义也没有鉴权）。
- */
-export function buildComposerModelOptions({
-  availableModels = [],
-  customModels = [],
-  currentProvider = "",
-  currentModel = "",
-}: {
-  availableModels?: ModelSummary[];
-  customModels?: CustomModelEntry[];
-  currentProvider?: string;
-  currentModel?: string;
-}): ComposerModelOption[] {
-  const options: ComposerModelOption[] = [];
-  const seen = new Set<string>();
-
-  const push = (option: ComposerModelOption) => {
-    if (seen.has(option.key)) {
-      return;
-    }
-    seen.add(option.key);
-    options.push(option);
-  };
-
-  for (const entry of customModels) {
-    if (!entry.managed || !entry.model) {
-      continue;
-    }
-    push({
-      key: modelKey(entry.providerId, entry.model),
-      provider: entry.providerId,
-      model: entry.model,
-      label: entry.modelLabel || prettifyModelId(entry.model),
-      detail: entry.providerName,
-      custom: true,
-      available: Boolean(entry.available),
-    });
-  }
-
-  const builtIn = availableModels
-    .filter((model) => model.available && !seen.has(modelKey(model.provider, model.model)))
-    .map((model) => ({
-      key: modelKey(model.provider, model.model),
-      provider: model.provider,
-      model: model.model,
-      label: model.name || prettifyModelId(model.model),
-      detail: model.provider,
-      custom: false,
-      available: true,
-    }))
-    .sort((left, right) => left.detail.localeCompare(right.detail) || left.label.localeCompare(right.label));
-
-  for (const option of builtIn) {
-    push(option);
-  }
-
-  if (currentProvider && currentModel && !seen.has(modelKey(currentProvider, currentModel))) {
-    const summary = availableModels.find((model) => model.provider === currentProvider && model.model === currentModel);
-    push({
-      key: modelKey(currentProvider, currentModel),
-      provider: currentProvider,
-      model: currentModel,
-      label: summary?.name || prettifyModelId(currentModel),
-      detail: summary?.provider ?? currentProvider,
-      custom: false,
-      available: Boolean(summary?.available),
-    });
-  }
-
-  return options;
-}
-
-export interface ComposerModelGroup {
-  /** provider id，作为分组 key。 */
-  key: string;
-  /** 分组标题：供应商展示名。 */
-  label: string;
-  custom: boolean;
-  options: ComposerModelOption[];
-}
-
-/**
- * 下拉框按供应商分组。
- *
- * 顺序沿用列表本身的顺序（自定义在前），组内不变；自定义组按首次出现排，
- * 内置组按名字排，这样几十个模型不至于糊成一条平铺的长列表。
- */
-export function groupComposerOptionsByProvider(options: ComposerModelOption[]): ComposerModelGroup[] {
-  const groups = new Map<string, ComposerModelGroup>();
-  for (const option of options) {
-    const existing = groups.get(option.provider);
-    if (existing) {
-      existing.options.push(option);
-      continue;
-    }
-    groups.set(option.provider, {
-      key: option.provider,
-      label: option.detail || option.provider,
-      custom: option.custom,
-      options: [option],
-    });
-  }
-
-  const list = [...groups.values()];
-  const rank = (group: ComposerModelGroup) => (group.custom ? 0 : 1);
-  return list.sort(
-    (left, right) => rank(left) - rank(right) ||
-      (rank(left) === 1 ? left.label.localeCompare(right.label) : 0),
-  );
 }
 
 export interface CustomEntryGroup {

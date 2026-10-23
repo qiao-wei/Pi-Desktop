@@ -6,7 +6,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { join, relative, resolve } from "node:path";
 
 import {
@@ -21,7 +21,6 @@ import {
 } from "../server/capabilityPackageSource.mjs";
 import { bridgeSource } from "./lib/bridgeSource.ts";
 
-const ROOT = resolve(import.meta.dirname, "..");
 const CWD = "/Users/dev/Desktop/tmp/aaa";
 const AGENT_DIR = "/Users/dev/.pi/agent";
 const TARGET = "/tmp/probe-ext-pkg";
@@ -77,17 +76,29 @@ test("a hand-written cwd-relative entry is caught too, because both bases are tr
 });
 
 test("object entries keep autoload and friends when only the source is rewritten", () => {
-  assert.deepEqual(
-    absolutizedPackageEntry({ source: PI_ENTRY, autoload: false }, TARGET),
-    { source: TARGET, autoload: false },
-  );
+  assert.deepEqual(absolutizedPackageEntry({ source: PI_ENTRY, autoload: false }, TARGET), {
+    source: TARGET,
+    autoload: false,
+  });
 });
 
 test("nothing to do: already absolute, registry source, or no matching install", () => {
-  assert.deepEqual(selectEntriesToAbsolutize({ packages: [TARGET], installTarget: TARGET, bases: [CWD] }), []);
-  assert.deepEqual(selectEntriesToAbsolutize({ packages: ["npm:pi-memory"], installTarget: TARGET, bases: [CWD] }), []);
-  assert.deepEqual(selectEntriesToAbsolutize({ packages: ["./other"], installTarget: TARGET, bases: [CWD] }), []);
-  assert.deepEqual(selectEntriesToAbsolutize({ packages: [], installTarget: "", bases: [CWD] }), []);
+  assert.deepEqual(
+    selectEntriesToAbsolutize({ packages: [TARGET], installTarget: TARGET, bases: [CWD] }),
+    [],
+  );
+  assert.deepEqual(
+    selectEntriesToAbsolutize({ packages: ["npm:pi-memory"], installTarget: TARGET, bases: [CWD] }),
+    [],
+  );
+  assert.deepEqual(
+    selectEntriesToAbsolutize({ packages: ["./other"], installTarget: TARGET, bases: [CWD] }),
+    [],
+  );
+  assert.deepEqual(
+    selectEntriesToAbsolutize({ packages: [], installTarget: "", bases: [CWD] }),
+    [],
+  );
   assert.deepEqual(selectEntriesToAbsolutize({}), []);
 });
 
@@ -155,8 +166,16 @@ test("the install handler straightens user-scope packages and matches them by wh
   const source = bridgeSource();
 
   assert.match(source, /straightenInstalledPackage\(targetRuntime, source\)/);
-  assert.match(source, /settingsManager: targetRuntime\.settingsManager/, "the rewrite must run against live settings");
-  assert.match(source, /pkg\.installedPath === resolve\(installTarget\)/, "lookups must survive the rewritten source");
+  assert.match(
+    source,
+    /settingsManager: targetRuntime\.settingsManager/,
+    "the rewrite must run against live settings",
+  );
+  assert.match(
+    source,
+    /pkg\.installedPath === resolve\(installTarget\)/,
+    "lookups must survive the rewritten source",
+  );
 });
 
 /* ------------------- remove/update: the stored source round-trip ------------------- */
@@ -171,34 +190,71 @@ test("a project entry is resolved from `.pi`, where pi actually wrote it", () =>
   const projectEntry = "../packages/pi-mcp-adapter";
 
   assert.equal(
-    packageSourceForPi({ source: projectEntry, scope: "project", projectCwd: CWD, agentDir: AGENT_DIR }),
+    packageSourceForPi({
+      source: projectEntry,
+      scope: "project",
+      projectCwd: CWD,
+      agentDir: AGENT_DIR,
+    }),
     join(CWD, "packages", "pi-mcp-adapter"),
   );
   assert.notEqual(
-    packageSourceForPi({ source: projectEntry, scope: "project", projectCwd: CWD, agentDir: AGENT_DIR }),
+    packageSourceForPi({
+      source: projectEntry,
+      scope: "project",
+      projectCwd: CWD,
+      agentDir: AGENT_DIR,
+    }),
     projectEntry,
     "a bare relative source must not reach pi: it would resolve against the cwd and miss",
   );
 });
 
 test("a user entry is resolved from the agent dir", () => {
-  assert.equal(packageSourceForPi({ source: PI_ENTRY, scope: "user", projectCwd: CWD, agentDir: AGENT_DIR }), TARGET);
+  assert.equal(
+    packageSourceForPi({ source: PI_ENTRY, scope: "user", projectCwd: CWD, agentDir: AGENT_DIR }),
+    TARGET,
+  );
 });
 
 test("absolute paths and registry sources pass through untouched", () => {
-  assert.equal(packageSourceForPi({ source: TARGET, scope: "project", projectCwd: CWD, agentDir: AGENT_DIR }), TARGET);
-  assert.equal(packageSourceForPi({ source: "npm:pi-memory", scope: "project", projectCwd: CWD, agentDir: AGENT_DIR }), "npm:pi-memory");
   assert.equal(
-    packageSourceForPi({ source: "git:github.com/x/y", scope: "project", projectCwd: CWD, agentDir: AGENT_DIR }),
+    packageSourceForPi({ source: TARGET, scope: "project", projectCwd: CWD, agentDir: AGENT_DIR }),
+    TARGET,
+  );
+  assert.equal(
+    packageSourceForPi({
+      source: "npm:pi-memory",
+      scope: "project",
+      projectCwd: CWD,
+      agentDir: AGENT_DIR,
+    }),
+    "npm:pi-memory",
+  );
+  assert.equal(
+    packageSourceForPi({
+      source: "git:github.com/x/y",
+      scope: "project",
+      projectCwd: CWD,
+      agentDir: AGENT_DIR,
+    }),
     "git:github.com/x/y",
   );
 });
 
 test("missing sources and surrounding whitespace are handled", () => {
-  assert.equal(packageSourceForPi({ source: "  ", scope: "project", projectCwd: CWD, agentDir: AGENT_DIR }), "");
+  assert.equal(
+    packageSourceForPi({ source: "  ", scope: "project", projectCwd: CWD, agentDir: AGENT_DIR }),
+    "",
+  );
   assert.equal(packageSourceForPi({ scope: "project", projectCwd: CWD, agentDir: AGENT_DIR }), "");
   assert.equal(
-    packageSourceForPi({ source: "  ./local-pkg  ", scope: "project", projectCwd: CWD, agentDir: AGENT_DIR }),
+    packageSourceForPi({
+      source: "  ./local-pkg  ",
+      scope: "project",
+      projectCwd: CWD,
+      agentDir: AGENT_DIR,
+    }),
     join(CWD, ".pi", "local-pkg"),
   );
 });

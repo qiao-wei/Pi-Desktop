@@ -1,0 +1,306 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error"
+  },
+  "plugins": [
+    "react"
+  ],
+  "rules": {
+    "no-unused-vars": "error",
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "warn",
+    "react/exhaustive-effect-dependencies": "warn",
+    "react/refs": "warn",
+    "react/react-in-jsx-scope": "off",
+    "react/set-state-in-effect": "off",
+    "max-lines": "off",
+    "no-console": "off"
+  },
+  "overrides": [
+    {
+      "files": [
+        "e2e/**"
+      ],
+      "rules": {
+        "react/rules-of-hooks": "off",
+        "react/exhaustive-deps": "off",
+        "react/exhaustive-effect-dependencies": "off",
+        "react/refs": "off",
+        "react/react-in-jsx-scope": "off",
+        "no-empty-pattern": "off"
+      }
+    },
+    {
+      "files": [
+        "e2e/**"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 700
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/**"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 700
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "server/**"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 900
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "scripts/**"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 900
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "**/*.test.ts"
+      ],
+      "rules": {
+        "max-lines": "off"
+      }
+    },
+    {
+      "files": [
+        "**/*.spec.ts"
+      ],
+      "rules": {
+        "max-lines": "off"
+      }
+    },
+    {
+      "files": [
+        "**/*.test.tsx"
+      ],
+      "rules": {
+        "max-lines": "off"
+      }
+    },
+    {
+      "files": [
+        "src-electron/**"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 700
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/i18n/zh.ts"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 1400
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/i18n/en.ts"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 1400
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "server/customModels.mjs"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 1080
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "server/gitInfo.mjs"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 1177
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/app/Sidebar.tsx"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 1285
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/components/assistant-ui/elements/thread.aui.tsx"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 1362
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/components/GitStatusBadge.tsx"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 1028
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/features/chat/ChatThread.tsx"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 1379
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/features/chat/MessageEditBox.tsx"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 845
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 2963
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/features/models/AddModelsDialog.tsx"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 834
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/features/models/CustomModelsSettings.tsx"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 986
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/features/models/ProviderDialog.tsx"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 748
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/shared/chatBubbles.ts"
+      ],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 1163
+          }
+        ]
+      }
+    }
+  ]
+}

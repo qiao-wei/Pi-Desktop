@@ -6,7 +6,16 @@
  */
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -88,9 +97,21 @@ test("脚本正文在命令前注入环境变量（值用单引号包裹）", ()
 test("commandProcessEnv：没环境变量时原样返回 baseEnv，有则叠加", () => {
   const base = { PATH: "/usr/bin" };
   assert.equal(commandProcessEnv([], base), base);
-  assert.deepEqual(commandProcessEnv([{ key: "PORT", value: "3000" }], base), { PATH: "/usr/bin", PORT: "3000" });
+  assert.deepEqual(commandProcessEnv([{ key: "PORT", value: "3000" }], base), {
+    PATH: "/usr/bin",
+    PORT: "3000",
+  });
   // 非法键 / 覆盖已有值
-  assert.deepEqual(commandProcessEnv([{ key: "1bad", value: "x" }, { key: "PATH", value: "/x" }], base), { PATH: "/x" });
+  assert.deepEqual(
+    commandProcessEnv(
+      [
+        { key: "1bad", value: "x" },
+        { key: "PATH", value: "/x" },
+      ],
+      base,
+    ),
+    { PATH: "/x" },
+  );
 });
 
 test("windowsCommandEnvPrefix 拼 set 前缀", () => {
@@ -101,18 +122,36 @@ test("windowsCommandEnvPrefix 拼 set 前缀", () => {
 });
 
 test("macOS 用 open 把脚本交给 Terminal，并补一次 activate", () => {
-  const plans = terminalLauncherPlans({ platform: "darwin", scriptPath: "/tmp/run.command", command: "npm run dev", cwd: "/tmp/p", env: {} });
+  const plans = terminalLauncherPlans({
+    platform: "darwin",
+    scriptPath: "/tmp/run.command",
+    command: "npm run dev",
+    cwd: "/tmp/p",
+    env: {},
+  });
   assert.equal(plans.length, 1);
   assert.deepEqual(plans[0][0], { command: "open", args: ["-a", "Terminal", "/tmp/run.command"] });
   assert.equal(plans[0][1]?.command, "osascript");
   assert.equal(plans[0][1]?.optional, true);
 
-  const custom = terminalLauncherPlans({ platform: "darwin", scriptPath: "/tmp/run.command", command: "x", cwd: "/tmp/p", env: { PI_DESKTOP_TERMINAL: "iTerm" } });
+  const custom = terminalLauncherPlans({
+    platform: "darwin",
+    scriptPath: "/tmp/run.command",
+    command: "x",
+    cwd: "/tmp/p",
+    env: { PI_DESKTOP_TERMINAL: "iTerm" },
+  });
   assert.deepEqual(custom[0][0]?.args, ["-a", "iTerm", "/tmp/run.command"]);
 });
 
 test("Windows 用 cmd start 新开一个窗口", () => {
-  const plans = terminalLauncherPlans({ platform: "win32", scriptPath: "C:\\tmp\\run.command", command: "npm run dev", cwd: "C:\\proj", env: {} });
+  const plans = terminalLauncherPlans({
+    platform: "win32",
+    scriptPath: "C:\\tmp\\run.command",
+    command: "npm run dev",
+    cwd: "C:\\proj",
+    env: {},
+  });
   assert.equal(plans.length, 1);
   assert.equal(plans[0][0]?.command, "cmd");
   assert.ok(plans[0][0]?.args.join(" ").includes('cd /d "C:\\proj" && npm run dev'));
@@ -131,7 +170,13 @@ test("Windows 终端方案把环境变量拼成 set 前缀（在 cd 之前）", 
 });
 
 test("Linux 按候选顺序列终端，第一个是 x-terminal-emulator", () => {
-  const plans = terminalLauncherPlans({ platform: "linux", scriptPath: "/tmp/run.command", command: "npm run dev", cwd: "/tmp/p", env: {} });
+  const plans = terminalLauncherPlans({
+    platform: "linux",
+    scriptPath: "/tmp/run.command",
+    command: "npm run dev",
+    cwd: "/tmp/p",
+    env: {},
+  });
   assert.deepEqual(
     plans.map((steps) => steps[0]?.command),
     ["x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"],
@@ -143,7 +188,13 @@ test("运行会写出 755 的临时脚本并拉起终端", async () => {
   const project = tempDir("pi-run-project-");
   const { calls, spawnImpl } = fakeSpawn();
 
-  const result = await runProjectCommand("npm run dev", project, { spawnImpl, platform: "darwin", baseDir, now: 1_700_000_000_000, env: {} });
+  const result = await runProjectCommand("npm run dev", project, {
+    spawnImpl,
+    platform: "darwin",
+    baseDir,
+    now: 1_700_000_000_000,
+    env: {},
+  });
   assert.equal(result.launcher, "open");
   assert.equal(calls[0]?.command, "open");
 
@@ -160,17 +211,33 @@ test("第一个终端没装就换下一个候选", async () => {
   const project = tempDir("pi-run-project-");
   const { calls, spawnImpl } = fakeSpawn({ failOn: ["x-terminal-emulator"] });
 
-  const result = await runProjectCommand("npm run dev", project, { spawnImpl, platform: "linux", baseDir, env: {} });
+  const result = await runProjectCommand("npm run dev", project, {
+    spawnImpl,
+    platform: "linux",
+    baseDir,
+    env: {},
+  });
   assert.equal(result.launcher, "gnome-terminal");
-  assert.deepEqual(calls.map((call) => call.command), ["x-terminal-emulator", "gnome-terminal"]);
+  assert.deepEqual(
+    calls.map((call) => call.command),
+    ["x-terminal-emulator", "gnome-terminal"],
+  );
 });
 
 test("空命令 / 不存在的目录都直接报错，不启动任何东西", async () => {
   const baseDir = tempDir("pi-run-base-");
   const { calls, spawnImpl } = fakeSpawn();
-  await assert.rejects(runProjectCommand("   ", baseDir, { spawnImpl, platform: "darwin", baseDir, env: {} }), /没有可运行的命令/);
   await assert.rejects(
-    runProjectCommand("npm run dev", join(baseDir, "nope"), { spawnImpl, platform: "darwin", baseDir, env: {} }),
+    runProjectCommand("   ", baseDir, { spawnImpl, platform: "darwin", baseDir, env: {} }),
+    /没有可运行的命令/,
+  );
+  await assert.rejects(
+    runProjectCommand("npm run dev", join(baseDir, "nope"), {
+      spawnImpl,
+      platform: "darwin",
+      baseDir,
+      env: {},
+    }),
     /项目目录不存在/,
   );
   assert.deepEqual(calls, []);
@@ -199,24 +266,44 @@ test("normalizeTerminalApp 挡住非法 app 名", () => {
 });
 
 test("terminalApp 指定 macOS 终端；非法值回落 Terminal", () => {
-  const custom = terminalLauncherPlans({ platform: "darwin", scriptPath: "/tmp/run.command", command: "x", cwd: "/tmp/p", env: {}, terminalApp: "Warp" });
+  const custom = terminalLauncherPlans({
+    platform: "darwin",
+    scriptPath: "/tmp/run.command",
+    command: "x",
+    cwd: "/tmp/p",
+    env: {},
+    terminalApp: "Warp",
+  });
   assert.deepEqual(custom[0][0]?.args, ["-a", "Warp", "/tmp/run.command"]);
 
-  const fallback = terminalLauncherPlans({ platform: "darwin", scriptPath: "/tmp/run.command", command: "x", cwd: "/tmp/p", env: {}, terminalApp: "bad; rm -rf /" });
+  const fallback = terminalLauncherPlans({
+    platform: "darwin",
+    scriptPath: "/tmp/run.command",
+    command: "x",
+    cwd: "/tmp/p",
+    env: {},
+    terminalApp: "bad; rm -rf /",
+  });
   assert.deepEqual(fallback[0][0]?.args, ["-a", "Terminal", "/tmp/run.command"]);
 });
 
 test("backgroundCommandPlan 用登录 shell 跑命令，不弹窗", () => {
-  assert.deepEqual(backgroundCommandPlan({ platform: "darwin", command: " npm run dev ", cwd: "/tmp/p" }), {
-    command: "/bin/sh",
-    args: ["-lc", "npm run dev"],
-    cwd: "/tmp/p",
-  });
-  assert.deepEqual(backgroundCommandPlan({ platform: "win32", command: "npm run dev", cwd: "C:\\p" }), {
-    command: "cmd",
-    args: ["/c", "npm run dev"],
-    cwd: "C:\\p",
-  });
+  assert.deepEqual(
+    backgroundCommandPlan({ platform: "darwin", command: " npm run dev ", cwd: "/tmp/p" }),
+    {
+      command: "/bin/sh",
+      args: ["-lc", "npm run dev"],
+      cwd: "/tmp/p",
+    },
+  );
+  assert.deepEqual(
+    backgroundCommandPlan({ platform: "win32", command: "npm run dev", cwd: "C:\\p" }),
+    {
+      command: "cmd",
+      args: ["/c", "npm run dev"],
+      cwd: "C:\\p",
+    },
+  );
 });
 
 test("后台静默运行：不拉起终端，stdout/stderr 写进日志文件", async () => {
@@ -224,7 +311,12 @@ test("后台静默运行：不拉起终端，stdout/stderr 写进日志文件", 
   const project = tempDir("pi-run-project-");
   const { calls, spawnImpl } = fakeSpawn();
 
-  const result = await runProjectCommandInBackground("npm run dev", project, { spawnImpl, platform: "darwin", baseDir, now: 1_700_000_000_000 });
+  const result = await runProjectCommandInBackground("npm run dev", project, {
+    spawnImpl,
+    platform: "darwin",
+    baseDir,
+    now: 1_700_000_000_000,
+  });
   assert.equal(result.launcher, BACKGROUND_LAUNCHER);
   assert.equal(result.pid, 4321);
   assert.deepEqual(calls, [{ command: "/bin/sh", args: ["-lc", "npm run dev"] }]);
@@ -249,7 +341,7 @@ test("后台运行支持参数与环境变量：参数拼进命令行、env 交�
   });
 
   assert.deepEqual(calls, [{ command: "/bin/sh", args: ["-lc", "npm run dev -- --port 3000"] }]);
-  assert.equal((options[0]?.env as Record<string, string>).NODE_ENV, "development");
+  assert.equal((options[0]?.env as Record<string, string> | undefined)?.NODE_ENV, "development");
   const text = readFileSync(result.logPath, "utf8");
   assert.ok(text.includes("# command: npm run dev -- --port 3000"));
   assert.ok(text.includes("# env: NODE_ENV=***"), text);
@@ -270,7 +362,7 @@ test("runProjectCommand 把 args / commandEnv 透传到后台路径", async () =
     commandEnv: [{ key: "PORT", value: "8080" }],
   });
   assert.deepEqual(calls[0]?.args, ["-lc", "npm run dev --host 0.0.0.0"]);
-  assert.equal((options[0]?.env as Record<string, string>).PORT, "8080");
+  assert.equal((options[0]?.env as Record<string, string> | undefined)?.PORT, "8080");
 });
 
 test("runProjectCommand background: true 走静默路径", async () => {
@@ -278,7 +370,12 @@ test("runProjectCommand background: true 走静默路径", async () => {
   const project = tempDir("pi-run-project-");
   const { calls, spawnImpl } = fakeSpawn();
 
-  const result = await runProjectCommand("npm run dev", project, { spawnImpl, platform: "darwin", baseDir, background: true });
+  const result = await runProjectCommand("npm run dev", project, {
+    spawnImpl,
+    platform: "darwin",
+    baseDir,
+    background: true,
+  });
   assert.equal(result.launcher, BACKGROUND_LAUNCHER);
   assert.equal(calls[0]?.command, "/bin/sh");
 });
@@ -286,7 +383,10 @@ test("runProjectCommand background: true 走静默路径", async () => {
 test("detectTerminalApps 扫描 /Applications，Terminal 永远第一", () => {
   const list = detectTerminalApps({
     platform: "darwin",
-    readdir: ((dir: string) => (dir === "/Applications" ? ["Terminal.app", "iTerm.app", "Safari.app", "Warp.app"] : [])) as never,
+    readdir: ((dir: string) =>
+      dir === "/Applications"
+        ? ["Terminal.app", "iTerm.app", "Safari.app", "Warp.app"]
+        : []) as never,
     exists: (() => true) as never,
     home: "/Users/example",
   });

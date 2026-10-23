@@ -7,9 +7,8 @@ import type {
   PromptAttachmentInput,
   PromptMessagePartInput,
   PromptStreamEvent,
-  StreamProcessBlock,
 } from "../../lib/api";
-import { fetchAmbientBootstrap, fetchBootstrap, fetchJson, postExtensionUiResponse, postJson, reportDiagnostic, streamNdjson } from "../../lib/api";
+import { fetchAmbientBootstrap, fetchBootstrap, postExtensionUiResponse, postJson, reportDiagnostic, streamNdjson } from "../../lib/api";
 import { isAppWindowFocused, showSystemNotification } from "../../lib/systemNotification";
 import { loadUiPreferences } from "../../lib/ui-preferences";
 import { t } from "../../i18n";
@@ -23,7 +22,7 @@ import {
   patchMessages,
   promoteSessionRow,
   touchConversation,
-  useContextUsage,
+  applyContextUsage,
   withConversation,
   withMessages,
   withStats,
@@ -50,10 +49,13 @@ import {
   finalizeChatStreamView,
   projectStreamEvent,
   type ChatStreamView,
-  stringifyValue,
   streamingBubbleId,
 } from "../../shared/chatStreamProjection";
 import { perfCount, perfMark, perfMeasure } from "../../lib/perf";
+import {
+  hasCapabilityPart,
+  promptFallback,
+} from "./promptFallbacks";
 import type {
   AppSnapshot,
   ChatAttachment,
@@ -203,7 +205,6 @@ function createDefaultProject(): ProjectSummary {
 }
 
 function createDefaultSnapshot(): AppSnapshot {
-  const now = Date.now();
   return {
     conversation: createDefaultConversation(),
     project: createDefaultProject(),
@@ -395,7 +396,7 @@ export function reducer(state: AppState, action: Action): AppState {
       if (!state.bootstrap || !isBootstrapForSession(state.bootstrap, action.sessionPath)) {
         return state;
       }
-      const patched = useContextUsage(state.bootstrap, action.usage);
+      const patched = applyContextUsage(state.bootstrap, action.usage);
       return patched.changed ? { ...state, bootstrap: patched.bootstrap } : state;
     }
     case "set-bubbles": {
@@ -1420,10 +1421,12 @@ export function usePiDesktopApp() {
       const displayInput = rawInput;
       const attachments = attachmentInputs.map(toChatAttachment);
       const contentParts = normalizeMessageParts(messageParts, displayInput, attachments);
-      const input = displayInput || attachmentOnlyPrompt(attachments);
+      // 只挂了技能徽标也算一次提交；input 必须是服务端会算出的同一句话。
+      const capabilityPart = hasCapabilityPart(contentParts);
+      const input = promptFallback(displayInput, attachments, contentParts);
       const sessionPath = bootstrap.activeSessionPath ?? conversation.sessionFile;
       if (
-        (!displayInput.trim() && !attachments.length) ||
+        (!displayInput.trim() && !attachments.length && !capabilityPart) ||
         !sessionPath ||
         state.isBootstrapping ||
         state.isStopping
@@ -1770,10 +1773,11 @@ export function usePiDesktopApp() {
       const displayInput = rawInput;
       const attachments = attachmentInputs.map(toChatAttachment);
       const contentParts = normalizeMessageParts(messageParts, displayInput, attachments);
-      const input = displayInput || attachmentOnlyPrompt(attachments);
+      const capabilityPart = hasCapabilityPart(contentParts);
+      const input = promptFallback(displayInput, attachments, contentParts);
       const sessionPath = bootstrap.activeSessionPath ?? conversation.sessionFile;
       if (
-        (!displayInput.trim() && !attachments.length) ||
+        (!displayInput.trim() && !attachments.length && !capabilityPart) ||
         !sessionPath ||
         state.isBootstrapping ||
         state.isStopping ||
@@ -2848,24 +2852,7 @@ export function usePiDesktopApp() {
   };
 }
 
-function createMessage(
-  role: "user" | "assistant",
-  content: string,
-  status: "streaming" | "done",
-  attachments: ChatAttachment[] = [],
-  contentParts: PromptMessagePartInput[] = [],
-): ChatMessage {
-  return {
-    id: createId("msg"),
-    role,
-    kind: "text",
-    content,
-    attachments,
-    contentParts,
-    createdAt: Date.now(),
-    status,
-  };
-}
+
 
 function toChatAttachment(attachment: PromptAttachmentInput): ChatAttachment {
   return {
@@ -2906,13 +2893,6 @@ function normalizeMessageParts(
     ...(displayInput ? [{ kind: "text" as const, text: displayInput }] : []),
     ...attachments.map((attachment) => ({ kind: "attachment" as const, attachmentId: attachment.id })),
   ];
-}
-
-function attachmentOnlyPrompt(attachments: ChatAttachment[]) {
-  if (attachments.length === 1) {
-    return `Please review the attached ${attachments[0].kind === "directory" ? "folder" : "file"}: ${attachments[0].name}`;
-  }
-  return `Please review these ${attachments.length} attached files.`;
 }
 
 function createDefaultBootstrap(): BootstrapResponse {
@@ -2969,37 +2949,14 @@ function isAbortError(error: unknown) {
     : error instanceof Error && error.name === "AbortError";
 }
 
-function renderProcessText(blocks: StreamProcessBlock[]): string {
-  return blocks.map((block) => renderProcessBlock(block)).filter(Boolean).join("\n\n");
-}
 
-function renderProcessBlock(block: StreamProcessBlock): string {
-  if (block.type === "thinking") {
-    const thinking = block.thinking.trim();
-    return thinking ? `### Thinking\n\n\`\`\`text\n${thinking}\n\`\`\`` : "";
-  }
 
-  if (block.type === "notice") {
-    const notice = block.notice.trim();
-    return notice ? `### Process note\n\n${notice}` : "";
-  }
 
-  return `### Tool call: ${block.toolName}\n\n\`\`\`json\n${stringifyValue(block.arguments)}\n\`\`\``;
-}
 
-function renderToolExecutionStart(toolName: string | undefined, args: unknown): string {
-  const title = toolName ? `### Running ${toolName}` : "### Running tool";
-  return `${title}\n\n\`\`\`json\n${stringifyValue(args)}\n\`\`\``;
-}
 
-function renderToolExecutionUpdate(toolName: string | undefined, partialResult: unknown): string {
-  const title = toolName ? `### Tool output: ${toolName}` : "### Tool output";
-  return `${title}\n\n\`\`\`text\n${stringifyValue(partialResult)}\n\`\`\``;
-}
 
-function renderToolExecutionEnd(toolName: string | undefined, result: unknown, isError?: boolean): string {
-  const title = toolName ? `### ${isError ? "Tool error" : "Tool result"}: ${toolName}` : isError ? "### Tool error" : "### Tool result";
-  return `${title}\n\n\`\`\`text\n${stringifyValue(result)}\n\`\`\``;
-}
+
+
+
 
 

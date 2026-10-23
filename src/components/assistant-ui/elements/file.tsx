@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, type FC } from "react";
+import { createElement, memo, type FC } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import {
   FileIcon,
@@ -122,15 +122,13 @@ function FileIconDisplay({
   children,
   ...props
 }: FileIconDisplayProps) {
-  const IconComponent = mimeType ? getMimeTypeIcon(mimeType) : FileIcon;
-
   return (
     <span
       data-slot="file-icon"
       className={cn("text-muted-foreground shrink-0", className)}
       {...props}
     >
-      {children ?? <IconComponent className="size-5" />}
+      {children ?? createElement(mimeType ? getMimeTypeIcon(mimeType) : FileIcon, { className: "size-5" })}
     </span>
   );
 }

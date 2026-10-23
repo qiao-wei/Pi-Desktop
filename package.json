@@ -9,6 +9,11 @@
     "dev:api": "node server/index.mjs",
     "build": "tsc -b && vite build",
     "test": "PI_DESKTOP_LOCALE=zh node scripts/run-tests.mjs",
+    "lint": "oxlint .",
+    "lint:config": "node scripts/architecture/lint-config.mjs",
+    "lint:config:check": "node scripts/architecture/lint-config.mjs --check",
+    "format": "oxfmt --write src server scripts tests src-electron",
+    "format:check": "oxfmt --check src server scripts tests src-electron",
     "test:serial": "PI_DESKTOP_LOCALE=zh node scripts/run-tests.mjs --pool=serial",
     "architecture:check": "node scripts/architecture/check.mjs",
     "typecheck:node": "tsc -p tsconfig.node-runtime.json",
@@ -40,7 +45,9 @@
     "pack:tauri:windows:slim": "node scripts/pack.mjs --host tauri --target windows --mode slim",
     "upstream:check": "node scripts/architecture/upstream-admission.mjs --check",
     "upstream:write": "node scripts/architecture/upstream-admission.mjs --write",
-    "architecture:why": "node scripts/architecture/why.mjs"
+    "architecture:why": "node scripts/architecture/why.mjs",
+    "e2e": "playwright test",
+    "e2e:report": "playwright show-report e2e/.report"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.17",
@@ -66,6 +73,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^24.1.0",
@@ -74,6 +82,8 @@
     "@vitejs/plugin-react": "^5.0.0",
     "electron": "^44.2.0",
     "electron-builder": "^26.15.3",
+    "oxfmt": "^0.74.0",
+    "oxlint": "^1.89.0",
     "tailwindcss": "^4.3.3",
     "tw-animate-css": "^1.4.0",
     "typescript": "^5.8.3",

@@ -7,7 +7,7 @@
  * 那个文件曾经 8.7k 行、棘轮不许它再长，所以按「一簇一文件」往外搬。
  */
 import { ATTACHMENT_CONTEXT_END, ATTACHMENT_CONTEXT_START } from "../src/shared/chatBubbles.ts";
-import { extname, join } from "node:path";
+import { extname } from "node:path";
 
 function appendAttachmentContext(input, displayInput, attachments, messageParts = []) {
   const hasCapabilityParts = messageParts.some((part) => part?.kind === "capability");
@@ -78,7 +78,8 @@ function inferAttachmentMimeType(path) {
 function sanitizeAttachmentName(name) {
   return name
     .normalize("NFKC")
-    .replace(/[\/\\:*?"<>|\u0000-\u001f]/g, "-")
+    // oxlint-disable-next-line no-control-regex -- 目的就是匹配控制字符（文件名清洗）
+    .replace(/[/\\:*?"<>|\u0000-\u001f]/g, "-")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120) || "attachment";

@@ -6,7 +6,6 @@ import {
   deriveSessionTitle,
   sessionTitleMaxChars,
   sessionTitleMaxChaseChars,
-  sessionTitleMaxWords,
   sessionTitleUnits,
 } from "../src/shared/sessionTitle.ts";
 
@@ -82,7 +81,10 @@ test("deriveSessionTitle drops attachment metadata and inline badge characters",
 });
 
 test("deriveSessionTitle falls back to the attachment name, then to empty", () => {
-  assert.equal(deriveSessionTitle({ text: "", attachments: [{ name: "screenshot.png" }] }), "screenshot.png");
+  assert.equal(
+    deriveSessionTitle({ text: "", attachments: [{ name: "screenshot.png" }] }),
+    "screenshot.png",
+  );
   assert.equal(
     deriveSessionTitle({
       text: `${ATTACHMENT_CONTEXT_START}{"displayInput":"","attachments":[{"name":"报告.pdf"}]}${ATTACHMENT_CONTEXT_END}`,
@@ -120,7 +122,9 @@ test("deriveSessionTitle pushes a cut forward to the next punctuation (capped)",
 
   // The only punctuation sits past the cap, so the title falls back to the
   // budget cut instead of growing to chase it.
-  const capped = deriveSessionTitle("实现多任务调度系统的完整方案并且支持并行开发处理流程化评估，还要断点续传");
+  const capped = deriveSessionTitle(
+    "实现多任务调度系统的完整方案并且支持并行开发处理流程化评估，还要断点续传",
+  );
   assert.equal(capped, "多任务调度系统的完整方案");
   assert.ok(sessionTitleUnits(capped) <= submitBudget, `should not chase past the cap: ${capped}`);
 });
@@ -160,7 +164,7 @@ test("client and server share one submit-time implementation", () => {
   // one, so the model-unavailable fallback shares the same rule.
   assert.ok(/function fallbackSessionTitle[\s\S]*?deriveSessionTitle\(/.test(server));
   // 退化到兜底标题时用的是同一条规则（这里多一个 userMessage 存在性判断，避免对 undefined 调 messageToText）。
-  assert.ok(server.includes("fallbackSessionTitle(userMessage ? messageToText(userMessage) : \"\")"));
+  assert.ok(server.includes('fallbackSessionTitle(userMessage ? messageToText(userMessage) : "")'));
 });
 
 test("the summary title is kept as written, never cut to fit", () => {
@@ -172,11 +176,14 @@ test("the summary title is kept as written, never cut to fit", () => {
   assert.ok(server.includes("英文标题不超过 ${sessionTitleMaxWords} 个词"));
 
   const normalize = /function normalizeGeneratedTitle\([\s\S]*?\n\}/.exec(server)?.[0] ?? "";
-  assert.ok(normalize.includes("function normalizeGeneratedTitle"), "normalizeGeneratedTitle not found");
+  assert.ok(
+    normalize.includes("function normalizeGeneratedTitle"),
+    "normalizeGeneratedTitle not found",
+  );
   assert.ok(!normalize.includes("truncateTitle"), "summary title is still truncated");
   assert.ok(!normalize.includes("firstSentence"), "summary title still loses its first sentence");
   assert.ok(!/\.slice\(/.test(normalize), "summary title is still sliced by length");
 
   // A truncated model title is exactly the bug from the screenshot.
-  assert.ok(!server.includes('truncateTitle(assistantContentText(response)'));
+  assert.ok(!server.includes("truncateTitle(assistantContentText(response)"));
 });

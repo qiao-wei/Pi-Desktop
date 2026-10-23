@@ -1,4 +1,4 @@
-import { invokeHost, invokeHostQuietly } from "./shell/host.ts";
+import { invokeHostQuietly } from "./shell/host.ts";
 
 import { hasShellBridge } from "./systemNotification.ts";
 

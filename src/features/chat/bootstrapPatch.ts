@@ -1,5 +1,5 @@
 import type { BootstrapResponse } from "../../lib/api";
-import type { ChatMessage, ChatSession, MessageProcessBlock, ProjectSessionSummary, ProjectSummary } from "../../types";
+import type { ChatMessage, ChatSession, ProjectSessionSummary, ProjectSummary } from "../../types";
 /* The block algebra moved to `shared/chatProcessBlocks.ts` so the server and the
  * stream projection can use it too; re-exported here for existing call sites. */
 export {
@@ -78,7 +78,7 @@ export type ContextUsagePatch = Pick<
  * a real answer: "not knowable right now", which is exactly what pi reports
  * straight after a compaction and which must not be swallowed.
  */
-export function useContextUsage(bootstrap: BootstrapResponse, usage: ContextUsagePatch): PatchResult {
+export function applyContextUsage(bootstrap: BootstrapResponse, usage: ContextUsagePatch): PatchResult {
   const stats = bootstrap.snapshot.stats;
   // A fresh object arrives per event, so compare it by value: keeping the old
   // identity is what stops every `message_end` from re-rendering the usage panel.

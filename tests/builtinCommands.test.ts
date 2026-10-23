@@ -20,7 +20,7 @@ import {
   planBuiltinCommand,
 } from "../server/builtinCommands.mjs";
 import { functionBody } from "./lib/sourceText.ts";
-import { bridgeSource } from "./lib/bridgeSource.ts";
+import { bridgeSource, routeBody } from "./lib/bridgeSource.ts";
 import { appSource } from "./lib/appSource.ts";
 
 const server = bridgeSource();
@@ -68,12 +68,11 @@ test("snapshot ships the built-in registry to the client", () => {
 
 test("the bridge exposes POST /api/builtin-command", () => {
   assert.match(server, /url\.pathname === "\/api\/builtin-command"/);
-  const route = server.slice(
-    server.indexOf('url.pathname === "/api/builtin-command"'),
-    server.indexOf('url.pathname === "/api/builtin-command"') + 220,
-  );
-  assert.match(route, /await readJson\(req\)/);
-  assert.match(route, /sendJson\(res, 200, await runBuiltinCommand\(body\)\)/);
+  // 分支体已抽成 handle_post_api_builtin_command(ctx)：按处理器函数取，而不是按标记切固定长度
+  // （见 tests/lib/bridgeSource.ts#routeBody）。`ctx.req`/`ctx.res` 就是原来回调里的 req/res。
+  const route = routeBody(server, 'url.pathname === "/api/builtin-command"');
+  assert.match(route, /await readJson\(ctx\.req\)/);
+  assert.match(route, /sendJson\(ctx\.res, 200, await runBuiltinCommand\(body\)\)/);
 });
 
 test("runBuiltinCommand: plans, refuses busy sessions, reloads the target runtime", () => {

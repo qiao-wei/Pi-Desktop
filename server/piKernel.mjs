@@ -43,6 +43,7 @@ import {
   SessionManager,
   withFileMutationQueue,
   initTheme,
+  stripFrontmatter,
 } from "@earendil-works/pi-coding-agent";
 import { matchesKey } from "@earendil-works/pi-tui";
 
@@ -64,6 +65,7 @@ export {
   SessionManager,
   withFileMutationQueue,
   initTheme,
+  stripFrontmatter,
   matchesKey,
 };
 

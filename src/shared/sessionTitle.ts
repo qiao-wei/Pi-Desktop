@@ -41,6 +41,7 @@ export interface SessionTitleInput {
 }
 
 const CJK_CHAR_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f\uac00-\ud7af]/u;
+// oxlint-disable-next-line no-control-regex -- 目的就是匹配控制字符/不可见字符（标题清洗）
 const HIDDEN_CHAR_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060\ufeff]/gu;
 const FENCED_CODE_RE = /```[^\n]*\n([\s\S]*?)```/gu;
 const IMAGE_RE = /!\[([^\]]*)\]\([^)]*\)/gu;
@@ -348,9 +349,7 @@ function truncateSessionTitle(text: string, maxUnits: number): string {
   return chars.slice(0, boundary).join("").trim();
 }
 
-function truncatePlain(text: string, maxChars: number): string {
-  return [...text].slice(0, maxChars).join("").trim();
-}
+
 
 function hasContent(text: string): boolean {
   return /[\p{L}\p{N}]/u.test(text);

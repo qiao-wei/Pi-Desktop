@@ -7,7 +7,8 @@
   "scanRoots": [
     "src",
     "server",
-    "src-electron"
+    "src-electron",
+    "e2e"
   ],
   "notes": [
     "Layer order is the enforcement direction: a module may only import modules in layers it lists in its layer's mayImport (plus its own layer). 'type' imports are exempt - they are erased at runtime and cannot create an init cycle.",
@@ -218,7 +219,8 @@
       "layer": "tooling",
       "roots": [
         "scripts",
-        "tests"
+        "tests",
+        "e2e"
       ],
       "owner": "@qiaowei",
       "bridgeSafe": false
@@ -232,6 +234,14 @@
     {
       "match": "**/*.test.tsx",
       "limit": 0
+    },
+    {
+      "match": "**/*.spec.ts",
+      "limit": 0
+    },
+    {
+      "match": "e2e/**",
+      "limit": 700
     },
     {
       "match": "src/i18n/zh.ts",
@@ -342,7 +352,7 @@
     {
       "rule": "max-lines",
       "file": "server/customModels.mjs",
-      "ceiling": 1081,
+      "ceiling": 1080,
       "owner": "@qiaowei",
       "deadline": "2026-12-31",
       "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
@@ -351,22 +361,6 @@
       "rule": "max-lines",
       "file": "server/gitInfo.mjs",
       "ceiling": 1177,
-      "owner": "@qiaowei",
-      "deadline": "2026-12-31",
-      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
-    },
-    {
-      "rule": "max-lines",
-      "file": "server/index.mjs",
-      "ceiling": 7930,
-      "owner": "@qiaowei",
-      "deadline": "2026-12-31",
-      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
-    },
-    {
-      "rule": "max-lines",
-      "file": "src/app/App.tsx",
-      "ceiling": 3366,
       "owner": "@qiaowei",
       "deadline": "2026-12-31",
       "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
@@ -406,7 +400,7 @@
     {
       "rule": "max-lines",
       "file": "src/features/chat/MessageEditBox.tsx",
-      "ceiling": 918,
+      "ceiling": 845,
       "owner": "@qiaowei",
       "deadline": "2026-12-31",
       "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
@@ -414,7 +408,7 @@
     {
       "rule": "max-lines",
       "file": "src/features/chat/usePiDesktopApp.ts",
-      "ceiling": 3006,
+      "ceiling": 2963,
       "owner": "@qiaowei",
       "deadline": "2026-12-31",
       "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
@@ -423,14 +417,6 @@
       "rule": "max-lines",
       "file": "src/features/models/AddModelsDialog.tsx",
       "ceiling": 834,
-      "owner": "@qiaowei",
-      "deadline": "2026-12-31",
-      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
-    },
-    {
-      "rule": "max-lines",
-      "file": "src/features/models/customModelForm.ts",
-      "ceiling": 716,
       "owner": "@qiaowei",
       "deadline": "2026-12-31",
       "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
@@ -453,24 +439,8 @@
     },
     {
       "rule": "max-lines",
-      "file": "src/i18n/en.ts",
-      "ceiling": 930,
-      "owner": "@qiaowei",
-      "deadline": "2026-12-31",
-      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
-    },
-    {
-      "rule": "max-lines",
-      "file": "src/i18n/zh.ts",
-      "ceiling": 935,
-      "owner": "@qiaowei",
-      "deadline": "2026-12-31",
-      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
-    },
-    {
-      "rule": "max-lines",
       "file": "src/shared/chatBubbles.ts",
-      "ceiling": 1165,
+      "ceiling": 1163,
       "owner": "@qiaowei",
       "deadline": "2026-12-31",
       "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
@@ -491,11 +461,12 @@
       "root": [
         "server",
         "scripts",
-        "src-electron"
+        "src-electron",
+        "e2e"
       ],
       "config": "tsconfig.node-runtime.json",
       "checked": true,
-      "why": "非渲染侧的运行时代码：桥（server/**）、宿主主进程与 preload（src-electron/**）、构建脚本（scripts/**）。checkJs + 棘轮（规则 node-typecheck）"
+      "why": "非渲染侧的运行时代码：桥（server/**）、宿主主进程与 preload（src-electron/**）、构建脚本（scripts/**）、e2e 夹具（e2e/**，只含 .mjs 那部分）。checkJs + 棘轮（规则 node-typecheck）"
     },
     {
       "id": "vite-config",

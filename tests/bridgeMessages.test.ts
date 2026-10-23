@@ -21,7 +21,6 @@ import {
   AMBIENT_FIELDS,
   AMBIENT_OPTIONAL_FIELDS,
   AMBIENT_REQUIRED_FIELDS,
-  BOOTSTRAP_FIELDS,
   BOOTSTRAP_OPTIONAL_FIELDS,
   BOOTSTRAP_REQUIRED_FIELDS,
   assertBridgePayload,
@@ -67,8 +66,14 @@ test("快照字段集与渲染进程声明的接口一致（两个方向都比�
     sorted(declared.optional.filter((field) => field !== "protocolVersion")),
     "BOOTSTRAP_OPTIONAL_FIELDS 与 BootstrapResponse 的可选字段必须一致",
   );
-  assert.ok(declared.optional.includes("protocolVersion"), "客户端侧 protocolVersion 是可选（靠校验抛错）");
-  assert.ok(BOOTSTRAP_REQUIRED_FIELDS.includes("protocolVersion"), "桥侧 protocolVersion 必须每次发送");
+  assert.ok(
+    declared.optional.includes("protocolVersion"),
+    "客户端侧 protocolVersion 是可选（靠校验抛错）",
+  );
+  assert.ok(
+    BOOTSTRAP_REQUIRED_FIELDS.includes("protocolVersion"),
+    "桥侧 protocolVersion 必须每次发送",
+  );
 });
 
 test("ambient 字段集与 AmbientBootstrap 接口一致", () => {
@@ -83,7 +88,11 @@ test("ambient 字段集与 AmbientBootstrap 接口一致", () => {
   );
   // ambient 的 protocolVersion 由 fetchJson 的类型交叉声明（不在接口体里），单独钉住。
   assert.ok(AMBIENT_FIELDS.includes("protocolVersion"), "ambient 必须声明协议版本字段");
-  assert.match(apiSource, /AmbientBootstrap & \{ protocolVersion\?: number \}/, "fetchAmbientBootstrap 必须校验版本");
+  assert.match(
+    apiSource,
+    /AmbientBootstrap & \{ protocolVersion\?: number \}/,
+    "fetchAmbientBootstrap 必须校验版本",
+  );
 });
 
 test("桥在两条快照出口都调用了报文自检（不调就没人检查）", () => {
@@ -94,7 +103,7 @@ test("桥在两条快照出口都调用了报文自检（不调就没人检查�
   );
   assert.match(
     bridgeSource,
-    /assertBridgePayload\(buildAmbientSnapshot\(runtime\), "ambient"\)/,
+    /assertBridgePayload\(buildAmbientSnapshot\(state\.runtime\), "ambient"\)/,
     "ambient 出口必须自检",
   );
   assert.match(
@@ -117,12 +126,24 @@ test("缺字段时点名，缺的是已声明字段时才报（未知字段不�
     "personalization",
     "protocolVersion",
   ]);
-  assert.deepEqual(missingBridgeFields({ ambient: true, canPrompt: true, projectTrusted: true, protocolVersion: 1 }, "ambient"), []);
+  assert.deepEqual(
+    missingBridgeFields(
+      { ambient: true, canPrompt: true, projectTrusted: true, protocolVersion: 1 },
+      "ambient",
+    ),
+    [],
+  );
   assert.deepEqual(missingBridgeFields(null, "ambient"), [...AMBIENT_REQUIRED_FIELDS]);
 });
 
 test("自检返回原对象（所以出口那句 sendJson 没法悄悄绕过检查）", () => {
-  const payload = { ambient: true, canPrompt: true, projectTrusted: true, protocolVersion: 1, extra: "kept" };
+  const payload = {
+    ambient: true,
+    canPrompt: true,
+    projectTrusted: true,
+    protocolVersion: 1,
+    extra: "kept",
+  };
   assert.equal(assertBridgePayload(payload, "ambient"), payload);
 });
 
@@ -137,7 +158,10 @@ test("自检失败只写警告，不抛（一个字段缺失不该让整个快�
     console.warn = originalWarn;
   }
   assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /ambient payload is missing required field\(s\): canPrompt, projectTrusted, protocolVersion/);
+  assert.match(
+    warnings[0],
+    /ambient payload is missing required field\(s\): canPrompt, projectTrusted, protocolVersion/,
+  );
 });
 
 test("可选字段的语义：缺席是「没设置」，不是缺字段", () => {
@@ -154,5 +178,9 @@ test("可选字段的语义：缺席是「没设置」，不是缺字段", () =>
     personalization: {},
     protocolVersion: 1,
   };
-  assert.deepEqual(missingBridgeFields(payload, "bootstrap"), [], "必填齐了就不该报，可选字段缺席是正常的");
+  assert.deepEqual(
+    missingBridgeFields(payload, "bootstrap"),
+    [],
+    "必填齐了就不该报，可选字段缺席是正常的",
+  );
 });

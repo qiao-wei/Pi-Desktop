@@ -11,6 +11,7 @@ code_refs:
   - scripts/architecture/lib/graph.mjs
 tags: [architecture, layers, boundaries]
 summary: "Pi Desktop 的分层模型、模块归属、依赖规则与债务登记；表格由 architecture/policy.json 生成，并与代码双向校验。"
+reviewers: ["@qiaowei"]
 ---
 
 # Pi Desktop 分层架构

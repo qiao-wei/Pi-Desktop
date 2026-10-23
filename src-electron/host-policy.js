@@ -37,7 +37,6 @@ function dialogStartingDirectory(defaultPath) {
     return undefined;
   }
 
-  const fs = require("node:fs");
   if (isDirectory(value)) {
     return value;
   }

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import { choosePollMode, pollDelayMs } from "../src/features/chat/pollMode.ts";
 import { applyAmbientBootstrap, isBootstrapForSession } from "../src/features/chat/ambientState.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
 /**
  * 流式进行中的对账轮询改造（pi：不轮询状态、只推）的回归用例。
@@ -130,7 +131,7 @@ test("接线：ambient 分支不走向全量 merge", () => {
 });
 
 test("接线：轻量视图两端都在", () => {
-  const server = readFileSync("server/index.mjs", "utf8");
+  const server = bridgeSource();
   const api = readFileSync("src/lib/api.ts", "utf8");
   const hook = readFileSync("src/features/chat/usePiDesktopApp.ts", "utf8");
 

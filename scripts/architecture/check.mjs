@@ -51,9 +51,43 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildGraph, externalSpecifiers, listSourceFiles, posix, relativeTo } from "./lib/graph.mjs";
+import {
+  buildGraph,
+  externalSpecifiers,
+  listSourceFiles,
+  posix,
+  relativeTo,
+} from "./lib/graph.mjs";
 import { renderDocRegions } from "./lib/render.mjs";
 import { checkProcessBoundaries } from "./lib/boundaries.mjs";
+import { matchGlob } from "./lib/glob.mjs";
+import { renderConfig as renderLintConfig } from "./lint-config.mjs";
+import {
+  bridgeAnswers,
+  extractBridgeRoutes,
+  extractClientPaths,
+  extractDeclaredEndpoints,
+  extractInvokeSites,
+  extractPreloadWhitelist,
+  extractProtocolVersion,
+  stripComments,
+  structuralMatch,
+} from "./lib/extractors.mjs";
+import { readRegion, writeRegion } from "./lib/regions.mjs";
+
+// 这些名字过去住在 check.mjs，测试与 land-docs 从那里取；搬走后仍从这里再导出，调用点不动。
+export { readRegion, writeRegion };
+export { matchGlob };
+export {
+  bridgeAnswers,
+  extractBridgeRoutes,
+  extractClientPaths,
+  extractDeclaredEndpoints,
+  extractInvokeSites,
+  extractPreloadWhitelist,
+  extractProtocolVersion,
+  structuralMatch,
+};
 import { PROTOCOL_SEAMS } from "../../src/shared/protocol/seams.ts";
 import {
   NODE_TYPECHECK_BASELINE,
@@ -71,26 +105,29 @@ export function loadPolicy(root = REPO_ROOT) {
   return JSON.parse(readFileSync(join(root, "architecture", "policy.json"), "utf8"));
 }
 
-/** Minimal glob: `**` spans directories, `*` stays inside a segment.
+/**
+ * 这个文件适用哪条 max-lines 上限。
  *
- *Minimal glob: `**` spans directories (including zero segments), `*` stays inside a segment. */
-export function matchGlob(pattern, file) {
-  return matchSegments(pattern.split("/"), file.split("/"));
-}
-
-/** One segment against one path segment: `*` matches inside the segment only. */
-function globSegmentMatches(patternSegment, pathSegment) {
-  if (!patternSegment.includes("*")) return patternSegment === pathSegment;
-  const escaped = patternSegment
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*/g, "[^/]*");
-  return new RegExp(`^${escaped}$`).test(pathSegment);
-}
-
+ * 多条都匹配时取**最具体**的那条（字面字符最多的模式），不是「最后一条」——
+ * 否则 `src/i18n/zh.ts: 1400` 会被后面的 `src/** : 700` 覆盖，专用条目变成死代码
+ * （2026-10-23 发现：i18n 的 1400 一直没生效，报告里显示的上限是 700）。
+ * 上限 0 表示「不受限」（测试文件就是这样豁免的）。
+ *
+ * @param {{ sizeRules: { match: string, limit: number }[] }} policy
+ * @param {string} file
+ * @returns {number}
+ */
 function sizeLimit(policy, file) {
   let limit = 0;
+  let specificity = -1;
   for (const rule of policy.sizeRules) {
-    if (matchGlob(rule.match, file)) limit = rule.limit;
+    if (!matchGlob(rule.match, file)) continue;
+    // 具体度 = 模式里非通配符字符的个数（`src/i18n/zh.ts` 14 > `src/**` 4）。
+    const literal = rule.match.replace(/[*?{[\]}()!+@]/g, "").length;
+    if (literal > specificity) {
+      specificity = literal;
+      limit = rule.limit;
+    }
   }
   return limit;
 }
@@ -108,7 +145,8 @@ function moduleForFile(policy, relativePath) {
             other.roots.some(
               (otherRoot) =>
                 posix(otherRoot).startsWith(`${normalized}/`) &&
-                (relativePath === posix(otherRoot) || relativePath.startsWith(`${posix(otherRoot)}/`)),
+                (relativePath === posix(otherRoot) ||
+                  relativePath.startsWith(`${posix(otherRoot)}/`)),
             ),
         );
         if (longer) continue;
@@ -134,161 +172,6 @@ export function mayImport(policy, fromLayerId, toLayerId) {
 // ---------------------------------------------------------------------------------------
 // sources of truth: bridge routes, client call sites, shell whitelist, protocol version
 // ---------------------------------------------------------------------------------------
-
-const METHOD_WINDOW = 160;
-
-/** Every route the bridge answers, with the methods it answers on. */
-export function extractBridgeRoutes(bridgeSource) {
-  const routes = new Map();
-  const add = (path, method) => {
-    if (!routes.has(path)) routes.set(path, new Set());
-    if (method) routes.get(path).add(method);
-  };
-
-  const exact = [
-    new RegExp(
-      `req\\.method\\s*===\\s*"([A-Z]+)"[\\s\\S]{0,${METHOD_WINDOW}}?url\\.pathname\\s*===\\s*"([^"]+)"`,
-      "g",
-    ),
-    new RegExp(
-      `url\\.pathname\\s*===\\s*"([^"]+)"[\\s\\S]{0,${METHOD_WINDOW}}?req\\.method\\s*===\\s*"([A-Z]+)"`,
-      "g",
-    ),
-  ];
-  for (const [index, regex] of exact.entries()) {
-    for (const match of bridgeSource.matchAll(regex)) {
-      if (index === 0) add(match[2], match[1]);
-      else add(match[1], match[2]);
-    }
-  }
-  for (const match of bridgeSource.matchAll(/url\.pathname\.startsWith\("([^"]+)"\)/g)) {
-    add(`${match[1].replace(/\/$/, "")}/**`, null);
-  }
-  for (const match of bridgeSource.matchAll(/url\.pathname\.endsWith\("([^"]+)"\)/g)) {
-    add(`**/${match[1].replace(/^\//, "")}`, null);
-  }
-  return routes;
-}
-
-const CLIENT_CALL = /(fetchJson|postJson|streamNdjson|fetchBootstrap|fetchAmbientBootstrap|reportDiagnostic)\s*(?:<[^>\n]*>)?\s*\(\s*(`[^`]*`|"[^"]*")/g;
-const API_LITERAL = /["'`](\/api\/[A-Za-z0-9/_:.-]*)/g;
-
-/**
- * Comments are not call sites. Without this, a JSDoc line that mentions a path (or an example
- * in a comment) lands in the frozen surface and pins a route nobody calls.
- */
-function stripComments(text) {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^[\t ]*\/\/.*$/gm, "")
-    .replace(/^[\t ]*\*.*$/gm, "");
-}
-
-/** Every `/api/...` path a renderer file names, with the helper it is called through. */
-export function extractClientPaths(files, root) {
-  const paths = new Map();
-  const record = (path, file, method) => {
-    const normalized = path.replace(/\$\{[^}]*\}/g, ":param").replace(/\?.*$/, "").replace(/\/$/, "");
-    if (!normalized.startsWith("/api/")) return;
-    if (normalized.includes("...")) return;
-    if (!paths.has(normalized)) paths.set(normalized, { methods: new Set(), callers: new Set() });
-    const entry = paths.get(normalized);
-    if (method) entry.methods.add(method);
-    entry.callers.add(relativeTo(root, file));
-  };
-
-  for (const file of files) {
-    const relative = relativeTo(root, file);
-    const text = stripComments(readFileSync(file, "utf8"));
-    for (const match of text.matchAll(CLIENT_CALL)) {
-      const helper = match[1];
-      const raw = match[2].slice(1, -1);
-      const method =
-        helper === "fetchJson" || helper === "fetchBootstrap" || helper === "fetchAmbientBootstrap"
-          ? "GET"
-          : "POST";
-      record(raw, file, method);
-    }
-    // The protocol module *declares* paths; it does not call them, so it is not a call site.
-    if (relative.startsWith("src/shared/protocol/")) continue;
-    for (const match of text.matchAll(API_LITERAL)) {
-      record(match[1], file, null);
-    }
-  }
-  return paths;
-}
-
-/** Declared core endpoints, read out of the protocol module (rule `protocol-core`). */
-export function extractDeclaredEndpoints(protocolSource) {
-  const body = protocolSource.match(/export const BRIDGE_ENDPOINTS = \{([\s\S]*?)\n\} as const/);
-  if (!body) return [];
-  return [...body[1].matchAll(/^\s{2}([A-Za-z]+):\s*\{([\s\S]*?)^\s{2}\},/gm)].map((match) => ({
-    id: match[1],
-    path: (match[2].match(/path:\s*"([^"]+)"/) ?? [])[1] ?? "",
-    method: (match[2].match(/method:\s*"([A-Z]+)"/) ?? [])[1] ?? "",
-    since: Number((match[2].match(/since:\s*(\d+)/) ?? [])[1] ?? 0),
-  }));
-}
-
-/**
- * Proper segment matching. A `**` segment consumes any number of segments, so a suffix pattern
- * only matches paths that end that way. Before this, a leading `**` short-circuited to `true`,
- * which made every route look implemented and silently emptied the `protocol-surface` rule.
- */
-function matchSegments(patternSegments, pathSegments) {
-  if (patternSegments.length === 0) return pathSegments.length === 0;
-  const [head, ...rest] = patternSegments;
-  if (head === "**") {
-    for (let index = 0; index <= pathSegments.length; index += 1) {
-      if (matchSegments(rest, pathSegments.slice(index))) return true;
-    }
-    return false;
-  }
-  if (pathSegments.length === 0) return false;
-  if (head !== ":param" && !globSegmentMatches(head, pathSegments[0])) return false;
-  return matchSegments(rest, pathSegments.slice(1));
-}
-
-export function structuralMatch(pattern, path) {
-  return matchSegments(
-    pattern.split("/").filter(Boolean),
-    path.replace(/\?.*$/, "").split("/").filter(Boolean),
-  );
-}
-
-/** Does the bridge answer this client path at all? */
-export function bridgeAnswers(routes, path) {
-  for (const [pattern] of routes) {
-    if (structuralMatch(pattern, path)) return true;
-  }
-  return false;
-}
-
-export function extractPreloadWhitelist(preloadSource) {
-  const match = preloadSource.match(/const HOST_COMMANDS = new Set\(\[([\s\S]*?)\]\)/);
-  if (!match) return null;
-  return [...match[1].matchAll(/"([^"]+)"/g)].map((entry) => entry[1]);
-}
-
-export function extractInvokeSites(files, root) {
-  const sites = [];
-  for (const file of files) {
-    const text = readFileSync(file, "utf8");
-    for (const match of text.matchAll(/\binvoke(?:Host)?\(\s*"([^"]+)"/g)) {
-      sites.push({ command: match[1], file: relativeTo(root, file) });
-    }
-  }
-  return sites;
-}
-
-export function extractProtocolVersion(versionSource, mirrorSource) {
-  const declared = versionSource.match(/PROTOCOL_VERSION\s*=\s*(\d+)/);
-  const mirrored = mirrorSource.match(/PROTOCOL_VERSION\s*=\s*(\d+)/);
-  return {
-    declared: declared ? Number(declared[1]) : null,
-    mirrored: mirrored ? Number(mirrored[1]) : null,
-  };
-}
 
 // ---------------------------------------------------------------------------------------
 // the check
@@ -451,7 +334,9 @@ export function runCheck(root = REPO_ROOT, policy = loadPolicy(root)) {
     ]) {
       if (!existsSync(join(root, path))) {
         violations.push(
-          violation("protocol-seam", `seam ${seam.id}: ${field} ${path} does not exist`, { file: path }),
+          violation("protocol-seam", `seam ${seam.id}: ${field} ${path} does not exist`, {
+            file: path,
+          }),
         );
       }
     }
@@ -509,7 +394,10 @@ export function runCheck(root = REPO_ROOT, policy = loadPolicy(root)) {
   for (const id of seamIds) {
     if (!policyProtocolIds.has(id)) {
       violations.push(
-        violation("protocol-seam", `seam ${id} is not declared in architecture/policy.json protocols`),
+        violation(
+          "protocol-seam",
+          `seam ${id} is not declared in architecture/policy.json protocols`,
+        ),
       );
     }
   }
@@ -539,9 +427,7 @@ export function runCheck(root = REPO_ROOT, policy = loadPolicy(root)) {
       const text = stripComments(readFileSync(join(root, file), "utf8"));
       const hits = [...text.matchAll(shape)];
       if (!hits.length) continue;
-      const locations = hits
-        .map((hit) => text.slice(0, hit.index).split("\n").length)
-        .join(",");
+      const locations = hits.map((hit) => text.slice(0, hit.index).split("\n").length).join(",");
       violations.push(
         violation(
           "no-bypass",
@@ -577,7 +463,11 @@ export function runCheck(root = REPO_ROOT, policy = loadPolicy(root)) {
     }
     if (!exception) {
       violations.push(
-        violation("max-lines", `${file} is ${lines} lines (limit ${limit})`, { file, lines, limit }),
+        violation("max-lines", `${file} is ${lines} lines (limit ${limit})`, {
+          file,
+          lines,
+          limit,
+        }),
       );
       continue;
     }
@@ -702,9 +592,13 @@ export function runCheck(root = REPO_ROOT, policy = loadPolicy(root)) {
     for (const command of preloadSet) {
       if (!declaredSet.has(command)) {
         violations.push(
-          violation("shell-commands", `preload allows "${command}" but the protocol does not declare it`, {
-            file: "src-electron/preload.js",
-          }),
+          violation(
+            "shell-commands",
+            `preload allows "${command}" but the protocol does not declare it`,
+            {
+              file: "src-electron/preload.js",
+            },
+          ),
         );
       }
     }
@@ -722,9 +616,13 @@ export function runCheck(root = REPO_ROOT, policy = loadPolicy(root)) {
     for (const site of extractInvokeSites(rendererFiles, root)) {
       if (!declaredSet.has(site.command)) {
         violations.push(
-          violation("shell-commands", `${site.file} invokes "${site.command}" which is not declared`, {
-            file: site.file,
-          }),
+          violation(
+            "shell-commands",
+            `${site.file} invokes "${site.command}" which is not declared`,
+            {
+              file: site.file,
+            },
+          ),
         );
       }
     }
@@ -836,39 +734,15 @@ export function runCheck(root = REPO_ROOT, policy = loadPolicy(root)) {
   };
 }
 
-export const REGION_OPEN = "<!-- architecture:begin ";
-export const REGION_CLOSE = "<!-- architecture:end ";
-
-export function readRegion(text, name) {
-  const open = `${REGION_OPEN}${name} -->`;
-  const close = `${REGION_CLOSE}${name} -->`;
-  const start = text.indexOf(open);
-  if (start === -1) return null;
-  const end = text.indexOf(close, start);
-  if (end === -1) return null;
-  return text.slice(start + open.length, end);
-}
-
-export function writeRegion(text, name, body) {
-  const open = `${REGION_OPEN}${name} -->`;
-  const close = `${REGION_CLOSE}${name} -->`;
-  const start = text.indexOf(open);
-  if (start === -1) return null;
-  const end = text.indexOf(close, start);
-  const next = `${open}\n${body.trim()}\n${close}`;
-  return text.slice(0, start) + next + text.slice(end + close.length);
-}
-
 function buildSurface(bridgeRoutes, clientPaths, previous) {
   const routes = {};
   const allPaths = new Set([...bridgeRoutes.keys(), ...clientPaths.keys()]);
   for (const path of allPaths) {
     if (path.includes("*") && !clientPaths.has(path)) continue;
     const callers = [...(clientPaths.get(path)?.callers ?? [])].sort();
-    const methods = [...new Set([
-      ...(clientPaths.get(path)?.methods ?? []),
-      ...(bridgeRoutes.get(path) ?? []),
-    ])].sort();
+    const methods = [
+      ...new Set([...(clientPaths.get(path)?.methods ?? []), ...(bridgeRoutes.get(path) ?? [])]),
+    ].sort();
     const transport = /\/prompt$/.test(path) || /\/diagnostic$/.test(path) ? "ndjson" : "json";
     routes[path] = {
       methods,
@@ -951,6 +825,9 @@ export function writeGenerated(result, policy = loadPolicy(REPO_ROOT)) {
     `${JSON.stringify(nextPolicy, null, 2)}\n`,
   );
 
+  // oxlint 的行数上限由同一份 policy 生成：棘轮收窄/删除例外之后立刻重算，两处不可能漂移。
+  writeFileSync(join(REPO_ROOT, ".oxlintrc.json"), renderLintConfig(nextPolicy));
+
   for (const [docPath, regions] of Object.entries(result.generated.docRegions)) {
     const absolute = join(REPO_ROOT, docPath);
     if (!existsSync(absolute)) continue;
@@ -1004,7 +881,10 @@ export function applyRatchet(root, policy) {
     }
   }
 
-  return { ...policy, exceptions: [...kept, ...[...next.values()].sort((a, b) => a.file.localeCompare(b.file))] };
+  return {
+    ...policy,
+    exceptions: [...kept, ...[...next.values()].sort((a, b) => a.file.localeCompare(b.file))],
+  };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -7,7 +7,7 @@
  * 兑付这个 nowrap；费用仍走 estimatedCostUsd != null 条件渲染。
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import test from "node:test";
 import { appSource } from "./lib/appSource.ts";
 
@@ -30,14 +30,21 @@ test("元信息单行硬约束：整块 whitespace-nowrap，token 与费用仍�
     "meta 块缺 whitespace-nowrap（单行硬约束）",
   );
   assert.match(body, /\{" · "\}/, "token 与费用之间应保留「·」分隔");
-  assert.match(body, /t\("usage\.usedOfWindow", \{ used: formatTokens\(stats\.contextTokens\), total: formatTokens\(stats\.contextWindow\) \}\)/);
+  assert.match(
+    body,
+    /t\("usage\.usedOfWindow", \{ used: formatTokens\(stats\.contextTokens\), total: formatTokens\(stats\.contextWindow\) \}\)/,
+  );
   assert.match(body, /t\("usage\.estimatedCost", \{ cost: formatCny\(estimatedCostUsd\) \}\)/);
 });
 
 test("弹层加宽到 380px（移动端 356px），给 nowrap 留出余量", () => {
   const body = usagePopoverBody();
   assert.match(body, /w-\[min\(380px,calc\(100vw-28px\)\)\]/, "弹层基础宽度应加宽到 380px");
-  assert.match(body, /max-\[560px\]:w-\[min\(356px,calc\(100vw-24px\)\)\]/, "移动端档应加宽到 356px");
+  assert.match(
+    body,
+    /max-\[560px\]:w-\[min\(356px,calc\(100vw-24px\)\)\]/,
+    "移动端档应加宽到 356px",
+  );
 });
 
 test("费用段只在有预计费用时渲染", () => {

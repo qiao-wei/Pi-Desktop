@@ -6,7 +6,7 @@
  * 从 `src/app/App.tsx` 搬出来的自包含一簇（只依赖 import 进来的东西，不碰模块状态）——
  * 大文件被 `max-lines` 棘轮冻着不许再长，所以按「一簇一文件」往外搬，调用点零改动。
  */
-import { setLocale, t } from "../i18n/index.ts";
+import { setLocale } from "../i18n/index.ts";
 import { useLocale, useT } from "../i18n/react";
 import { hasHostShell, invokeHostQuietly } from "../lib/shell/host.ts";
 import { Button } from "@/components/ui/button";

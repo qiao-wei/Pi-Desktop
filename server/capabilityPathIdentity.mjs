@@ -11,8 +11,8 @@
  * 只对「存在的东西」解析软链；不存在（还没建的目录、被删掉的 worktree）退回 `resolve()`，
  * 保证纯函数、不抛错。这样调用方不用先 existsSync。
  */
-import { realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 /**
  * 真实路径；路径不存在时解析「最深的已存在祖先」再把剩余段接回去（不是简单退回 resolve）。
@@ -106,11 +106,16 @@ export function isSkillPathUnderRoots(filePath, roots) {
  * （worktree 会话里 `<worktree>/.pi` 软链 → 归 `project`）。
  */
 export function skillSourceForPath(filePath, roots = {}) {
+  // 一个来源可能对应**多个**根（项目的 `.agents/skills` 从 cwd 一路向上都有），所以值可以是数组。
   const entries = [
     ["builtin", roots.builtin],
     ["piAgent", roots.piAgent],
     ["agents", roots.agents],
-  ].filter((entry) => Boolean(entry[1]));
+    ["projectAgents", roots.projectAgents],
+  ].flatMap(([source, value]) => {
+    const list = Array.isArray(value) ? value : [value];
+    return list.filter(Boolean).map((root) => [source, root]);
+  });
   // 第一遍只看字面路径：pi 报哪一侧就归哪一侧，分类和删除守卫（也按字面路径）永远一致。
   const literal = resolve(String(filePath ?? "").trim() || ".");
   for (const [source, root] of entries) {
@@ -137,5 +142,80 @@ export function skillSourceForPath(filePath, roots = {}) {
  * 从这一个客户端删会把别人的入口一起删掉。只有 `piAgent` 与 `project` 可删。
  */
 export function isReadOnlySkillSource(source) {
-  return source === "builtin" || source === "agents";
+  return source === "builtin" || source === "agents" || source === "projectAgents";
+}
+
+/**
+ * 一个路径是否住在任何 `.agents/skills` 里（用户的 `~/.agents/skills`，或项目里任意一层
+ * 的 `<dir>/.agents/skills`）。
+ *
+ * 只看字面路径、不解析软链：`~/.pi/agent/skills/x -> ~/.agents/skills/x` 那种软链的两个侧面
+ * 身份不同（删软链侧只删软链），正是能力页依赖的语义。
+ *
+ * 用途是「跨客户端技能一律只读」的守卫：`.agents/skills` 是 Agent Skills 的共享目录，Codex /
+ * Gemini / 百炼都从同一份目录读技能，从这一个客户端删会把别人的入口一起删掉。
+ */
+export function isCrossClientSkillPath(filePath) {
+  const parts = resolve(String(filePath ?? "").trim() || ".").split(sep);
+  return parts.some((part, index) => part === ".agents" && parts[index + 1] === "skills");
+}
+
+/**
+ * 项目里的 `.agents/skills` 根列表：从 `cwd` 一路向上到 git 仓库根（有仓库时）或文件系统根。
+ *
+ * 与 pi 的 `collectAncestorAgentsSkillDirs`（`dist/core/package-manager.js`）同规则，只是把
+ * **用户那份** `~/.agents/skills` 排除掉（pi 也排除：那份已经作为用户级 "agents" 来源单独收）。
+ * pi 只在项目已信任时才用这些根加载技能，所以这里的列表只用来认身份 / 认来源，不是加载清单。
+ */
+export function projectAgentsSkillRoots(cwd, homeDir = "") {
+  const userAgentsSkillsDir = homeDir ? resolve(homeDir, ".agents", "skills") : "";
+  const start = resolve(String(cwd ?? "").trim() || ".");
+  const gitRepoRoot = findGitRepoRoot(start);
+  const roots = [];
+  let dir = start;
+  for (;;) {
+    const candidate = join(dir, ".agents", "skills");
+    if (candidate !== userAgentsSkillsDir) {
+      roots.push(candidate);
+    }
+    if (gitRepoRoot && dir === gitRepoRoot) {
+      break;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    dir = parent;
+  }
+  return roots;
+}
+
+function findGitRepoRoot(startDir) {
+  let dir = resolve(startDir);
+  for (;;) {
+    if (existsSync(join(dir, ".git"))) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      return "";
+    }
+    dir = parent;
+  }
+}
+
+/**
+ * 一个技能落盘后，删除/覆盖它真正要动的那条路径。
+ *
+ * 技能有两种形态，能力页把它们一视同仁地列出来：
+ * - **目录技能**：`<root>/<name>/SKILL.md` → 目标是那个技能目录；
+ * - **独立 markdown 技能**：pi 的 `loadSkillsFromDir` 从技能根目录直接收 `*.md`
+ *   （`includeRootFiles`），此时目标是那个文件本身。
+ *
+ * 所以不能统一取 `dirname(filePath)`：独立 md 技能算出来的目标是**整个 skills 根目录**，
+ * 删一个技能会把用户所有技能一起 `rm -rf`（`~/.pi/agent/skills` 下还全是指向别处的软链）。
+ */
+export function skillPathTarget(filePath) {
+  const resolved = resolve(String(filePath ?? "").trim() || ".");
+  return basename(resolved) === "SKILL.md" ? dirname(resolved) : resolved;
 }

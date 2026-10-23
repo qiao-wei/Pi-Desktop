@@ -13,6 +13,7 @@ code_refs:
   - tests/architecture.test.ts
 tags: [architecture, governance, debt]
 summary: "架构债务登记成带 deadline 与只降不升 ceiling 的例外；超上限必须拆文件，到期未处理即失败。"
+reviewers: ["@qiaowei"]
 ---
 
 # ADR-003：债务棘轮与例外政策

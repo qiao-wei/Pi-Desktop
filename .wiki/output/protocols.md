@@ -15,6 +15,7 @@ code_refs:
   - server/sqlite.mjs
 tags: [architecture, protocol, boundaries]
 summary: "Pi Desktop 七条边界（bridge / shell / kernel-adapter / sqlite storage / perf / local-store / locale）的契约、版本策略与换实现步骤，以及每条边界的可替换性证据。"
+reviewers: ["@qiaowei"]
 ---
 
 # 边界协议

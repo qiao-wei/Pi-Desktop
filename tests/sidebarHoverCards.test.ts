@@ -12,7 +12,10 @@ import { appSource as readAppSource } from "./lib/appSource.ts";
 
 const appSourceText = readAppSource();
 const stylesSource = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");
-const autoHideSource = readFileSync(new URL("../src/components/AutoHideScroll.tsx", import.meta.url), "utf8");
+const autoHideSource = readFileSync(
+  new URL("../src/components/AutoHideScroll.tsx", import.meta.url),
+  "utf8",
+);
 
 /** Source of a top-level `function name(...) { ... }`, delimited at the next flush-left brace. */
 function topLevelFunctionSource(name: string): string {
@@ -26,8 +29,16 @@ function topLevelFunctionSource(name: string): string {
 test("the sidebar scroll region hides the native bar and dismisses cards while scrolling", () => {
   const sidebar = topLevelFunctionSource("ProjectSidebar");
 
-  assert.match(sidebar, /<AutoHideScroll[^>]*className="flex-1"[^>]*onScroll=\{hideHoverCard\}/, "sidebar must use the overlay scroll container");
-  assert.match(sidebar, /<\/AutoHideScroll>/, "the sidebar list must be inside the overlay scroll container");
+  assert.match(
+    sidebar,
+    /<AutoHideScroll[^>]*className="flex-1"[^>]*onScroll=\{hideHoverCard\}/,
+    "sidebar must use the overlay scroll container",
+  );
+  assert.match(
+    sidebar,
+    /<\/AutoHideScroll>/,
+    "the sidebar list must be inside the overlay scroll container",
+  );
 });
 
 test("acting on a row closes its preview immediately", () => {
@@ -42,7 +53,11 @@ test("acting on a row closes its preview immediately", () => {
   assert.notEqual(listEnd, -1, "the sidebar list scroll container is not closed");
   const list = sidebar.slice(listStart, listEnd);
 
-  assert.match(list, /onPointerDownCapture=\{hideHoverCard\}/, "pointerdown on a row must dismiss the preview");
+  assert.match(
+    list,
+    /onPointerDownCapture=\{hideHoverCard\}/,
+    "pointerdown on a row must dismiss the preview",
+  );
   // The capture must not sit on the aside: the project card is interactive and lives outside
   // this block, so clicking its pin / Edit project would otherwise dismiss it mid-interaction.
   assert.doesNotMatch(sidebar.slice(listEnd), /onPointerDownCapture=\{hideHoverCard\}/);
@@ -53,7 +68,10 @@ test("hovering a project row or a session row opens the matching preview", () =>
 
   // Project rows: the wrapper (not the button) is hovered, because the card is anchored
   // to the whole row and leaving it has a grace period.
-  assert.match(sidebar, /onMouseEnter=\{\(event\) => showProjectCard\(event\.currentTarget, project\)\}/);
+  assert.match(
+    sidebar,
+    /onMouseEnter=\{\(event\) => showProjectCard\(event\.currentTarget, project\)\}/,
+  );
   assert.match(sidebar, /onMouseLeave=\{scheduleHideHoverCard\}/);
 
   // Both session lists (Pinned and per-project) must opt into the preview.
@@ -69,7 +87,10 @@ test("hovering a project row or a session row opens the matching preview", () =>
   );
 
   const sessionRow = topLevelFunctionSource("SidebarSessionRow");
-  assert.match(sessionRow, /onMouseEnter=\{\(event\) => onHoverSession\(event\.currentTarget, session, projectName \?\? ""\)\}/);
+  assert.match(
+    sessionRow,
+    /onMouseEnter=\{\(event\) => onHoverSession\(event\.currentTarget, session, projectName \?\? ""\)\}/,
+  );
   assert.match(sessionRow, /onMouseLeave=\{onHoverEnd\}/);
 });
 
@@ -77,7 +98,11 @@ test("cards use the shared placement helper and are positioned fixed", () => {
   const sidebar = topLevelFunctionSource("ProjectSidebar");
 
   assert.match(sidebar, /placeSidebarHoverCard\(/, "cards must reuse the tested placement helper");
-  assert.match(sidebar, /style=\{\{ left: hoverCard\.x, top: hoverCard\.y \}\}/, "cards must be placed from the computed state");
+  assert.match(
+    sidebar,
+    /style=\{\{ left: hoverCard\.x, top: hoverCard\.y \}\}/,
+    "cards must be placed from the computed state",
+  );
   // The card sits outside the scrolling list, so it cannot be clipped by it.
   assert.match(sidebar, /"fixed z-\[60\]/, "the hover card must be position:fixed");
 });
@@ -85,9 +110,16 @@ test("cards use the shared placement helper and are positioned fixed", () => {
 test("the project card can be hovered, the session card cannot", () => {
   const sidebar = topLevelFunctionSource("ProjectSidebar");
 
-  assert.match(sidebar, /onMouseEnter=\{\(\) => window\.clearTimeout\(hoverHideTimerRef\.current\)\}/);
+  assert.match(
+    sidebar,
+    /onMouseEnter=\{\(\) => window\.clearTimeout\(hoverHideTimerRef\.current\)\}/,
+  );
   assert.match(sidebar, /onMouseLeave=\{scheduleHideHoverCard\}/);
-  assert.match(sidebar, /pointer-events-none w-\[258px\]/, "the session card must not swallow the pointer");
+  assert.match(
+    sidebar,
+    /pointer-events-none w-\[258px\]/,
+    "the session card must not swallow the pointer",
+  );
 });
 
 test("the pointer can cross the gap onto the card without the card unmounting", () => {
@@ -102,8 +134,16 @@ test("the pointer can cross the gap onto the card without the card unmounting", 
     /onMouseLeave=\{hideHoverCard\}/,
     "leaving the sidebar while crossing onto a card must not kill the card instantly",
   );
-  assert.match(sidebar, /pointerKeepsSidebarCardOpen\(/, "card retention must use the tested geometry helper");
-  assert.match(sidebar, /hoverAnchorRef\.current = element;/, "the row that opened the card has to be remembered");
+  assert.match(
+    sidebar,
+    /pointerKeepsSidebarCardOpen\(/,
+    "card retention must use the tested geometry helper",
+  );
+  assert.match(
+    sidebar,
+    /hoverAnchorRef\.current = element;/,
+    "the row that opened the card has to be remembered",
+  );
   assert.match(sidebar, /ref=\{hoverCardRef\}/, "the open card has to be measurable");
   assert.match(
     sidebar,
@@ -141,7 +181,11 @@ test("the project card's folder path opens the folder", () => {
   const pathButton = card.slice(card.indexOf("<button"), card.indexOf("No folder"));
 
   assert.match(pathButton, /<button/, "the path must be clickable, not a plain row");
-  assert.match(pathButton, /title=\{hoverCard\.project\.cwd\}/, "the button still shows the full path on hover");
+  assert.match(
+    pathButton,
+    /title=\{hoverCard\.project\.cwd\}/,
+    "the button still shows the full path on hover",
+  );
   // Clicking navigates away from the card, so it has to close first (same as Edit project) —
   // leaving the card open over the revealed folder is exactly the stuck-card bug.
   assert.match(
@@ -156,7 +200,10 @@ test("the project card's folder path opens the folder", () => {
   // Reveal is a bridge-side action (`open` / `explorer.exe`), not a Tauri-only one: the
   // sidebar menu must not gate it behind `isTauriRuntime`, which is false on Electron and web.
   assert.doesNotMatch(sidebar, /showReveal/);
-  assert.match(sidebar, /<DropdownMenuItem onSelect=\{\(\) => void onRevealProject\(project\.id\)\}>/);
+  assert.match(
+    sidebar,
+    /<DropdownMenuItem onSelect=\{\(\) => void onRevealProject\(project\.id\)\}>/,
+  );
 });
 
 test("project pin actions are hidden behind the feature flag", () => {
@@ -168,7 +215,7 @@ test("project pin actions are hidden behind the feature flag", () => {
   assert.equal(
     [...sidebar.matchAll(/projectPinActionsVisible \? \(/g)].length,
     2,
-    "the \"…\" menu item and the project hover-card button must both be guarded",
+    'the "…" menu item and the project hover-card button must both be guarded',
   );
   assert.equal(
     [...sidebar.matchAll(/onPinProject\(/g)].length,
@@ -181,11 +228,15 @@ test("the overlay thumb fades in while scrolling and out after it stops", () => 
   assert.match(autoHideSource, /thumb\.classList\.add\("is-visible"\)/);
   assert.match(autoHideSource, /thumb\.classList\.remove\("is-visible"\)/);
   assert.match(autoHideSource, /window\.setTimeout\(/, "the thumb must fade out on a timer");
-  assert.match(autoHideSource, /new ResizeObserver/, "the thumb must repaint when the list resizes");
+  assert.match(
+    autoHideSource,
+    /new ResizeObserver/,
+    "the thumb must repaint when the list resizes",
+  );
 
   // Chrome does not reliably repaint a class-toggled ::-webkit-scrollbar, so the native
   // bar has to be gone entirely and the thumb drawn as an overlay.
-  assert.match(stylesSource, /\.autohide-box::\-webkit-scrollbar\s*\{[^}]*width: 0;/);
+  assert.match(stylesSource, /\.autohide-box::-webkit-scrollbar\s*\{[^}]*width: 0;/);
   assert.match(stylesSource, /\.autohide-box\s*\{[^}]*scrollbar-width: none;/);
   assert.match(stylesSource, /\.autohide-thumb\s*\{[^}]*opacity: 0;/);
   assert.match(stylesSource, /\.autohide-thumb\.is-visible\s*\{[^}]*opacity: 1;/);

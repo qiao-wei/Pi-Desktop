@@ -14,7 +14,7 @@ import {
   touchConversation,
   upsertLiveToolBlock,
   upsertToolProcessBlock,
-  useContextUsage,
+  applyContextUsage,
   promoteSessionRow,
   withStats,
 } from "../src/features/chat/bootstrapPatch.ts";
@@ -66,7 +66,13 @@ type Bootstrap = {
   activeSessionPath: string;
   snapshot: {
     conversation: { sessionFile: string; updatedAt: number; messages: Message[] };
-    stats: { messageCount: number; assistantMessageCount: number; userMessageCount: number; turnCount: number; lastMessageAt?: number };
+    stats: {
+      messageCount: number;
+      assistantMessageCount: number;
+      userMessageCount: number;
+      turnCount: number;
+      lastMessageAt?: number;
+    };
   };
   projects: { id: string; sessions: { path: string }[] }[];
 };
@@ -103,7 +109,12 @@ function makeBootstrap(messageCount: number): Bootstrap {
     activeSessionPath: "/tmp/session.jsonl",
     snapshot: {
       conversation: { sessionFile: "/tmp/session.jsonl", updatedAt: 1000, messages },
-      stats: { messageCount: messageCount, assistantMessageCount: messageCount / 2, userMessageCount: messageCount / 2, turnCount: messageCount / 2 },
+      stats: {
+        messageCount: messageCount,
+        assistantMessageCount: messageCount / 2,
+        userMessageCount: messageCount / 2,
+        turnCount: messageCount / 2,
+      },
     },
     projects: [{ id: "p1", sessions: [{ path: "/tmp/session.jsonl" }] }],
   };
@@ -115,7 +126,12 @@ function clone<T>(value: T): T {
 
 /* Reference implementation: exactly what the old reducer did, minus the churn. */
 
-function referenceDelta(bootstrap: Bootstrap, messageId: string, delta: string, now: number): Bootstrap {
+function referenceDelta(
+  bootstrap: Bootstrap,
+  messageId: string,
+  delta: string,
+  now: number,
+): Bootstrap {
   const next = clone(bootstrap);
   const target = next.snapshot.conversation.messages.find((message) => message.id === messageId);
   if (!target || target.role !== "assistant") {
@@ -168,13 +184,17 @@ function referenceThinking(bootstrap: Bootstrap, messageId: string, thinking: st
 
 function referenceToolUpsert(bootstrap: Bootstrap, block: ToolBlock): Bootstrap {
   const next = clone(bootstrap);
-  const target = next.snapshot.conversation.messages[next.snapshot.conversation.messages.length - 1];
+  const target =
+    next.snapshot.conversation.messages[next.snapshot.conversation.messages.length - 1];
   if (!target || target.role !== "assistant") {
     return bootstrap;
   }
   const blocks: AnyBlock[] = (target.processBlocks ?? []).slice();
   const index = blocks.findIndex(
-    (item) => item.kind === "tool" && (item.toolCallId === block.toolCallId || (item.toolStreamId && item.toolStreamId === block.toolStreamId)),
+    (item) =>
+      item.kind === "tool" &&
+      (item.toolCallId === block.toolCallId ||
+        (item.toolStreamId && item.toolStreamId === block.toolStreamId)),
   );
   if (index < 0) {
     blocks.push(block);
@@ -203,7 +223,17 @@ test("append-assistant-delta matches the old clone-and-mutate result", () => {
       ...bootstrap.snapshot,
       conversation: {
         ...bootstrap.snapshot.conversation,
-        messages: [...bootstrap.snapshot.conversation.messages, { id: "live", role: "assistant", kind: "text", content: "", createdAt: 2000, status: "streaming" }],
+        messages: [
+          ...bootstrap.snapshot.conversation.messages,
+          {
+            id: "live",
+            role: "assistant",
+            kind: "text",
+            content: "",
+            createdAt: 2000,
+            status: "streaming",
+          },
+        ],
       },
     },
   };
@@ -221,7 +251,13 @@ test("append-assistant-delta matches the old clone-and-mutate result", () => {
   }
 
   assert.deepEqual(
-    { ...shared, snapshot: { ...shared.snapshot, conversation: { ...shared.snapshot.conversation, updatedAt: 5000 } } },
+    {
+      ...shared,
+      snapshot: {
+        ...shared.snapshot,
+        conversation: { ...shared.snapshot.conversation, updatedAt: 5000 },
+      },
+    },
     legacy,
     "streamed content and live blocks must be identical to the previous behaviour",
   );
@@ -232,7 +268,10 @@ test("only the touched message changes identity during a streamed turn", () => {
   const before = bootstrap.snapshot.conversation.messages;
   let next = bootstrap;
   for (let token = 0; token < 50; token += 1) {
-    next = patchMessage(next, "msg-59", (message) => ({ ...message, content: `${message.content}.${token}` })).bootstrap;
+    next = patchMessage(next, "msg-59", (message) => ({
+      ...message,
+      content: `${message.content}.${token}`,
+    })).bootstrap;
   }
   const after = next.snapshot.conversation.messages;
 
@@ -246,36 +285,69 @@ test("only the touched message changes identity during a streamed turn", () => {
 
 test("cumulative thinking payloads are a no-op when unchanged", () => {
   const blocks: any[] = [{ kind: "thinking", text: "planning the answer" }];
-  const again = mergeAssistantProcessBlocks(blocks, [{ kind: "thinking", text: "planning the answer" }] as any);
+  const again = mergeAssistantProcessBlocks(blocks, [
+    { kind: "thinking", text: "planning the answer" },
+  ] as any);
   assert.equal(again, blocks, "an identical cumulative payload must not allocate");
 
-  const grown = mergeAssistantProcessBlocks(blocks, [{ kind: "thinking", text: "planning the answer, in more detail" }] as any);
+  const grown = mergeAssistantProcessBlocks(blocks, [
+    { kind: "thinking", text: "planning the answer, in more detail" },
+  ] as any);
   assert.notEqual(grown, blocks);
   assert.equal(grown.length, 1);
   assert.equal((grown[0] as Block).text, "planning the answer, in more detail");
 
-  const shorter = mergeAssistantProcessBlocks(grown, [{ kind: "thinking", text: "planning" }] as any);
+  const shorter = mergeAssistantProcessBlocks(grown, [
+    { kind: "thinking", text: "planning" },
+  ] as any);
   assert.equal(shorter, grown, "a prefix of what we already have must not rewrite the block");
 });
 
 test("merging keeps untouched tool blocks referentially stable", () => {
-  const tool: ToolBlock = { kind: "tool", toolCallId: "c1", toolName: "bash", callText: "{\"a\":1}", resultText: "ok", status: "done" };
+  const tool: ToolBlock = {
+    kind: "tool",
+    toolCallId: "c1",
+    toolName: "bash",
+    callText: '{"a":1}',
+    resultText: "ok",
+    status: "done",
+  };
   const thinking: Block = { kind: "thinking", text: "step one" };
   const blocks = [thinking, tool] as any[];
 
-  const merged = mergeAssistantProcessBlocks(blocks, [{ kind: "thinking", text: "step one and step two" }] as any);
+  const merged = mergeAssistantProcessBlocks(blocks, [
+    { kind: "thinking", text: "step one and step two" },
+  ] as any);
   assert.notEqual(merged[0], thinking, "the changed thinking block gets a new object");
   assert.equal(merged[1], tool, "the untouched tool block keeps its identity");
 });
 
 test("upsertToolProcessBlock matches by toolCallId and by toolStreamId", () => {
-  const first: ToolBlock = { kind: "tool", toolCallId: "call-1", toolStreamId: "s1", toolName: "bash", callText: "{\"partial\":1}", status: "streaming" };
-  let blocks = upsertToolProcessBlock([first] as any, { ...first, callText: "{\"partial\":12}" } as any) as any as ToolBlock[];
+  const first: ToolBlock = {
+    kind: "tool",
+    toolCallId: "call-1",
+    toolStreamId: "s1",
+    toolName: "bash",
+    callText: '{"partial":1}',
+    status: "streaming",
+  };
+  let blocks = upsertToolProcessBlock(
+    [first] as any,
+    { ...first, callText: '{"partial":12}' } as any,
+  ) as any as ToolBlock[];
   assert.equal(blocks.length, 1);
-  assert.equal(blocks[0].callText, "{\"partial\":12}");
+  assert.equal(blocks[0].callText, '{"partial":12}');
 
   // Same stream id, freshly resolved call id -> still one block, ids merged.
-  blocks = upsertToolProcessBlock(blocks, { kind: "tool", toolCallId: "call-1", toolStreamId: "s1", toolName: "bash", callText: "", resultText: "done", status: "done" } as any) as any as ToolBlock[];
+  blocks = upsertToolProcessBlock(blocks, {
+    kind: "tool",
+    toolCallId: "call-1",
+    toolStreamId: "s1",
+    toolName: "bash",
+    callText: "",
+    resultText: "done",
+    status: "done",
+  } as any) as any as ToolBlock[];
   assert.equal(blocks.length, 1);
   assert.equal(blocks[0].resultText, "done");
   assert.equal(blocks[0].status, "done");
@@ -283,13 +355,24 @@ test("upsertToolProcessBlock matches by toolCallId and by toolStreamId", () => {
   const untouched = upsertToolProcessBlock(blocks, blocks[0] as any) as any as ToolBlock[];
   assert.equal(untouched, blocks, "an identical upsert must return the same array");
 
-  const appended = upsertToolProcessBlock(blocks, { kind: "tool", toolCallId: "call-2", toolName: "read", callText: "{}" } as any) as any as ToolBlock[];
+  const appended = upsertToolProcessBlock(blocks, {
+    kind: "tool",
+    toolCallId: "call-2",
+    toolName: "read",
+    callText: "{}",
+  } as any) as any as ToolBlock[];
   assert.equal(appended.length, 2);
   assert.equal(appended[0], blocks[0]);
 });
 
 test("live blocks only replace the tail text block", () => {
-  const tool: ToolBlock = { kind: "tool", toolCallId: "c1", toolName: "bash", callText: "{}", status: "streaming" };
+  const tool: ToolBlock = {
+    kind: "tool",
+    toolCallId: "c1",
+    toolName: "bash",
+    callText: "{}",
+    status: "streaming",
+  };
   const blocks = [tool, { kind: "text", text: "he" }] as any[];
   const next = appendLiveTextBlock(blocks as never, "llo") as never as AnyBlock[];
 
@@ -298,19 +381,38 @@ test("live blocks only replace the tail text block", () => {
   assert.equal((next[1] as Block).text, "hello");
   const empty = appendLiveTextBlock(blocks as never, "") as never as AnyBlock[];
   assert.equal(empty.length, blocks.length, "an empty delta must not add a block");
-  assert.ok(empty.every((block, index) => block === blocks[index]), "an empty delta must not copy blocks");
+  assert.ok(
+    empty.every((block, index) => block === blocks[index]),
+    "an empty delta must not copy blocks",
+  );
 });
 
 test("mergeLiveProcessBlocks folds thinking without copying tools", () => {
-  const tool: ToolBlock = { kind: "tool", toolCallId: "c1", toolName: "bash", callText: "{}", status: "streaming" };
+  const tool: ToolBlock = {
+    kind: "tool",
+    toolCallId: "c1",
+    toolName: "bash",
+    callText: "{}",
+    status: "streaming",
+  };
   const blocks = [tool] as any[];
-  const merged = mergeLiveProcessBlocks(blocks as never, [{ kind: "thinking", text: "reasoning" }] as any) as never as AnyBlock[];
+  const merged = mergeLiveProcessBlocks(
+    blocks as never,
+    [{ kind: "thinking", text: "reasoning" }] as any,
+  ) as never as AnyBlock[];
   assert.equal(merged.length, 2);
   assert.equal(merged[0], tool);
 
-  const toolAgain = upsertLiveToolBlock(merged as never, { ...tool, callText: "{\"x\":1}" } as any) as never as ToolBlock[];
-  assert.equal(toolAgain[0].callText, "{\"x\":1}");
-  assert.equal(upsertLiveToolBlock(toolAgain as never, toolAgain[0] as any), toolAgain, "unchanged upsert must be identity preserving");
+  const toolAgain = upsertLiveToolBlock(
+    merged as never,
+    { ...tool, callText: '{"x":1}' } as any,
+  ) as never as ToolBlock[];
+  assert.equal(toolAgain[0].callText, '{"x":1}');
+  assert.equal(
+    upsertLiveToolBlock(toolAgain as never, toolAgain[0] as any),
+    toolAgain,
+    "unchanged upsert must be identity preserving",
+  );
 });
 
 test("finish-session-streaming-messages only touches streaming assistants", () => {
@@ -323,14 +425,23 @@ test("finish-session-streaming-messages only touches streaming assistants", () =
         ...bootstrap.snapshot.conversation,
         messages: [
           ...bootstrap.snapshot.conversation.messages,
-          { id: "live", role: "assistant", kind: "text", content: "", createdAt: 3000, status: "streaming" },
+          {
+            id: "live",
+            role: "assistant",
+            kind: "text",
+            content: "",
+            createdAt: 3000,
+            status: "streaming",
+          },
         ],
       },
     },
   };
 
   const result = patchMessages(withLive, (message) =>
-    message.role === "assistant" && message.status === "streaming" ? { ...message, status: "done" } : message,
+    message.role === "assistant" && message.status === "streaming"
+      ? { ...message, status: "done" }
+      : message,
   );
   assert.equal(result.changed, true);
   const messages = result.bootstrap.snapshot.conversation.messages;
@@ -338,34 +449,55 @@ test("finish-session-streaming-messages only touches streaming assistants", () =
   assert.equal(messages[1], withLive.snapshot.conversation.messages[1]);
 
   const nothing = patchMessages(result.bootstrap, (message) =>
-    message.role === "assistant" && message.status === "streaming" ? { ...message, status: "done" } : message,
+    message.role === "assistant" && message.status === "streaming"
+      ? { ...message, status: "done" }
+      : message,
   );
   assert.equal(nothing.changed, false, "a second finish pass must not churn the state");
 });
 
 test("structural helpers report no change for missing targets", () => {
   const bootstrap = makeBootstrap(4);
-  assert.equal(patchMessage(bootstrap, "nope", (message) => ({ ...message, content: "x" })).changed, false);
+  assert.equal(
+    patchMessage(bootstrap, "nope", (message) => ({ ...message, content: "x" })).changed,
+    false,
+  );
   assert.equal(removeMessageById(bootstrap, "nope").changed, false);
   assert.equal(touchConversation(bootstrap, bootstrap.snapshot.conversation.updatedAt), bootstrap);
 });
 
 test("insert / append / remove keep the untouched prefix stable", () => {
   const bootstrap = makeBootstrap(6);
-  const inserted = insertMessageAt(bootstrap, 3, { id: "new", role: "assistant", kind: "text", content: "", createdAt: 4000, status: "streaming" });
+  const inserted = insertMessageAt(bootstrap, 3, {
+    id: "new",
+    role: "assistant",
+    kind: "text",
+    content: "",
+    createdAt: 4000,
+    status: "streaming",
+  });
   assert.deepEqual(
     inserted.bootstrap.snapshot.conversation.messages.map((message) => message.id),
     ["msg-0", "msg-1", "msg-2", "new", "msg-3", "msg-4", "msg-5"],
   );
-  assert.equal(inserted.bootstrap.snapshot.conversation.messages[0], bootstrap.snapshot.conversation.messages[0]);
+  assert.equal(
+    inserted.bootstrap.snapshot.conversation.messages[0],
+    bootstrap.snapshot.conversation.messages[0],
+  );
 
-  const appended = appendMessages(bootstrap, [{ id: "tail", role: "user", kind: "text", content: "hi", createdAt: 5000, status: "done" }]);
+  const appended = appendMessages(bootstrap, [
+    { id: "tail", role: "user", kind: "text", content: "hi", createdAt: 5000, status: "done" },
+  ]);
   assert.equal(appended.bootstrap.snapshot.conversation.messages.length, 7);
   assert.equal(removed(appended.bootstrap).bootstrap.snapshot.conversation.messages.length, 6);
 
   const stats = withStats(bootstrap, { ...bootstrap.snapshot.stats, messageCount: 99 });
   assert.equal(stats.snapshot.stats.messageCount, 99);
-  assert.equal(stats.snapshot.conversation, bootstrap.snapshot.conversation, "stats-only updates must not rebuild the conversation");
+  assert.equal(
+    stats.snapshot.conversation,
+    bootstrap.snapshot.conversation,
+    "stats-only updates must not rebuild the conversation",
+  );
   assert.equal(withStats(bootstrap, bootstrap.snapshot.stats), bootstrap);
 });
 
@@ -376,18 +508,36 @@ function removed(bootstrap: Bootstrap) {
 test("normalizeMessageProcessBlocks is a no-op for already normalized messages", () => {
   const bootstrap = makeBootstrap(2);
   const assistant = bootstrap.snapshot.conversation.messages[1];
-  assert.equal(normalizeMessageProcessBlocks(assistant as never), assistant, "an unchanged message must keep its identity");
+  assert.equal(
+    normalizeMessageProcessBlocks(assistant as never),
+    assistant,
+    "an unchanged message must keep its identity",
+  );
 
-  const dirty = { ...assistant, processBlocks: [{ kind: "thinking", text: "  padded  " }, ...(assistant.processBlocks ?? [])] };
+  const dirty = {
+    ...assistant,
+    processBlocks: [{ kind: "thinking", text: "  padded  " }, ...(assistant.processBlocks ?? [])],
+  };
   const normalized = normalizeMessageProcessBlocks(dirty as never) as Message;
-  assert.equal((normalized.processBlocks?.[0] as Block).text, "padded");
-  assert.equal(normalizeMessageProcessBlocks(normalized as never), normalized, "normalising twice must be stable");
+  assert.equal((normalized.processBlocks?.[0] as Block | undefined)?.text, "padded");
+  assert.equal(
+    normalizeMessageProcessBlocks(normalized as never),
+    normalized,
+    "normalising twice must be stable",
+  );
 });
 
 test("reference thinking/tool semantics agree across a long random turn", () => {
   let shared = makeBootstrap(4);
   let legacy = makeBootstrap(4);
-  shared = insertMessageAt(shared, 4, { id: "live", role: "assistant", kind: "text", content: "", createdAt: 9000, status: "streaming" }).bootstrap;
+  shared = insertMessageAt(shared, 4, {
+    id: "live",
+    role: "assistant",
+    kind: "text",
+    content: "",
+    createdAt: 9000,
+    status: "streaming",
+  }).bootstrap;
   legacy = clone(shared);
 
   let thinking = "";
@@ -396,7 +546,9 @@ test("reference thinking/tool semantics agree across a long random turn", () => 
     if (roll === 0) {
       thinking += `s${step} `;
       shared = patchMessage(shared, "live", (message) => {
-        const processBlocks = mergeAssistantProcessBlocks(message.processBlocks ?? [], [{ kind: "thinking", text: thinking }] as any) as any;
+        const processBlocks = mergeAssistantProcessBlocks(message.processBlocks ?? [], [
+          { kind: "thinking", text: thinking },
+        ] as any) as any;
         return { ...message, processBlocks };
       }).bootstrap;
       legacy = referenceThinking(legacy, "live", thinking);
@@ -408,7 +560,13 @@ test("reference thinking/tool semantics agree across a long random turn", () => 
       })).bootstrap;
       legacy = referenceDelta(legacy, "live", `tok${step}`, 9001);
     } else if (roll === 2) {
-      const block: ToolBlock = { kind: "tool", toolCallId: `c${step % 5}`, toolName: "bash", callText: `{"i":${step}}`, status: "streaming" };
+      const block: ToolBlock = {
+        kind: "tool",
+        toolCallId: `c${step % 5}`,
+        toolName: "bash",
+        callText: `{"i":${step}}`,
+        status: "streaming",
+      };
       shared = patchMessage(shared, "live", (message) => ({
         ...message,
         processBlocks: upsertToolProcessBlock(message.processBlocks ?? [], block as any) as any,
@@ -419,8 +577,13 @@ test("reference thinking/tool semantics agree across a long random turn", () => 
       // lets it through) must be observably inert and must not churn identity.
       const before = shared.snapshot.conversation.messages;
       shared = patchMessage(shared, "live", (message) => {
-        const processBlocks = mergeAssistantProcessBlocks(message.processBlocks ?? [], [{ kind: "thinking", text: thinking }] as any) as any;
-        const liveBlocks = mergeLiveProcessBlocks((message.liveBlocks ?? []) as never, processBlocks as never) as never;
+        const processBlocks = mergeAssistantProcessBlocks(message.processBlocks ?? [], [
+          { kind: "thinking", text: thinking },
+        ] as any) as any;
+        const liveBlocks = mergeLiveProcessBlocks(
+          (message.liveBlocks ?? []) as never,
+          processBlocks as never,
+        ) as never;
         return { ...message, processBlocks, liveBlocks };
       }).bootstrap;
       const after = shared.snapshot.conversation.messages;
@@ -442,7 +605,10 @@ test("reference thinking/tool semantics agree across a long random turn", () => 
     return copy;
   };
   assert.deepEqual(strip(shared), strip(legacy));
-  assert.equal(shared.snapshot.conversation.messages.length, legacy.snapshot.conversation.messages.length);
+  assert.equal(
+    shared.snapshot.conversation.messages.length,
+    legacy.snapshot.conversation.messages.length,
+  );
 });
 
 /* -------------------------------------------------------------------------- */
@@ -461,14 +627,17 @@ const withUsage = (over: Record<string, unknown> = {}) => {
   const bootstrap = makeBootstrap(4);
   return {
     ...bootstrap,
-    snapshot: { ...bootstrap.snapshot, stats: { ...bootstrap.snapshot.stats, ...usageStats(over) } },
+    snapshot: {
+      ...bootstrap.snapshot,
+      stats: { ...bootstrap.snapshot.stats, ...usageStats(over) },
+    },
   } as never;
 };
 
 test("context_usage moves only the usage fields and keeps the conversation identity", () => {
   const bootstrap = withUsage();
   const before = bootstrap.snapshot.conversation;
-  const { bootstrap: next, changed } = useContextUsage(bootstrap, {
+  const { bootstrap: next, changed } = applyContextUsage(bootstrap, {
     contextTokens: 9_000,
     contextWindow: 200_000,
     contextPercent: 4.5,
@@ -485,7 +654,10 @@ test("context_usage moves only the usage fields and keeps the conversation ident
 
 test("a null reading is an answer: pi reports null right after a compaction", () => {
   const bootstrap = withUsage();
-  const { bootstrap: next, changed } = useContextUsage(bootstrap, { contextTokens: null, contextPercent: null } as never);
+  const { bootstrap: next, changed } = applyContextUsage(bootstrap, {
+    contextTokens: null,
+    contextPercent: null,
+  } as never);
 
   assert.equal(changed, true);
   assert.equal(next.snapshot.stats.contextPercent, null);
@@ -505,11 +677,11 @@ test("repeating the same reading does not churn the stats object", () => {
     tokenUsage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
   };
 
-  const first = useContextUsage(bootstrap, usage as never);
+  const first = applyContextUsage(bootstrap, usage as never);
   assert.equal(first.changed, false);
   assert.equal(first.bootstrap, bootstrap);
 
-  const empty = useContextUsage(bootstrap, {} as never);
+  const empty = applyContextUsage(bootstrap, {} as never);
   assert.equal(empty.changed, false);
 });
 
@@ -518,7 +690,17 @@ test("repeating the same reading does not churn the stats object", () => {
 /* -------------------------------------------------------------------------- */
 
 function sessionRow(path: string, updatedAt: number, pinned = false) {
-  return { path, id: path, title: path, cwd: "/tmp", createdAt: updatedAt, updatedAt, messageCount: 2, firstMessage: "", pinned };
+  return {
+    path,
+    id: path,
+    title: path,
+    cwd: "/tmp",
+    createdAt: updatedAt,
+    updatedAt,
+    messageCount: 2,
+    firstMessage: "",
+    pinned,
+  };
 }
 
 function makeSidebarBootstrap() {
@@ -548,10 +730,16 @@ test("a submit promotes its session row in the sidebar", () => {
   const { bootstrap: next, changed } = promoteSessionRow(bootstrap, "/c", 9999);
 
   assert.equal(changed, true);
-  assert.deepEqual(next.projects[0].sessions.map((session) => session.path), ["/c", "/a", "/b"]);
+  assert.deepEqual(
+    next.projects[0].sessions.map((session) => session.path),
+    ["/c", "/a", "/b"],
+  );
   assert.equal(next.projects[0].sessions[0].updatedAt, 9999);
   // The snapshot's project copy has to move too: it is the fallback the sidebar reads.
-  assert.deepEqual(next.snapshot.project.sessions.map((session) => session.path), ["/c", "/a", "/b"]);
+  assert.deepEqual(
+    next.snapshot.project.sessions.map((session) => session.path),
+    ["/c", "/a", "/b"],
+  );
   // Other projects keep their identity, and the transcript is untouched.
   assert.equal(next.snapshot.conversation, bootstrap.snapshot.conversation);
   // The clock is NOT driven from here: the busy watchdog must not start on submit.
@@ -567,11 +755,18 @@ test("an older timestamp cannot make the row look stale", () => {
 
 test("pinned rows keep the sidebar's pinned-first order", () => {
   const bootstrap = makeSidebarBootstrap();
-  bootstrap.projects[0].sessions = [sessionRow("/pin", 10, true), sessionRow("/a", 3000), sessionRow("/c", 1000)];
+  bootstrap.projects[0].sessions = [
+    sessionRow("/pin", 10, true),
+    sessionRow("/a", 3000),
+    sessionRow("/c", 1000),
+  ];
   bootstrap.snapshot.project.sessions = [...bootstrap.projects[0].sessions];
 
   const { bootstrap: next } = promoteSessionRow(bootstrap, "/c", 4000);
-  assert.deepEqual(next.projects[0].sessions.map((session) => session.path), ["/pin", "/c", "/a"]);
+  assert.deepEqual(
+    next.projects[0].sessions.map((session) => session.path),
+    ["/pin", "/c", "/a"],
+  );
   // Pinned rows are filtered out before the list is sliced, so the promoted row is the
   // first thing the user sees among the unpinned ones.
   assert.deepEqual(

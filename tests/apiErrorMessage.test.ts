@@ -35,13 +35,19 @@ async function withFetch(response, run) {
   }
 }
 
-test("错误体是 {\"error\":\"...\"} 时，抛出去的是那句话本身", async () => {
-  await withFetch(fakeResponse({ status: 500, body: '{"error":"Base URL is required."}' }), async () => {
-    await assert.rejects(() => postJson("/api/custom-models", {}), (error) => {
-      assert.equal(error.message, "Base URL is required.");
-      return true;
-    });
-  });
+test('错误体是 {"error":"..."} 时，抛出去的是那句话本身', async () => {
+  await withFetch(
+    fakeResponse({ status: 500, body: '{"error":"Base URL is required."}' }),
+    async () => {
+      await assert.rejects(
+        () => postJson("/api/custom-models", {}),
+        (error) => {
+          assert.equal(error.message, "Base URL is required.");
+          return true;
+        },
+      );
+    },
+  );
 });
 
 test("`message` 字段也认；两个字段都没有就退回原文", async () => {

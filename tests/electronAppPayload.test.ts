@@ -74,7 +74,6 @@ test("打包配置排除了 app.asar 里的 node_modules", () => {
 
 test("主进程的相对依赖都在 asar 里解析得到", () => {
   // 静态地跟着 require 走一遍：这正好是"产物里少了包"会炸的地方。
-  const entry = readFileSync(join(shellDir, "main.js"), "utf8");
   const visited = new Set();
   const missing = [];
 
@@ -109,20 +108,33 @@ test("主进程的相对依赖都在 asar 里解析得到", () => {
   assert.deepEqual(missing, []);
   assert.deepEqual(
     [...visited].sort(),
-    ["host-commands.js", "host-policy.js", "main.js", "paths.js", "sidecar.js", "static-server.js", "turn-notification.js"],
+    [
+      "host-commands.js",
+      "host-policy.js",
+      "main.js",
+      "paths.js",
+      "sidecar.js",
+      "static-server.js",
+      "turn-notification.js",
+    ],
     "main.js 的 require 图应该是这七个",
   );
   // preload 不挂在 require 图上（由 Electron 按路径加载），单独确认它的依赖也是干净的。
   const preload = moduleSpecifiers(readFileSync(join(shellDir, "preload.js"), "utf8"));
   assert.deepEqual(
-    preload.filter((spec) => !spec.startsWith(".") && !BUILTIN.has(spec) && !ELECTRON_BUILTIN.test(spec)),
+    preload.filter(
+      (spec) => !spec.startsWith(".") && !BUILTIN.has(spec) && !ELECTRON_BUILTIN.test(spec),
+    ),
     [],
     "preload 不应引入第三方模块",
   );
 });
 
 test("已构建的 asar 里确实只剩主进程代码（没有产物时跳过）", (t) => {
-  const archive = resolve(repoRoot, "dist-electron/mac-arm64/Pi Desktop.app/Contents/Resources/app.asar");
+  const archive = resolve(
+    repoRoot,
+    "dist-electron/mac-arm64/Pi Desktop.app/Contents/Resources/app.asar",
+  );
   if (!existsSync(archive)) {
     t.skip("还没打过 --dir，无法核对产物");
     return;
@@ -145,6 +157,11 @@ test("已构建的 asar 里确实只剩主进程代码（没有产物时跳过�
     ],
     "asar 里只应该剩主进程代码",
   );
-  assert.ok(!existsSync(join(repoRoot, "dist-electron/mac-arm64/Pi Desktop.app/Contents/Resources/app.asar.unpacked")), "不该再产出 unpacked 目录");
+  assert.ok(
+    !existsSync(
+      join(repoRoot, "dist-electron/mac-arm64/Pi Desktop.app/Contents/Resources/app.asar.unpacked"),
+    ),
+    "不该再产出 unpacked 目录",
+  );
   // package.json 必须在：Electron 靠它找 main。见上面的完整清单。
 });

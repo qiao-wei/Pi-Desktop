@@ -115,12 +115,23 @@ summary: "7 组工作项（A 类型与边界 / B 拆大文件 / C 协议可替�
 - 验收：`wc -l server/index.mjs` ≤ 1,200；`npm run architecture:check` 无 `protocol-surface` 违规；`npm test` pass ≥ 1999。
 - 现状提醒：`server/index.mjs` 现在 8,711 行、ceiling 8,712 —— **加一行就得删一行**，这个压力是有意的（见 ADR-003）。
 
-**B2 `App.tsx` 拆四块** 🟡（9,189 → **3,365**；拆出 15 块，设置弹层/侧栏/能力页/标题栏/扩展 UI/用量/输入框控件都各成一文件；**未到 800**，剩余主体是 `App()` 自身）
+**B2 `App.tsx` 拆四块** ✅（9,189 → **3,365** → **16 行**（2026-10-23 第二轮，见下））；两轮共拆出 15 块组件 + 7 段 hook + 2 个视图区，设置弹层/侧栏/能力页/标题栏/扩展 UI/用量/输入框控件都各成一文件；**已到 800 以下**（16 行））
+> **2026-10-23 第二轮：`App()` 剩下的 3,298 行拆完了（3,298 → 16）**。方法与 B1 同构，三次机械变换、每步都跑 `tsc -b` + `npm test`：
+> 1. **`.scratch/split-app.mjs`**：`App()` 拆成 `App()`（胶水）/ `useAppModel()`（逻辑）/ `AppShell({view})`（JSX）。
+>    JSX **一个字没改** —— 新组件里 `const { …152 个字段… } = view;` 把 model 解构出来（比「JSX 全改成 `view.X`」少 150 处改动，也避免结构性断言因前缀假红）。
+> 2. **`.scratch/split-app-files.mjs`**：三块各自成 `src/app/{useAppModel,AppShell}.ts`，import 按各块真实引用自动算。
+> 3. **`.scratch/split-hook-segments.mjs`**：2,058 行的 `useAppModel()` 按**原语句顺序**切成 7 段（`useAppCore` 363 / `useAppWiring` 436 / `useAppComposer` 667 / `useAppTurn` 333 / `useAppComposerEditing` 565 / `useAppCaretSync` 350 / `useAppSearch` 108）。
+>    跨段引用只在**延迟执行位置**出现（`.scratch/app-hook-clusters.mjs` 证明：0 个引用环、就地立即执行的向后引用 0 条），所以顺序切段安全：前段的从 `deps` 解构、后段的就地写 `deps.X`。
+> 4. **`.scratch/extract-jsx-region.mjs`**：`AppShell` 还剩 773 行（超 700）→ 把 `<section>`（389 行）搬成 `ComposerRegion.tsx`（506），宿主里换成 `<ComposerRegion view={view} />`。
+> 5. **前向签名快照 `.scratch/emit-forward-types.mjs` → `src/app/appForwarded.ts`**：20 个「前段调用、后段声明」的函数签名由 TS 类型检查器从拆分前的代码导出。写成 `Pick<ReturnType<typeof 后段>>` 会自引用（TS2502），写成 `any` 会让回调参数退化成 implicit any —— 快照既不环也不松，一致性由 `useAppModel()` 赋值处兜住（写错了那里会红）。
+> 6. **内容保全**：`.scratch/verify-app-split.mjs` 逐条比对「拆分前 `App()` 的 181 条有辨识度语句是否还在 `src/app/`」→ **0 条丢失**（JSX 382 行里 10 行「找不到」经查全是多行 JSX 注释的行级误报，原文都在）；`merge` 侧的 main 内容仍由 `.scratch/verify-their-lines.mjs --theirs main` 兜（剩 6 行：4 条注释措辞误报 + 2 条测试源码**有意**改成读整个目录，文件里已注明）。
+> 7. **新增 `tests/appModelSplit.test.ts`（7 条）**钉住拆分后最容易悄悄变形的东西：hook 调用顺序（React 靠顺序认 state）、段之间只许 type-only 依赖、`deps.X` 读取集合与 `appForwarded` 快照**双向**一致、装配点里不许再长出 hook、视图解构字段 ⊆ 各段导出、`App.tsx` 只剩胶水。
+> **验收（全部达成）**：`wc -l src/app/App.tsx` = **16**（目标 ≤800）；`npx tsc -b` 0 error；`npm test` **2,109 + 34 全绿 / 0 fail / 0 skip**；`architecture:check` clean（262 文件）；`typecheck:node` 0；`upstream:check` ok；`App.tsx` 的 max-lines 例外被 `architecture:write` **自动删除**（棘轮净减：这轮共删 3 条过期例外 + 收紧 1 条）。
 - 做什么：侧栏 / Git 面板 / 设置弹层 / composer 四块各自成 `src/features/*` 或 `src/components/*`；**一块一验**，不做一次性大搬迁。
-- 验收：`wc -l src/app/App.tsx` ≤ 800（**未达成**，见上）；四块的测试文件存在且 `npm test` 全绿（✅ 已满足）。
+- 验收：`wc -l src/app/App.tsx` ≤ 800 ✅（现 **16**）；四块的测试文件存在且 `npm test` 全绿（✅ 已满足）。
 - 配套：`tests/lib/appSource.ts`（`appSource()` / `appEntrySource()`）—— 拆分后，把「这段代码在 App 里」的结构性断言从钉死 `App.tsx` 改成读整个 `src/app/`；共 45 个测试文件按此调整，否则每次合法拆分都会假红。
 
-**B3 棘轮同步收紧** 🟡（机械部分已全部落地并**真咬过**：`exceptions` 规则抓到 `src/app/CapabilitiesPage.tsx` 拆到 564 行后例外失效 → `architecture:write` 直接删除该条；`CapabilitiesMcp`/`CapabilityDetail`/`SidebarDialogs`/`ComposerControls` 等拆出来后就落在 700 以内，不需要新例外。**未达成**的验收条件：exceptions 里仍有 `server/index.mjs`（7,930）与 `src/app/App.tsx`（3,365）以及本轮新增的 `src/app/Sidebar.tsx`（1,284）。）
+**B3 棘轮同步收紧** 🟡（B1/B2 完成后的现状：`server/index.mjs` 与 `src/app/App.tsx` 的例外**已消失**；剩 13 条 max-lines 例外，最大的四个是 `src/features/chat/usePiDesktopApp.ts` 3,006 / `ChatThread.tsx` 1,379 / `thread.aui.tsx` 1,362 / `src/app/Sidebar.tsx` 1,285）（机械部分已全部落地并**真咬过**：`exceptions` 规则抓到 `src/app/CapabilitiesPage.tsx` 拆到 564 行后例外失效 → `architecture:write` 直接删除该条；`CapabilitiesMcp`/`CapabilityDetail`/`SidebarDialogs`/`ComposerControls` 等拆出来后就落在 700 以内，不需要新例外。**已达成**的验收条件：exceptions 里不再有 `server/index.mjs`（现 876）与 `src/app/App.tsx`（现 16）。）
 - 做什么：B1/B2 每完成一块跑 `architecture:write`（ceiling 自动下调），拆到限下后从 `policy.json` 的 exceptions 删除该条（规则会在条目失效时报错）。
 - 验收：exceptions 里不再出现 `server/index.mjs` 与 `src/app/App.tsx`。
 
@@ -249,7 +260,7 @@ summary: "7 组工作项（A 类型与边界 / B 拆大文件 / C 协议可替�
 - 现状补充（2026-10-23）：`docs/architecture/` 目录还不存在；三份草稿与生成区域的**一致性已经用 checker 自己的 `writeRegion`/`readRegion` 在 `/tmp/landsim` 预演过**（`protocols ✓ 一致 / seams ✓ 一致`），所以解锁后是一条命令的事，不会在落盘时才发现区域对不上。
 - 验收：`tests/architecture.test.ts` 的 skip 自动生效；`npm run architecture:check` 的 `docs-regions` 归零。
 
-**G2 `DESIGN.md` 定位修正** 🟡（部分）：在 `DESIGN.md` 的 frontmatter 之后插了 15 行定位说明 —— 明确「这是 Meta 参考、不是本项目规范」，并给出本项目真正的规范落点（`CONTEXT.md` 词表 + `docs/architecture/*`）。**未做**的部分：683 行正文没有按 PiDesktop 逐节改写，也没有移入 `docs/reference/`（那要动 `docs/`，卡 G1 的写权限）。
+**G2 `docs/reference/design-meta.md` 定位修正** 🟡（部分）：在 `docs/reference/design-meta.md` 的 frontmatter 之后插了 15 行定位说明 —— 明确「这是 Meta 参考、不是本项目规范」，并给出本项目真正的规范落点（`CONTEXT.md` 词表 + `docs/architecture/*`）。**未做**的部分：683 行正文没有按 PiDesktop 逐节改写，也没有移入 `docs/reference/`（那要动 `docs/`，卡 G1 的写权限）。
 
 **G3 `CONTEXT.md` 领域词表** ✅（根目录 `CONTEXT.md`，含 `_Avoid_` 反例与代码落点）
 - 为什么：ZCode 有 `CONTEXT.md`（5.5KB，含 `_Avoid_` 反例），我们没有 → 术语靠口语约定，新人和 agent 都会用错。
@@ -316,3 +327,132 @@ G1（需人工开写保护）→ G2 → G3 → G4
 ```
 
 依赖关系：A 组是其余各组的编译期安全网；C1 必须先做（否则换实现没有规则钉）；C3 依赖 D2（签名先钉住再注入）；G1 依赖人工开关，不阻塞其余。
+## 7. 终验（2026-10-23 第二轮：B1/B2/B3 收口；由「架构加固」计划驱动）
+
+### 7.1 A–G 状态板（逐项对照验收命令）
+
+| 组 | 项 | 状态 | 验收证据 |
+| --- | --- | --- | --- |
+| A | A1 node 侧类型保护 | ✅ | `tsconfig.node-runtime.json` + `node-typecheck` 规则；`npm run typecheck:node` exit 0 |
+| A | A2 诊断 128 → 0 | ✅ | 基线文件已删除 ⇒ 规则变成「必须 0 条」 |
+| A | A3 进程边界 | ✅ | `process-boundary` 规则 + `matchGlob` 的 `**` 零段 bug 修复 |
+| B | B1 `server/index.mjs` | ✅ | **7,839 → 876**（目标 ≤1,200）：18 个领域模块 + `boot.mjs` + `domains.mjs` + 98 个路由处理器；例外自动删除 |
+| B | B2 `src/app/App.tsx` | ✅ | **3,298 → 16**（目标 ≤800）：7 段 hook + `AppShell` + `ComposerRegion`；例外自动删除 |
+| B | B3 棘轮收紧 | ✅ | exceptions 里不再有 `server/index.mjs` / `src/app/App.tsx`；`architecture:write` 净删 3 条过期例外 + 收紧 `MessageEditBox.tsx` 918 → 850 |
+| C | C1–C8 协议与可替换性 | ✅ | 6 条接缝登记 + `protocol-seam` / `no-bypass` 规则；`protocols.md` 生成接缝矩阵 |
+| D | D1–D3 报文与内核 | ✅ | `bridgeMessages.ts` 单一真源 + 桥自检；内核 arity tripwire；`upstream:check` ok（kernel 1.4.0 / 21 exports） |
+| E | E2 打包测试硬门 | ✅ | `packagingTestGate.test.ts` |
+| E | E3 测试隔离池 | ✅ | `tests/isolation.json` + `testPools.test.ts` |
+| E | E4 `architecture:why` | ✅ | `scripts/architecture/why.mjs` + `architectureWhy.test.ts`（6 条） |
+| E | E1 oxlint / oxfmt | ⛔ 待用户拍板 | 要新增 devDependencies（会改 `package.json` / `package-lock.json`）—— 属需你拍板的事，**未擅自开工**。更正：我一度在此写成「与『不要新增依赖』冲突」，那句是**我自己的归纳**，翻遍 `MEMORY.md`/daily/`docs/`/README 都没有你的原话；仓库里最接近的只有 README 关于**测试运行器**的一句：`不引入框架、不加依赖`（`README.zh-CN.md:87` / `README.md:91`）。 |
+| F | F1/F2 playwright e2e | ⛔ 待用户拍板 | 要选 e2e 基建与「假内核」方案，**未擅自开工** |
+| G | G1 文档落盘 | ✅ | `docs/architecture/{architecture,protocols}.md` + `docs/adr/ADR-001`；`architecture:check` 无 `docs-regions` |
+| G | G2 定位说明 | ✅ | `docs/reference/design-meta.md`（原根目录 `DESIGN.md`）顶部说明「外部参考、不是我方规范」并移入 `docs/reference/` |
+| G | G3 领域词表 | ✅ | `CONTEXT.md` |
+| G | G4 ADR | ✅ | `docs/adr/ADR-001/002/003` 全部落盘（002/003 由本轮 `architecture:land-docs` 落） |
+
+### 7.2 终验命令与输出（原样）
+
+```
+$ npx tsc -b                    → 0 error
+$ npm run typecheck:node        → exit 0
+$ npm run architecture:check    → architecture: clean (262 files, 784 imports, 10 modules, 96 protocol routes, boundary v1)
+$ npm run upstream:check        → upstream-admission: ok (kernel 1.4.0, 21 exports)
+$ npm test                      → run-tests: parallel pool -> ok / serial pool -> ok
+                                  ℹ tests 2109 / pass 2109 / fail 0 / skipped 0
+                                  ℹ tests 34   / pass 34   / fail 0
+$ node .scratch/check-slices.mjs        → 所有区间锚点都还有效 ✓
+$ node .scratch/verify-app-split.mjs    → 拆分前 App() 语句 182 条 / 有辨识度的 181 条 → 找不到的 0 条
+$ node .scratch/verify-their-lines.mjs --theirs main
+                                  → 6 行「缺」：4 条注释措辞误报 + 2 条测试源码有意改成读整个目录（文件内已注明）
+$ project_wiki format=lint      → 没有 findings（0 条；修掉 docs/plan.md 的 missing-frontmatter）
+$ wc -l server/index.mjs src/app/App.tsx → 876 / 16
+```
+
+### 7.3 本轮的账（不隐匿）
+
+- **新增文件**：`src/app/{useAppModel,AppShell,ComposerRegion,appForwarded}.ts(x)` + 7 个 `src/app/useApp*.ts` 段 + `server/{boot,domains,routesApp,routesProjects,...}.mjs`（B1）。
+- **新增测试**：`tests/appModelSplit.test.ts`（7 条）、B1 期间的若干（`bridgeEndpoint` / `extensionUiMode` / `bridgeMessages` / `modelLoginWiring` 等的期望更新）。
+- **仍然超限的文件（13 条 max-lines 例外，均为既有债务，棘轮冻结增长）**：最大的四个 `src/features/chat/usePiDesktopApp.ts` 3,006 /
+  `src/features/chat/ChatThread.tsx` 1,379 / `src/components/assistant-ui/elements/thread.aui.tsx` 1,362 / `src/app/Sidebar.tsx` 1,285。
+  B3 的验收条件（`server/index.mjs`、`src/app/App.tsx` 不再在例外里）已达成；其余 13 条属于计划的下一批（未承诺本轮完成）。
+- **未做且不打算做**：把 `design-meta.md` 的 683 行正文「按 PiDesktop 逐节改写」——那会变成编造一套我们并不拥有的设计系统；改为明确标注为外部参考并归入 `docs/reference/`。
+
+## §8 E1 / F1 / F2 收口（2026-10-23，同一轮完成）
+
+用户批准 E1（"可以增加 dev 的依赖"）与 F1/F2（"做吧"）之后的实际结果。
+
+### E1 · oxlint（error 门禁）+ oxfmt（手动）—— ✅ 完成
+
+| 项 | 结果 |
+| --- | --- |
+| `.oxlintrc.json` | **生成物**：`scripts/architecture/lint-config.mjs` 从 `architecture/policy.json` 算（`sizeRules` = 上限，`exceptions` = 棘轮），`architecture:write` 会重新生成 |
+| 行数上限 | 21 条 override，其中 13 条棘轮 ceiling 与真实文件大小逐条对齐（`tests/lintGate.test.ts` 钉住） |
+| `no-unused-vars` | **1,378 → 0**（63 个文件：删 997 import / 334 变量 / 4 声明 / 7 函数）；`--write` 前先 dry-run，改前备份到 `/tmp/prune-backup-*.tgz`，改后用 TS parser 校验语法 |
+| 其余 diagnostic | 0 error；**84 warning**（react-hooks/exhaustive-deps 37、react/exhaustive-effect-dependencies 27、react/refs 20）—— 全部记入 `RULE_NOTES` 与 `npm run lint` 输出，**不挡门禁**，是排队中的语义级重构 |
+| `check.mjs` | 1,031 → 876 行（拆出 `lib/extractors.mjs` / `lib/glob.mjs` / `lib/regions.mjs`），顺手修掉 `matchGlob` 的 `**` 零段 bug 回归测试 |
+| oxfmt | 装了、`npm run format` / `format:check` 可用，**不进 CI**：纯格式化会在未提交的工作上产生大片 diff |
+| 门禁自检 | `tests/lintGate.test.ts` 6 条：配置与 policy 一致（不许手改）、棘轮上限一致、具体模式排在泛模式之后（`src/i18n` 的 1400 不许被 `src/**` 的 700 盖掉）、spec 豁免、`npm run lint` 退出码 0 且无 error、CI 在测试前跑 lint |
+| CI | `verify` 作业加 `npm run lint`（便宜的先跑：0.3s vs 25s） |
+
+### F1 · e2e 基建 —— ✅ 完成（4 条用例，本地全绿 51s）
+
+**与计划的差别（更好的方案，已写进 `e2e/README.md`）**：计划写的是"假内核"，实际做成**假模型端点**
+（`e2e/lib/fakeModel.mjs`：OpenAI 兼容 `/v1/chat/completions` 流式 + 非流式）。理由：假内核要把桥
+自己的 plumbing（会话生命周期、事件映射、SSE 帧、渲染 reducer）一起换掉 —— 那正是最该被测的部分；
+假模型端点让 pi 内核 + 桥 + 渲染进程全是真的，生产代码**零测试后门**，且一轮对话确定可断言。
+
+| 用例 | 断言 |
+| --- | --- |
+| `streamTurn.spec.ts` | 冷启动画出界面；发送消息；助手分块文本（`E2E-1…E2E-3 done`）真的流进 DOM；假端点收到的请求里确实是该 provider/model 与该条用户消息；结束后发送键从 "Queue follow-up" 回到 "Send" |
+| `protocolMismatch.spec.ts` | 拦截 `/api/protocol` 公告 v9999 → 外壳仍在（不白屏）+ 页面出现含双方版本号的可操作文案（`protocolMismatchMessage` 的 newer 分支） |
+| `trustGate.spec.ts` | 未信任项目：横幅可见 **且** 项目级技能真的看不见（`/api/skills/reload` 里没有 `e2e-project-skill`）→ 点"信任并加载"→ 横幅消失 **且** 技能出现（闸门有牙齿，不是装饰） |
+| `packagedShell.spec.ts` | 真起 Electron：窗口加载渲染 URL、首屏画出、并从桥拿到了数据（侧栏看到刚建的项目）；`PI_DESKTOP_E2E_SHELL=0` 可跳过（CI 无显示服务器） |
+
+隔离/确定性：`PI_CODING_AGENT_DIR=<临时目录>`（不动 HOME）、`PI_DESKTOP_PORT=0`（桥自选端口并公告，
+并行不抢端口）、`models.json` 指到假端点、vite dev 用 `VITE_PI_DESKTOP_API_BASE` 接桥。
+夹具是 worker 作用域（vite + 桥只起一次，`workers: 1`）。
+
+**F1 第一天就抓到的真 bug（B1 拆分遗留，2,100+ 条 node 级测试全绿却 500）**：
+
+1. `server/bridgeUtils.mjs` 把 `lastCapabilityLoadStatuses`（`Map`）当函数转发 `(...args) => deps.X(...args)` → `.get/.set` 丢失；
+2. `server/routesProjects.mjs` 把 `projectCommandRuns`（带 `register/scanProcesses/list/stop` 的对象）同样转发；
+3. `server/mcpInspector.mjs` 在**建厂时**就 `const { findProject } = deps`，而那些名字要到第 50/62/82/39 行才填 → 永久 `undefined`。
+
+三处都已修（值改用 `deps.X` 属性访问、跨域名改延迟转发），并且**钉成了测试**：
+`tests/domainAssembly.test.ts` 3 条装配不变式（①立即解构只能用已填的名字；②延迟转发的名字不许被当
+对象用；③域工厂只建一次）。三条都做过"注入 bug → 必须变红"的验证。顺带合并了 `domains.mjs` 里
+13 处重复建厂（重复建厂 = 两份实例各持自己的外部状态）。
+
+### F2 · CI 作业 —— ✅ 完成
+
+`.github/workflows/package-electron.yml` 新增 `e2e` 作业：ubuntu + `npx playwright install --with-deps chromium`
+（带浏览器缓存）+ `npm run e2e`（`PI_DESKTOP_E2E_SHELL=0`），失败上传 HTML 报告；并且是**出包作业的硬门**
+（`needs: [plan, verify, e2e]`，与 `verify` 一样没有开关可以跳过）。
+
+### 新增扫描范围 / 门禁
+
+- `policy.scanRoots` + tooling 模块 + `node-runtime` 进程边界都加了 `e2e`；
+  `tsconfig.node-runtime.json` include `e2e/**/*.mjs` + `e2e/**/*.ts`，`typecheck:node` **0 诊断**（棘轮要求零，9 处诊断已修）；
+- `sizeRules` 加 `e2e/**`（700）与 `**/*.spec.ts`（豁免）；
+- `.oxlintrc.json` 对 `e2e/**` 关掉 react 规则与 `no-empty-pattern`（Playwright 夹具签名就是 `async ({}, use)`），理由在 `RULE_NOTES`。
+
+### 终验（本机，全绿）
+
+```
+npx tsc -b                     → 0 error
+npm run typecheck:node         → 0 诊断
+npm run architecture:check     → clean (271 files, 699 imports, 10 modules, 96 routes, boundary v1)
+npm run lint                   → 0 error / 84 warning
+npm run upstream:check         → ok (kernel 1.4.0, 21 exports)
+npm test                       → 2118 pass + 34 pass / 0 fail / 0 skipped（并行池 + 串行池）
+PLAYWRIGHT_CHANNEL=chrome npx playwright test → 4 passed (51.4s)
+```
+
+### 未做（有意，非漏）
+
+- **oxfmt 进 CI**：会把纯格式化 diff 混进未提交的工作，等这轮提交落地后再决定。
+- **CI 里的外壳冒烟**：headless runner 要 xvfb 且常要 `--no-sandbox`，本机（有显示）已覆盖；
+  要上 CI 再加 `xvfb-run` + `--no-sandbox` 开关。
+- **13 条 max-lines 存量例外**（`usePiDesktopApp.ts` 2963 / `ChatThread.tsx` 1379 / `thread.aui.tsx` 1362 /
+  `Sidebar.tsx` 1285 …）：仍是既有债务，棘轮只降不升；下一批优先拆最大的四个（方法已验证：见 `[[b2-app-split]]`）。

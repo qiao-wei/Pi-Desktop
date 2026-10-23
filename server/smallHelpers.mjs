@@ -69,6 +69,22 @@ function attachmentOnlyPrompt(attachments) {
   return `Please review these ${attachments.length} attached files.`;
 }
 
+/**
+ * 只挂了能力徽标、一个字没写时给模型的那句话。
+ *
+ * 只挂技能时等价于 TUI 的 `/skill:name`（无参数） —— 技能正文由 manualSkillPrompt 顶在
+ * 最前面（manual-only 技能），或者由模型自己从 `<available_skills>` 里读（已使能的技能），
+ * 这里只需要给一个不空的指令，避免把空消息丢给模型。
+ */
+function capabilityOnlyPrompt(capabilities) {
+  const names = capabilities
+    .map((part) => String(part?.capability?.name ?? "").trim())
+    .filter((name) => name.length > 0);
+  // 兜底那句必须是普通字符串字面量：渲染进程侧的 promptFallbacks.ts 有一条「与服务端逐字一致」
+  // 的对照测试，它按双引号字面量取值（模板字面量取不到）。
+  return names.length ? `Please use the attached skill: ${names.join(", ")}` : "Please use the attached capability.";
+}
+
 /** 结果条数上限：太小一行放不下就翻不到，太大又会把 JSON 撑肥。 */
 function searchResultLimit(raw) {
   const value = Number(raw);
@@ -178,4 +194,4 @@ function mcpToolsByNamespace(targetRuntime) {
   return groupMcpToolsByNamespace(targetRuntime.session?.getAllTools?.() ?? []);
 }
 
-export { parseTime, errorDetails, readKeyResponse, sessionRuntimeKey, normalizePersonalizationText, attachmentOnlyPrompt, searchResultLimit, sendJson, writeJsonFile, createEmptyCapabilitiesDefaults, skillSummaries, projectCommandsPayload, assertMcpWriteScope, defaultSkillEnabled, writeVersionMetadata, displayAgentPath, normalizeThinkingLevel, formatAgentError, partialToolCall, toolStreamId, runtimeMode, isSessionBusy, mcpMetaKey, mcpToolsByNamespace };
+export { parseTime, errorDetails, readKeyResponse, sessionRuntimeKey, normalizePersonalizationText, attachmentOnlyPrompt, searchResultLimit, sendJson, writeJsonFile, createEmptyCapabilitiesDefaults, skillSummaries, projectCommandsPayload, assertMcpWriteScope, defaultSkillEnabled, writeVersionMetadata, displayAgentPath, normalizeThinkingLevel, formatAgentError, partialToolCall, toolStreamId, runtimeMode, isSessionBusy, mcpMetaKey, mcpToolsByNamespace, capabilityOnlyPrompt };

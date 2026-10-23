@@ -52,9 +52,7 @@ test("真正开子进程 / 冷启动编译器的测试都在串行池里", () =>
 });
 
 test("串行池的条目都写了原因（否则下一个人不知道能不能删）", () => {
-  const config = JSON.parse(
-    readFileSync(`${REPO_ROOT}/tests/isolation.json`, "utf8"),
-  );
+  const config = JSON.parse(readFileSync(`${REPO_ROOT}/tests/isolation.json`, "utf8"));
   assert.ok(Array.isArray(config.rules) && config.rules.length > 0, "要写清楚什么情况下该进串行池");
   for (const entry of config.serial) {
     assert.ok(entry.reason && entry.reason.length > 8, `${entry.file} 缺 reason`);
@@ -66,6 +64,6 @@ test("测试入口替代了裸 glob：package.json 指向 run-tests.mjs", () => 
   assert.match(
     pkg.scripts.test,
     /scripts\/run-tests\.mjs/,
-    "裸 `node --test \"tests/**/*.test.ts\"` 会让重活与 2000 个用例抢 CPU",
+    '裸 `node --test "tests/**/*.test.ts"` 会让重活与 2000 个用例抢 CPU',
   );
 });

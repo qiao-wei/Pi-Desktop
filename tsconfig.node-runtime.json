@@ -25,6 +25,8 @@
   "include": [
     "server/**/*.mjs",
     "src-electron/**/*.js",
-    "scripts/**/*.mjs"
+    "scripts/**/*.mjs",
+    "e2e/**/*.mjs",
+    "e2e/**/*.ts"
   ]
 }

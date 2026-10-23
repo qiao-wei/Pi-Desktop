@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { contrast, flatten, resolveColor, type Tokens } from "./lib/cssColor.ts";
+import { contrast, flatten, resolveColor } from "./lib/cssColor.ts";
 import { themeTokens } from "./lib/cssTokens.ts";
 import { defaultThemeCss } from "./lib/themeSources.ts";
 

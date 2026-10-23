@@ -4,33 +4,33 @@
  * 从 `src/app/App.tsx` 搬出来的自包含一簇（只依赖 import 进来的东西，不碰模块状态）——
  * 大文件被 `max-lines` 棘轮冻着不许再长，所以按「一簇一文件」往外搬，调用点零改动。
  */
-import { t } from "../i18n/index.ts";
+
 import { useT } from "../i18n/react";
-import { fetchJson, postJson } from "../lib/api";
-import { MarkdownContent } from "../lib/markdown";
+
+
 import { openTarget } from "../lib/open-target";
 import { invokeHost } from "../lib/shell/host.ts";
 import { loadUiPreferences, saveUiPreferences } from "../lib/ui-preferences";
-import { CAPABILITY_TABS, SKILL_SOURCE_CATEGORIES, SKILL_SOURCE_CATEGORY_LABEL_KEYS, canDeleteCapability, capabilitySourceLabel, matchesCapabilityQuery, matchesSkillCategory, scopedCapabilityItems } from "../shared/capabilityScope";
+import { CAPABILITY_TABS, SKILL_SOURCE_CATEGORIES, SKILL_SOURCE_CATEGORY_LABEL_KEYS, matchesCapabilityQuery, matchesSkillCategory, scopedCapabilityItems } from "../shared/capabilityScope";
 import type { CapabilityScopeTab, SkillSourceCategory } from "../shared/capabilityScope";
-import { buildMcpServerPayload, recordToRows } from "../shared/mcpForm";
-import type { McpKeyValueRow } from "../shared/mcpForm";
-import { themes } from "../themes/index.ts";
-import { CAPABILITY_MCP_EXPOSURES, CAPABILITY_PACKAGE_RESOURCE_TYPES } from "../types";
-import type { CapabilitiesState, CapabilityKind, CapabilityMcpDetail, CapabilityMcpExposure, CapabilityMcpImportResult, CapabilityMcpImportServer, CapabilityMcpInspection, CapabilityMcpServer, CapabilityPackage, CapabilityPackageFilePreview, CapabilityPackageResourceDetails, CapabilityPackageResourceEntry, CapabilityPackageResourceType } from "../types";
-import { CapabilityActions, CapabilityCommandMenu, CapabilityDeleteDialog, CapabilityDot, CapabilityItem, KeyValueEditor, PackageInstallDialog, SkillImportDialog } from "./CapabilitySurfaces";
+
+
+
+
+import type { CapabilitiesState, CapabilityKind, CapabilityMcpDetail, CapabilityMcpImportResult, CapabilityMcpInspection, CapabilityMcpServer, CapabilityPackage, CapabilityPackageResourceType } from "../types";
+import { CapabilityDeleteDialog, CapabilityDot, CapabilityItem, PackageInstallDialog, SkillImportDialog } from "./CapabilitySurfaces";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
+
 import { cn } from "@/lib/utils";
-import { BookOpen, Check, ChevronDown, ChevronUp, ClipboardCopy, ExternalLink, FileUp, Folder, FolderOpen, Loader2, Pencil, Pin, Plug, Plus, RefreshCw, Save, Settings, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { BookOpen, ExternalLink, Folder, FolderOpen, Pencil, Pin, Plug, Plus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { MCP_EXPOSURE_HINT_KEYS, MCP_EXPOSURE_LABEL_KEYS, MCP_IMPORT_FORMAT_KEYS, McpServerDialog, McpServerEditor, mcpImportFormatKey } from "./CapabilitiesMcp";
 import { CAPABILITY_RESOURCE_LABEL_KEYS, CapabilityDetailDialog, CapabilityMarketCard, CapabilityResourceChips, PackageResourcesDialog, PackageResourcesLoaded, PackageResourcesRequest, capabilityInitial, capabilityLoadClass, capabilityLoadLabel, formatFileSize, loadPackageResourceFile } from "./CapabilityDetail";
 /* moved to src/app/CapabilityDetail.tsx */
@@ -113,6 +113,8 @@ function CapabilitiesPage({
     && (tab !== "skill" || matchesSkillCategory(item, skillCategory))
   ));
   const selected = globalItems.find((item) => `${item.kind}:${item.id}` === selectedKey);
+  // 只看关键：诊断源是**整个**技能清单（含项目级），所以它只管当前这个 tab 上的那条告警。
+  const skillDiagnostics = capabilities.skillDiagnostics ?? [];
 
   async function run(label: string, action: () => Promise<unknown>) {
     setBusy(label);
@@ -348,6 +350,40 @@ function CapabilitiesPage({
                     {t(SKILL_SOURCE_CATEGORY_LABEL_KEYS[category])}
                   </Button>
                 ))}
+              </div>
+            ) : null}
+            {tab === "skill" && skillDiagnostics.length ? (
+              // 重名冲突时 pi 保留先发现的那份、丢掉后来的：只看到一个技能不见了而没有任何
+              // 解释，是用户最不能自解的一类问题，所以把加载器的诊断原样贴出来。
+              <div
+                className="grid gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5"
+                role="status"
+                aria-label={t("capability.skillDiagnostics.title")}
+              >
+                <p className="text-[12.5px] font-medium text-foreground">
+                  {t("capability.skillDiagnostics.title")}
+                </p>
+                <p className="text-[11.5px] text-muted-foreground">{t("capability.skillDiagnostics.hint")}</p>
+                <ul className="grid gap-1">
+                  {skillDiagnostics.map((diagnostic, index) => (
+                    <li key={`${diagnostic.type}:${diagnostic.path}:${index}`} className="grid gap-0.5">
+                      <span className="text-[11.5px] text-foreground">{diagnostic.message}</span>
+                      {diagnostic.path ? (
+                        <code className="truncate text-[11px] text-muted-foreground" title={diagnostic.path}>
+                          {diagnostic.path}
+                        </code>
+                      ) : null}
+                      {diagnostic.collision?.winnerPath ? (
+                        <code
+                          className="truncate text-[11px] text-muted-foreground"
+                          title={diagnostic.collision.winnerPath}
+                        >
+                          {t("capability.skillDiagnostics.kept", { path: diagnostic.collision.winnerPath })}
+                        </code>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
               </div>
             ) : null}
             <div className="grid min-w-0 grid-cols-3 gap-3.5 max-[1350px]:grid-cols-2 max-[920px]:grid-cols-1">

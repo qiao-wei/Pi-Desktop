@@ -168,7 +168,11 @@ function mix(
   const isOklab = method === "oklab" || method === "oklch";
   const isSrgbGamma = method === "srgb" || method === "rgb";
   const space = (color: Color): RGB =>
-    isOklab ? linearSrgbToOklab(toLinear(color.rgb)) : isSrgbGamma ? color.rgb.map((c) => c / 255) as RGB : toLinear(color.rgb);
+    isOklab
+      ? linearSrgbToOklab(toLinear(color.rgb))
+      : isSrgbGamma
+        ? (color.rgb.map((c) => c / 255) as RGB)
+        : toLinear(color.rgb);
   const fromSpace = (value: RGB): RGB => {
     if (isSrgbGamma) return value.map((v) => Math.round(v * 255)) as RGB;
     const linear = isOklab ? oklabToLinearSrgb(...value) : value;

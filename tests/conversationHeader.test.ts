@@ -7,7 +7,7 @@
  * "…" menu elsewhere in the file cannot satisfy these assertions.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import test from "node:test";
 
 import { revealFolderLabelKey } from "../src/shared/revealFolderLabel.ts";
@@ -37,8 +37,16 @@ test("the header shows the project name and the conversation title on one row", 
 test("the header's icon button opens the project folder instead of a three-dot menu", () => {
   const header = conversationHeaderSource();
 
-  assert.match(header, /revealProject\(activeProject\.id\)/, "the folder button must reveal the project folder");
-  assert.match(header, /title=\{`\$\{t\(platformRevealFolderLabelKey\(\)\)\}: \$\{activeProject\.cwd\}`\}/, "the tooltip carries the folder path the old third line showed");
+  assert.match(
+    header,
+    /revealProject\(activeProject\.id\)/,
+    "the folder button must reveal the project folder",
+  );
+  assert.match(
+    header,
+    /title=\{`\$\{t\(platformRevealFolderLabelKey\(\)\)\}: \$\{activeProject\.cwd\}`\}/,
+    "the tooltip carries the folder path the old third line showed",
+  );
   assert.ok(!/MoreHorizontal/.test(header), "the header must not keep a three-dot menu");
   assert.ok(!/DropdownMenu/.test(header), "the header must not keep a dropdown");
 });
@@ -55,7 +63,10 @@ test("项目名和标题共用一套字号/字重/颜色（大小粗细不能分
     assert.ok(className.includes("text-[0.86rem]"), `expected the shared size in "${className}"`);
     assert.ok(className.includes("font-medium"), `expected the shared weight in "${className}"`);
     assert.ok(className.includes("text-foreground"), `expected the shared color in "${className}"`);
-    assert.ok(!/font-(bold|semibold|extrabold)/.test(className), `the title must not be bolder than the project name: "${className}"`);
+    assert.ok(
+      !/font-(bold|semibold|extrabold)/.test(className),
+      `the title must not be bolder than the project name: "${className}"`,
+    );
   }
 });
 

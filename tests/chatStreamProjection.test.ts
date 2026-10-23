@@ -17,10 +17,7 @@ import {
   streamingBubbleId,
   type ChatStreamView,
 } from "../src/shared/chatStreamProjection.ts";
-import {
-  appendToolCallArgsText,
-  upsertToolProcessBlock,
-} from "../src/shared/chatProcessBlocks.ts";
+import { appendToolCallArgsText, upsertToolProcessBlock } from "../src/shared/chatProcessBlocks.ts";
 
 import type { PromptStreamEvent } from "../src/lib/api";
 import type { ChatMessage, MessageProcessBlock } from "../src/types";
@@ -43,10 +40,7 @@ const userBubble = (turn: number, content: string): ChatMessage => ({
   status: "done",
 });
 
-const assistantBubble = (
-  turn: number,
-  patch: Partial<ChatMessage> = {},
-): ChatMessage => ({
+const assistantBubble = (turn: number, patch: Partial<ChatMessage> = {}): ChatMessage => ({
   id: chatBubbleId(turn, "assistant"),
   role: "assistant",
   kind: "text",
@@ -57,8 +51,9 @@ const assistantBubble = (
   ...patch,
 });
 
-const event = (payload: Partial<PromptStreamEvent> & { type: PromptStreamEvent["type"] }): PromptStreamEvent =>
-  payload as PromptStreamEvent;
+const event = (
+  payload: Partial<PromptStreamEvent> & { type: PromptStreamEvent["type"] },
+): PromptStreamEvent => payload as PromptStreamEvent;
 
 /** 回合 1 正在写：问题 + 半个回答，用户此时按下了插话。 */
 function streamingTurnOne() {
@@ -107,13 +102,20 @@ test("症状②：插话之后回合仍在继续时，过程块只写进当回�
   );
   next = projectStreamEvent(
     next,
-    event({ type: "assistant_partial", bubbleId: chatBubbleId(1, "assistant"), blocks: [{ type: "thinking", thinking: "继续想" }] }),
+    event({
+      type: "assistant_partial",
+      bubbleId: chatBubbleId(1, "assistant"),
+      blocks: [{ type: "thinking", thinking: "继续想" }],
+    }),
   );
 
   assert.equal(next.bubbles.length, before, "不该冒出新气泡");
   const answer = next.bubbles.find((bubble) => bubble.id === chatBubbleId(1, "assistant"))!;
   assert.equal(answer.content, "还在说第一回合");
-  assert.equal(answer.processBlocks?.[1].kind === "tool" && answer.processBlocks[1].resultText, "a.txt");
+  assert.equal(
+    answer.processBlocks?.[1].kind === "tool" && answer.processBlocks[1].resultText,
+    "a.txt",
+  );
   assert.equal(
     answer.processBlocks?.some((block) => block.kind === "thinking" && block.text === "继续想"),
     true,
@@ -151,8 +153,14 @@ test("症状①：插话被 pi 展开过文本也照样在原位认领，并排�
   assert.ok(claimed.content.includes("顺便加个测试"), "换成服务端文本，位置不变");
   assert.equal(next.activeBubbleId, null, "回合边界之后旧气泡不能再被写");
 
-  next = projectStreamEvent(next, event({ type: "assistant_message_start", bubbleId: chatBubbleId(2, "assistant"), turn: 2 }));
-  next = projectStreamEvent(next, event({ type: "delta", bubbleId: chatBubbleId(2, "assistant"), delta: "第二回合的回答" }));
+  next = projectStreamEvent(
+    next,
+    event({ type: "assistant_message_start", bubbleId: chatBubbleId(2, "assistant"), turn: 2 }),
+  );
+  next = projectStreamEvent(
+    next,
+    event({ type: "delta", bubbleId: chatBubbleId(2, "assistant"), delta: "第二回合的回答" }),
+  );
   assert.deepEqual(
     next.bubbles.map((bubble) => [bubble.id, bubble.content]),
     [
@@ -177,17 +185,10 @@ test("症状③：快照落后于本地时，对账照常推进且保留排队�
   const pendingSteer = view.bubbles.find((bubble) => bubble.provisional && bubble.role === "user")!;
   assert.deepEqual(
     merged.map((bubble) => bubble.id),
-    [
-      chatBubbleId(1, "user"),
-      chatBubbleId(1, "assistant"),
-      pendingSteer.id,
-    ],
+    [chatBubbleId(1, "user"), chatBubbleId(1, "assistant"), pendingSteer.id],
     "旧实现会因为 hasPendingSteering 直接跳过对账，这里必须照样合并",
   );
-  assert.equal(
-    merged.find((bubble) => bubble.id === chatBubbleId(1, "assistant"))?.content,
-    "",
-  );
+  assert.equal(merged.find((bubble) => bubble.id === chatBubbleId(1, "assistant"))?.content, "");
 
   // 插话投递之后，快照里出现它的正式气泡：provisional 让位，不留两份
   const delivered: TranscriptMessage[] = [
@@ -202,9 +203,17 @@ test("症状③：快照落后于本地时，对账照常推进且保留排队�
   );
   next = projectStreamEvent(
     next,
-    event({ type: "user_message_start", bubbleId: chatBubbleId(2, "user"), turn: 2, content: "顺便加个测试" }),
+    event({
+      type: "user_message_start",
+      bubbleId: chatBubbleId(2, "user"),
+      turn: 2,
+      content: "顺便加个测试",
+    }),
   );
-  const settled = mergeChatBubbles(next.bubbles, buildChatBubbles(delivered, { isStreaming: true }));
+  const settled = mergeChatBubbles(
+    next.bubbles,
+    buildChatBubbles(delivered, { isStreaming: true }),
+  );
   assert.deepEqual(
     settled.map((bubble) => [bubble.id, bubble.status]),
     [
@@ -237,7 +246,12 @@ test("别的窗口入队时，队列补上缺失的插话气泡", () => {
   // 服务端一旦把它投递出来，user_message_start 会在原位认领
   const claimed = projectStreamEvent(
     synced,
-    event({ type: "user_message_start", bubbleId: chatBubbleId(2, "user"), turn: 2, content: "另一条插话" }),
+    event({
+      type: "user_message_start",
+      bubbleId: chatBubbleId(2, "user"),
+      turn: 2,
+      content: "另一条插话",
+    }),
   );
   assert.equal(claimed.bubbles.at(-1)?.provisional, false);
   assert.equal(claimed.bubbles.at(-1)?.id, chatBubbleId(2, "user"));
@@ -248,19 +262,33 @@ test("迟到的重复 queued 快照不会复活已投递的插话", () => {
   let view = createChatStreamView(base);
 
   // 入队：seq 1，队列里一条
-  view = projectStreamEvent(view, event({ type: "queued", behavior: "steer", steering: ["插话"], seq: 1 }));
+  view = projectStreamEvent(
+    view,
+    event({ type: "queued", behavior: "steer", steering: ["插话"], seq: 1 }),
+  );
   assert.equal(view.bubbles.filter((bubble) => bubble.provisional).length, 1);
 
   // pi 投递前先移出队列（seq 2），随后 user_message_start 在原位认领
-  view = projectStreamEvent(view, event({ type: "queued", behavior: "steer", steering: [], seq: 2 }));
   view = projectStreamEvent(
     view,
-    event({ type: "user_message_start", bubbleId: chatBubbleId(2, "user"), turn: 2, content: "插话" }),
+    event({ type: "queued", behavior: "steer", steering: [], seq: 2 }),
+  );
+  view = projectStreamEvent(
+    view,
+    event({
+      type: "user_message_start",
+      bubbleId: chatBubbleId(2, "user"),
+      turn: 2,
+      content: "插话",
+    }),
   );
   assert.equal(view.bubbles.filter((bubble) => bubble.provisional).length, 0);
 
   // 另一个在途请求的 ack 现在才到：seq 更旧，必须被忽略，否则会冒出一个幽灵
-  const late = projectStreamEvent(view, event({ type: "queued", behavior: "steer", steering: ["插话"], seq: 1 }));
+  const late = projectStreamEvent(
+    view,
+    event({ type: "queued", behavior: "steer", steering: ["插话"], seq: 1 }),
+  );
   assert.equal(late.bubbles.length, view.bubbles.length, "陈旧队列快照不能新增气泡");
   assert.equal(late.bubbles.filter((bubble) => bubble.provisional).length, 0);
 });
@@ -274,7 +302,12 @@ test("提交后问题确认时不会插到占位回答上面（加载圆点不�
   });
   const claimed = projectStreamEvent(
     { ...view, bubbles: placed.bubbles },
-    event({ type: "user_message_start", bubbleId: chatBubbleId(1, "user"), turn: 1, content: "说一个字：好" }),
+    event({
+      type: "user_message_start",
+      bubbleId: chatBubbleId(1, "user"),
+      turn: 1,
+      content: "说一个字：好",
+    }),
   );
   assert.deepEqual(
     claimed.bubbles.map((bubble) => bubble.id),
@@ -305,10 +338,18 @@ test("steer 排队期间圆点留在上一回合，插话被投递后才跟到�
   // 圆点不会同时亮两个，也不会留在插话前面。
   view = projectStreamEvent(
     view,
-    event({ type: "user_message_start", bubbleId: chatBubbleId(2, "user"), turn: 2, content: "插一句" }),
+    event({
+      type: "user_message_start",
+      bubbleId: chatBubbleId(2, "user"),
+      turn: 2,
+      content: "插一句",
+    }),
   );
   assert.equal(streamingBubbleId(view.bubbles), null);
-  assert.equal(view.bubbles.find((bubble) => bubble.id === chatBubbleId(1, "assistant"))?.status, "done");
+  assert.equal(
+    view.bubbles.find((bubble) => bubble.id === chatBubbleId(1, "assistant"))?.status,
+    "done",
+  );
 
   view = projectStreamEvent(
     view,
@@ -327,7 +368,10 @@ test("认不出归属的事件被计数丢弃，不会污染任何气泡", () =>
   const { view } = streamingTurnOne();
   const tolerated = projectStreamEvent(view, event({ type: "delta", delta: "旧服务端的一截" }));
   assert.equal(tolerated.activeBubbleId, chatBubbleId(1, "assistant"));
-  assert.equal(tolerated.bubbles.find((b) => b.id === chatBubbleId(1, "assistant"))?.content, "旧服务端的一截");
+  assert.equal(
+    tolerated.bubbles.find((b) => b.id === chatBubbleId(1, "assistant"))?.content,
+    "旧服务端的一截",
+  );
   assert.equal(tolerated.droppedEvents, 0);
 
   // 回合边界之后没有 active 气泡：宁可不显示，也不猜一个气泡写进去
@@ -355,8 +399,14 @@ test("delta 先于 assistant_message_start 到达时按 id 建气泡并落在对
 test("重复的 cumulative partial 不产生新引用（流式热路径）", () => {
   const view = createChatStreamView([userBubble(1, "问题"), assistantBubble(1)]);
   const blocks = [{ type: "thinking" as const, thinking: "同一段思考" }];
-  const once = projectStreamEvent(view, event({ type: "assistant_partial", bubbleId: chatBubbleId(1, "assistant"), blocks }));
-  const twice = projectStreamEvent(once, event({ type: "assistant_partial", bubbleId: chatBubbleId(1, "assistant"), blocks }));
+  const once = projectStreamEvent(
+    view,
+    event({ type: "assistant_partial", bubbleId: chatBubbleId(1, "assistant"), blocks }),
+  );
+  const twice = projectStreamEvent(
+    once,
+    event({ type: "assistant_partial", bubbleId: chatBubbleId(1, "assistant"), blocks }),
+  );
   assert.equal(twice.bubbles, once.bubbles);
   assert.equal(twice.bubbles[1], once.bubbles[1]);
 });
@@ -378,13 +428,27 @@ test("finalizeChatStreamView 收尾：本地气泡不再挂着 streaming", () =>
 
 test("插话起新回合（服务端当时没在流式）时也能正常渲染", () => {
   // 客户端以为是 steer，服务端其实开了新回合：事件仍带 id，投影不关心是谁发起的
-  let view = createChatStreamView([userBubble(1, "问题"), assistantBubble(1, { content: "答一", status: "done" })]);
+  let view = createChatStreamView([
+    userBubble(1, "问题"),
+    assistantBubble(1, { content: "答一", status: "done" }),
+  ]);
   view = projectStreamEvent(
     view,
-    event({ type: "user_message_start", bubbleId: chatBubbleId(2, "user"), turn: 2, content: "第二条" }),
+    event({
+      type: "user_message_start",
+      bubbleId: chatBubbleId(2, "user"),
+      turn: 2,
+      content: "第二条",
+    }),
   );
-  view = projectStreamEvent(view, event({ type: "assistant_message_start", bubbleId: chatBubbleId(2, "assistant"), turn: 2 }));
-  view = projectStreamEvent(view, event({ type: "delta", bubbleId: chatBubbleId(2, "assistant"), delta: "答二" }));
+  view = projectStreamEvent(
+    view,
+    event({ type: "assistant_message_start", bubbleId: chatBubbleId(2, "assistant"), turn: 2 }),
+  );
+  view = projectStreamEvent(
+    view,
+    event({ type: "delta", bubbleId: chatBubbleId(2, "assistant"), delta: "答二" }),
+  );
   assert.deepEqual(
     view.bubbles.map((bubble) => [bubble.id, bubble.content]),
     [
@@ -410,11 +474,20 @@ test("插话起新回合（服务端当时没在流式）时也能正常渲染",
  */
 test("thinking_delta 逐 token 追加到 liveBlocks，首条 delta 就开块", () => {
   let view = createChatStreamView([userBubble(1, "问题")]);
-  view = projectStreamEvent(view, event({ type: "assistant_message_start", bubbleId: chatBubbleId(1, "assistant"), turn: 1 }));
+  view = projectStreamEvent(
+    view,
+    event({ type: "assistant_message_start", bubbleId: chatBubbleId(1, "assistant"), turn: 1 }),
+  );
 
   const before = view.bubbles[1];
-  view = projectStreamEvent(view, event({ type: "thinking_delta", bubbleId: chatBubbleId(1, "assistant"), delta: "先" }));
-  view = projectStreamEvent(view, event({ type: "thinking_delta", bubbleId: chatBubbleId(1, "assistant"), delta: "想一想" }));
+  view = projectStreamEvent(
+    view,
+    event({ type: "thinking_delta", bubbleId: chatBubbleId(1, "assistant"), delta: "先" }),
+  );
+  view = projectStreamEvent(
+    view,
+    event({ type: "thinking_delta", bubbleId: chatBubbleId(1, "assistant"), delta: "想一想" }),
+  );
   const after = view.bubbles[1];
 
   assert.deepEqual(
@@ -423,26 +496,43 @@ test("thinking_delta 逐 token 追加到 liveBlocks，首条 delta 就开块", (
     [{ kind: "thinking", text: "先想一想", open: true }],
     "两次 delta 合成同一条思考块",
   );
-  assert.deepEqual(after.processBlocks, before.processBlocks, "逐 token 不动持久化列表（累计快照负责）");
+  assert.deepEqual(
+    after.processBlocks,
+    before.processBlocks,
+    "逐 token 不动持久化列表（累计快照负责）",
+  );
   assert.equal(after.status, "streaming");
 
   // 空 delta 必须保持身份，否则每帧都在重建整棵 thread
-  const same = projectStreamEvent(view, event({ type: "thinking_delta", bubbleId: chatBubbleId(1, "assistant"), delta: "" }));
+  const same = projectStreamEvent(
+    view,
+    event({ type: "thinking_delta", bubbleId: chatBubbleId(1, "assistant"), delta: "" }),
+  );
   assert.equal(same.bubbles[1], after, "空 delta 不产生新对象");
 });
 
 test("thinking 的累计快照只在收尾时定稿：开场快照不得给 live 播种正文", () => {
   let view = createChatStreamView([userBubble(1, "问题")]);
-  view = projectStreamEvent(view, event({ type: "assistant_message_start", bubbleId: chatBubbleId(1, "assistant"), turn: 1 }));
   view = projectStreamEvent(
     view,
-    event({ type: "assistant_partial", bubbleId: chatBubbleId(1, "assistant"), blocks: [{ type: "thinking", thinking: "先" }] }),
+    event({ type: "assistant_message_start", bubbleId: chatBubbleId(1, "assistant"), turn: 1 }),
+  );
+  view = projectStreamEvent(
+    view,
+    event({
+      type: "assistant_partial",
+      bubbleId: chatBubbleId(1, "assistant"),
+      blocks: [{ type: "thinking", thinking: "先" }],
+    }),
   );
 
   // 开场快照不带 closeThinking：它的正文是从未来借的，live 列表只认 delta。
   assert.deepEqual(view.bubbles[1].liveBlocks, [], "开场快照不再提前播种推理正文");
 
-  view = projectStreamEvent(view, event({ type: "thinking_delta", bubbleId: chatBubbleId(1, "assistant"), delta: "想一想" }));
+  view = projectStreamEvent(
+    view,
+    event({ type: "thinking_delta", bubbleId: chatBubbleId(1, "assistant"), delta: "想一想" }),
+  );
   view = projectStreamEvent(
     view,
     event({
@@ -454,7 +544,11 @@ test("thinking 的累计快照只在收尾时定稿：开场快照不得给 live
   );
 
   const bubble = view.bubbles[1];
-  assert.equal((bubble.processBlocks?.[0] as { text?: string })?.text, "先想一想", "持久化块由累计快照定稿");
+  assert.equal(
+    (bubble.processBlocks?.[0] as { text?: string })?.text,
+    "先想一想",
+    "持久化块由累计快照定稿",
+  );
   assert.deepEqual(
     bubble.liveBlocks?.slice(-1),
     // 没有 streamKey 的快照（旧服务端）走“文本前缀”兼容路径，那一支本来就不写 `open`，
@@ -477,7 +571,10 @@ test("thinking 的累计快照只在收尾时定稿：开场快照不得给 live
  */
 test("两轮 thinking 文本相同时也各开各的块，不会被并进 tool 上面那一块", () => {
   let view = createChatStreamView([userBubble(1, "问题")]);
-  view = projectStreamEvent(view, event({ type: "assistant_message_start", bubbleId: chatBubbleId(1, "assistant"), turn: 1 }));
+  view = projectStreamEvent(
+    view,
+    event({ type: "assistant_message_start", bubbleId: chatBubbleId(1, "assistant"), turn: 1 }),
+  );
   view = projectStreamEvent(
     view,
     event({
@@ -518,7 +615,11 @@ test("两轮 thinking 文本相同时也各开各的块，不会被并进 tool �
   assert.equal((blocks[0] as { streamKey?: string }).streamKey, "assistant-0-thinking-0");
   assert.equal((blocks[2] as { streamKey?: string }).streamKey, "assistant-1-thinking-0");
   assert.equal((blocks[0] as { open?: boolean }).open, false, "开 tool 时上一轮 thinking 已经关段");
-  assert.equal((blocks[2] as { open?: boolean }).open, undefined, "没收到 delta 前不会自己亮 spinner");
+  assert.equal(
+    (blocks[2] as { open?: boolean }).open,
+    undefined,
+    "没收到 delta 前不会自己亮 spinner",
+  );
 
   // 同 key 的后续 delta / 快照仍然写回同一块，不会一人一块。
   view = projectStreamEvent(
@@ -548,7 +649,11 @@ test("两轮 thinking 文本相同时也各开各的块，不会被并进 tool �
       blocks: [{ type: "thinking", thinking: "我想继续", streamKey: "assistant-1-thinking-0" }],
     }),
   );
-  assert.equal((view.bubbles[1].liveBlocks?.[2] as { open?: boolean }).open, false, "thinking_end 关段");
+  assert.equal(
+    (view.bubbles[1].liveBlocks?.[2] as { open?: boolean } | undefined)?.open,
+    false,
+    "thinking_end 关段",
+  );
 });
 
 /**
@@ -559,7 +664,10 @@ test("两轮 thinking 文本相同时也各开各的块，不会被并进 tool �
  */
 test("执行事件带 call id、流式卡没 id 时绑定到原卡而不是再开一张", () => {
   let view = createChatStreamView([userBubble(1, "问题")]);
-  view = projectStreamEvent(view, event({ type: "assistant_message_start", bubbleId: chatBubbleId(1, "assistant"), turn: 1 }));
+  view = projectStreamEvent(
+    view,
+    event({ type: "assistant_message_start", bubbleId: chatBubbleId(1, "assistant"), turn: 1 }),
+  );
   // 流式阶段 partial 里还取不到 id（provider 先开块后补 id）：只有 slot。
   view = projectStreamEvent(
     view,
@@ -617,22 +725,45 @@ test("执行事件带 call id、流式卡没 id 时绑定到原卡而不是再�
 test("tool_call_stream_delta 按 argsText 逐 token 追加，end 用解析后的 args 覆盖", () => {
   const stream = "assistant-0-tool-content-1";
   let view = createChatStreamView([userBubble(1, "问题")]);
-  view = projectStreamEvent(view, event({ type: "assistant_message_start", bubbleId: chatBubbleId(1, "assistant"), turn: 1 }));
   view = projectStreamEvent(
     view,
-    event({ type: "tool_call_stream_start", bubbleId: chatBubbleId(1, "assistant"), toolStreamId: stream, toolName: "bash", args: {} }),
+    event({ type: "assistant_message_start", bubbleId: chatBubbleId(1, "assistant"), turn: 1 }),
   );
   view = projectStreamEvent(
     view,
-    event({ type: "tool_call_stream_delta", bubbleId: chatBubbleId(1, "assistant"), toolStreamId: stream, argsText: '{"command":"ls ' }),
+    event({
+      type: "tool_call_stream_start",
+      bubbleId: chatBubbleId(1, "assistant"),
+      toolStreamId: stream,
+      toolName: "bash",
+      args: {},
+    }),
   );
   view = projectStreamEvent(
     view,
-    event({ type: "tool_call_stream_delta", bubbleId: chatBubbleId(1, "assistant"), toolStreamId: stream, argsText: '-la"}' }),
+    event({
+      type: "tool_call_stream_delta",
+      bubbleId: chatBubbleId(1, "assistant"),
+      toolStreamId: stream,
+      argsText: '{"command":"ls ',
+    }),
+  );
+  view = projectStreamEvent(
+    view,
+    event({
+      type: "tool_call_stream_delta",
+      bubbleId: chatBubbleId(1, "assistant"),
+      toolStreamId: stream,
+      argsText: '-la"}',
+    }),
   );
 
   const streaming = view.bubbles[1].processBlocks?.[0] as { callText?: string; status?: string };
-  assert.equal(streaming.callText, '{"command":"ls -la"}', "参数文本逐步拼出来，打字机才有东西可演");
+  assert.equal(
+    streaming.callText,
+    '{"command":"ls -la"}',
+    "参数文本逐步拼出来，打字机才有东西可演",
+  );
   assert.equal(streaming.status, "streaming");
 
   view = projectStreamEvent(
@@ -653,28 +784,55 @@ test("tool_call_stream_delta 按 argsText 逐 token 追加，end 用解析后的
 
 test("两个工具并行时 argsText 各写各的块，不串台", () => {
   let view = createChatStreamView([userBubble(1, "问题")]);
-  view = projectStreamEvent(view, event({ type: "assistant_message_start", bubbleId: chatBubbleId(1, "assistant"), turn: 1 }));
+  view = projectStreamEvent(
+    view,
+    event({ type: "assistant_message_start", bubbleId: chatBubbleId(1, "assistant"), turn: 1 }),
+  );
   for (const id of ["s-A", "s-B"]) {
     view = projectStreamEvent(
       view,
-      event({ type: "tool_call_stream_start", bubbleId: chatBubbleId(1, "assistant"), toolStreamId: id, toolName: id, args: {} }),
+      event({
+        type: "tool_call_stream_start",
+        bubbleId: chatBubbleId(1, "assistant"),
+        toolStreamId: id,
+        toolName: id,
+        args: {},
+      }),
     );
   }
   view = projectStreamEvent(
     view,
-    event({ type: "tool_call_stream_delta", bubbleId: chatBubbleId(1, "assistant"), toolStreamId: "s-A", argsText: "A1" }),
+    event({
+      type: "tool_call_stream_delta",
+      bubbleId: chatBubbleId(1, "assistant"),
+      toolStreamId: "s-A",
+      argsText: "A1",
+    }),
   );
   view = projectStreamEvent(
     view,
-    event({ type: "tool_call_stream_delta", bubbleId: chatBubbleId(1, "assistant"), toolStreamId: "s-B", argsText: "B1" }),
+    event({
+      type: "tool_call_stream_delta",
+      bubbleId: chatBubbleId(1, "assistant"),
+      toolStreamId: "s-B",
+      argsText: "B1",
+    }),
   );
   view = projectStreamEvent(
     view,
-    event({ type: "tool_call_stream_delta", bubbleId: chatBubbleId(1, "assistant"), toolStreamId: "s-A", argsText: "A2" }),
+    event({
+      type: "tool_call_stream_delta",
+      bubbleId: chatBubbleId(1, "assistant"),
+      toolStreamId: "s-A",
+      argsText: "A2",
+    }),
   );
 
   assert.deepEqual(
-    view.bubbles[1].processBlocks?.map((block) => [block.toolName, (block as { callText?: string }).callText]),
+    view.bubbles[1].processBlocks?.map((block) => [
+      block.toolName,
+      (block as { callText?: string }).callText,
+    ]),
     [
       ["s-A", "A1A2"],
       ["s-B", "B1"],
@@ -683,7 +841,10 @@ test("两个工具并行时 argsText 各写各的块，不串台", () => {
 });
 
 test("context_usage 事件不寻址气泡，也不算寻址失败", () => {
-  const view = createChatStreamView([userBubble(1, "问题"), assistantBubble(1, { status: "streaming" })]);
+  const view = createChatStreamView([
+    userBubble(1, "问题"),
+    assistantBubble(1, { status: "streaming" }),
+  ]);
 
   const next = projectStreamEvent(view, {
     type: "context_usage",
@@ -723,7 +884,11 @@ test("开场快照的抢跑正文不写进 live 推理块：delta 才是唯一�
   // pi 的 `partial` 是就地改写的活对象：`thinking_start` 那一刻读到的正文，
   // 其实来自还没发出去的 delta。旧实现在这里就把块播种成正文，随后同一批 delta
   // 再 append 一遍 → 「the the book」。
-  const opened = feed({ type: "assistant_partial", closeThinking: false, blocks: snapshotBlocks("The user hasn") });
+  const opened = feed({
+    type: "assistant_partial",
+    closeThinking: false,
+    blocks: snapshotBlocks("The user hasn"),
+  });
   assert.deepEqual(liveThinking(opened), [], "开场快照不得提前落地推理正文");
 
   feed({ type: "thinking_delta", thinkingStreamKey, delta: "The" });
@@ -735,7 +900,11 @@ test("开场快照的抢跑正文不写进 live 推理块：delta 才是唯一�
     closeThinking: true,
     blocks: snapshotBlocks("The user hasn't asked anything"),
   });
-  assert.deepEqual(liveThinking(closed), ["The user hasn't asked anything"], "收尾快照才是权威正文");
+  assert.deepEqual(
+    liveThinking(closed),
+    ["The user hasn't asked anything"],
+    "收尾快照才是权威正文",
+  );
   assert.equal(
     closed.liveBlocks?.filter((block) => block.kind === "thinking").length,
     1,
@@ -789,7 +958,9 @@ test("文本为空的收尾快照只清 open，不碰已流出的正文，且幂
   };
   const key = "assistant-0-thinking-0";
   const openThinking = () =>
-    (view.bubbles[1].liveBlocks ?? []).filter((block) => block.kind === "thinking" && block.open === true);
+    (view.bubbles[1].liveBlocks ?? []).filter(
+      (block) => block.kind === "thinking" && block.open === true,
+    );
   const textlessClose = () =>
     feed({
       type: "assistant_partial",
@@ -819,7 +990,7 @@ test("文本为空的收尾快照只清 open，不碰已流出的正文，且幂
     blocks: [{ type: "thinking", thinking: "让我看看目录结构", streamKey: key }],
   });
   assert.equal(
-    (final.liveBlocks?.[0] as { text?: string }).text,
+    (final.liveBlocks?.[0] as { text?: string } | undefined)?.text,
     "让我看看目录结构",
     "迟到的权威正文照常覆盖",
   );
@@ -877,8 +1048,20 @@ test("同 key 的迟到 delta 并回原块，但不重新点亮：不得另造�
   const key = "assistant-0-thinking-0";
 
   feed({ type: "thinking_delta", thinkingStreamKey: key, delta: "第一轮思考" });
-  feed({ type: "tool_call_stream_start", toolStreamId: "s1", toolCallId: "call1", toolName: "read", args: {} });
-  feed({ type: "tool_execution_end", toolCallId: "call1", toolStreamId: "s1", toolName: "read", result: "ok" });
+  feed({
+    type: "tool_call_stream_start",
+    toolStreamId: "s1",
+    toolCallId: "call1",
+    toolName: "read",
+    args: {},
+  });
+  feed({
+    type: "tool_execution_end",
+    toolCallId: "call1",
+    toolStreamId: "s1",
+    toolName: "read",
+    result: "ok",
+  });
   assert.equal(liveShape(message()), "RT", "工具卡出现时上面的思考已落定");
 
   // pi 每条 assistant 消息只有一个 thinking 块，交错 provider 会在正文/工具之后继续
@@ -894,10 +1077,16 @@ test("同 key 的迟到 delta 并回原块，但不重新点亮：不得另造�
   );
 
   // 收尾快照按 key 合并：同一块只留一份正文，既不重复也不丢
-  feed({ type: "assistant_partial", closeThinking: true, blocks: [{ type: "thinking", thinking: "第一轮思考的后半句", streamKey: key }] });
+  feed({
+    type: "assistant_partial",
+    closeThinking: true,
+    blocks: [{ type: "thinking", thinking: "第一轮思考的后半句", streamKey: key }],
+  });
   assert.equal(liveShape(message()), "RT");
   assert.deepEqual(
-    (message().liveBlocks ?? []).filter((block) => block.kind === "thinking").map((block) => block.text),
+    (message().liveBlocks ?? [])
+      .filter((block) => block.kind === "thinking")
+      .map((block) => block.text),
     ["第一轮思考的后半句"],
     "同一块只有一份正文",
   );
@@ -912,19 +1101,41 @@ test("交错思考不得把正文劈成两句：thinking → text → 迟到 thi
   const { feed, message } = streamFixture(1);
   const key = "assistant-0-thinking-0";
   const thinkingTexts = () =>
-    (message().liveBlocks ?? []).filter((block) => block.kind === "thinking").map((block) => block.text);
+    (message().liveBlocks ?? [])
+      .filter((block) => block.kind === "thinking")
+      .map((block) => block.text);
   const textTexts = () =>
-    (message().liveBlocks ?? []).filter((block) => block.kind === "text").map((block) => block.text);
+    (message().liveBlocks ?? [])
+      .filter((block) => block.kind === "text")
+      .map((block) => block.text);
 
-  feed({ type: "thinking_delta", thinkingStreamKey: key, delta: "All 9 pass. Let me run dom9.py again (3 " });
+  feed({
+    type: "thinking_delta",
+    thinkingStreamKey: key,
+    delta: "All 9 pass. Let me run dom9.py again (3 ",
+  });
   feed({ type: "delta", delta: "改动" });
   // provider 交错：正文开始之后 reasoning 又回来了（同一块、同一 key）
   feed({ type: "thinking_delta", thinkingStreamKey: key, delta: "attempts)." });
   feed({ type: "delta", delta: "齐了，重跑 DOM 探针（3 轮真实工具调用）。" });
-  feed({ type: "tool_call_stream_start", toolStreamId: "s1", toolCallId: "call1", toolName: "bash", args: {} });
+  feed({
+    type: "tool_call_stream_start",
+    toolStreamId: "s1",
+    toolCallId: "call1",
+    toolName: "bash",
+    args: {},
+  });
 
-  assert.equal(liveShape(message()), "RXT", "一块思考 + 一句正文 + 一张工具卡，中间不得再插一块思考");
-  assert.deepEqual(thinkingTexts(), ["All 9 pass. Let me run dom9.py again (3 attempts)."], "回流思考合回原块");
+  assert.equal(
+    liveShape(message()),
+    "RXT",
+    "一块思考 + 一句正文 + 一张工具卡，中间不得再插一块思考",
+  );
+  assert.deepEqual(
+    thinkingTexts(),
+    ["All 9 pass. Let me run dom9.py again (3 attempts)."],
+    "回流思考合回原块",
+  );
   assert.deepEqual(
     textTexts(),
     ["改动齐了，重跑 DOM 探针（3 轮真实工具调用）。"],
@@ -932,7 +1143,17 @@ test("交错思考不得把正文劈成两句：thinking → text → 迟到 thi
   );
 
   // 收尾：pi 的权威形状就是一块 thinking + 一句 text
-  feed({ type: "assistant_partial", closeThinking: true, blocks: [{ type: "thinking", thinking: "All 9 pass. Let me run dom9.py again (3 attempts).", streamKey: key }] });
+  feed({
+    type: "assistant_partial",
+    closeThinking: true,
+    blocks: [
+      {
+        type: "thinking",
+        thinking: "All 9 pass. Let me run dom9.py again (3 attempts).",
+        streamKey: key,
+      },
+    ],
+  });
   assert.equal(liveShape(message()), "RXT");
   assert.deepEqual(thinkingTexts(), ["All 9 pass. Let me run dom9.py again (3 attempts)."]);
   assert.deepEqual(textTexts(), ["改动齐了，重跑 DOM 探针（3 轮真实工具调用）。"]);
@@ -945,11 +1166,17 @@ test("丢掉一个 thinking delta 时，收尾快照把原块补齐（不新增�
   feed({ type: "thinking_delta", thinkingStreamKey: key, delta: "我先想" });
   feed({ type: "delta", delta: "正文" });
   feed({ type: "thinking_delta", thinkingStreamKey: key, delta: "再" });
-  feed({ type: "assistant_partial", closeThinking: true, blocks: [{ type: "thinking", thinking: "我先想再想想", streamKey: key }] });
+  feed({
+    type: "assistant_partial",
+    closeThinking: true,
+    blocks: [{ type: "thinking", thinking: "我先想再想想", streamKey: key }],
+  });
 
   assert.equal(liveShape(message()), "RX");
   assert.deepEqual(
-    (message().liveBlocks ?? []).filter((block) => block.kind === "thinking").map((block) => block.text),
+    (message().liveBlocks ?? [])
+      .filter((block) => block.kind === "thinking")
+      .map((block) => block.text),
     ["我先想再想想"],
     "收尾正文是权威全量，直接补齐同一块",
   );
@@ -959,10 +1186,18 @@ test("旧服务端按段发的 `#n` key 也并回同一块（升级窗口内的�
   const { feed, message } = streamFixture(1);
   const key = "assistant-0-thinking-0";
   const thinkingTexts = () =>
-    (message().liveBlocks ?? []).filter((block) => block.kind === "thinking").map((block) => block.text);
+    (message().liveBlocks ?? [])
+      .filter((block) => block.kind === "thinking")
+      .map((block) => block.text);
 
   feed({ type: "thinking_delta", thinkingStreamKey: key, delta: "我先想" });
-  feed({ type: "tool_call_stream_start", toolStreamId: "s1", toolCallId: "call1", toolName: "read", args: {} });
+  feed({
+    type: "tool_call_stream_start",
+    toolStreamId: "s1",
+    toolCallId: "call1",
+    toolName: "read",
+    args: {},
+  });
   feed({ type: "thinking_delta", thinkingStreamKey: `${key}#2`, delta: "再想想" });
 
   assert.equal(liveShape(message()), "RT", "`#2` 属于同一块：不得在工具卡下面另开面板");
@@ -986,9 +1221,19 @@ test("已存在工具块的活动也关闭它上面的思考面板（settle 丢�
   // 之类的事件缺口造成；直接按块代数构造，锁住 matched 分支的关闭行为。
   const openAbove: MessageProcessBlock = { kind: "thinking", text: "想想", open: true };
   const tool: MessageProcessBlock = {
-    kind: "tool", toolCallId: "call1", toolName: "bash", callText: "", status: "streaming",
+    kind: "tool",
+    toolCallId: "call1",
+    toolName: "bash",
+    callText: "",
+    status: "streaming",
   };
-  const probe: MessageProcessBlock = { kind: "tool", toolCallId: "call1", toolName: "bash", callText: "", status: "streaming" };
+  const probe: MessageProcessBlock = {
+    kind: "tool",
+    toolCallId: "call1",
+    toolName: "bash",
+    callText: "",
+    status: "streaming",
+  };
 
   // 参数 typewriter 命中已有块（appendToolCallArgsText 的 matched 分支）
   const afterArgs = appendToolCallArgsText([openAbove, tool], probe, "ls -l");
@@ -997,14 +1242,24 @@ test("已存在工具块的活动也关闭它上面的思考面板（settle 丢�
   // 执行事件命中已有块（upsertToolProcessBlock 的 matched 分支）——
   // 用全新的 open 列表，不依赖 args 路径先关过圈
   const afterExec = upsertToolProcessBlock([{ kind: "thinking", text: "想想", open: true }, tool], {
-    kind: "tool", toolCallId: "call1", toolName: "bash", callText: "ls -l", resultText: "out", status: "done",
+    kind: "tool",
+    toolCallId: "call1",
+    toolName: "bash",
+    callText: "ls -l",
+    resultText: "out",
+    status: "done",
   });
   assert.equal(shapeOf(afterExec), "RT", "执行事件同样要关掉上面的 open 面板");
 
   // 反向保证：matched 分支只关上面的，不碰下面的并发思考（S4）
   const concurrent: MessageProcessBlock = { kind: "thinking", text: "第二轮还在想", open: true };
   const afterLate = upsertToolProcessBlock([tool, concurrent], {
-    kind: "tool", toolCallId: "call1", toolName: "bash", callText: "ls -l", resultText: "out", status: "done",
+    kind: "tool",
+    toolCallId: "call1",
+    toolName: "bash",
+    callText: "ls -l",
+    resultText: "out",
+    status: "done",
   });
   assert.equal(shapeOf(afterLate), "TR*", "迟到的工具事件不得误伤下方仍在输出的思考");
 });
@@ -1014,15 +1269,31 @@ test("工具块活动只关它上面的思考：下方并发思考的流式面�
 
   // 第一轮：思考 → 工具1 开始执行
   feed({ type: "thinking_delta", thinkingStreamKey: "assistant-0-thinking-0", delta: "第一轮" });
-  feed({ type: "tool_call_stream_start", toolStreamId: "s1", toolCallId: "call1", toolName: "bash", args: {} });
+  feed({
+    type: "tool_call_stream_start",
+    toolStreamId: "s1",
+    toolCallId: "call1",
+    toolName: "bash",
+    args: {},
+  });
   feed({ type: "tool_execution_start", toolCallId: "call1", toolStreamId: "s1", toolName: "bash" });
 
   // 第二轮思考在工具1仍在执行时开始（交错思考）：面板在工具卡下面，还在输出
   feed({ type: "assistant_message_start", turn: 1 });
-  feed({ type: "thinking_delta", thinkingStreamKey: "assistant-1-thinking-0", delta: "第二轮还在想" });
+  feed({
+    type: "thinking_delta",
+    thinkingStreamKey: "assistant-1-thinking-0",
+    delta: "第二轮还在想",
+  });
   assert.equal(liveShape(message()), "RTR*", "下方并发思考的流式面板必须保持 running");
 
   // 工具1 的迟到执行事件命中已有块：只允许关它上面的（没有），不得碰下方那块
-  feed({ type: "tool_execution_update", toolCallId: "call1", toolStreamId: "s1", toolName: "bash", partialResult: "chunk" });
+  feed({
+    type: "tool_execution_update",
+    toolCallId: "call1",
+    toolStreamId: "s1",
+    toolName: "bash",
+    partialResult: "chunk",
+  });
   assert.equal(liveShape(message()), "RTR*", "迟到的工具事件不得误伤下方仍在输出的思考");
 });

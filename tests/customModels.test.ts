@@ -101,7 +101,10 @@ test("models.json 里的注释被容忍（pi 自己也是这么读的）", () =>
 });
 
 test("坏 JSON / 坏结构只报错，绝不返回空配置让人覆盖掉文件", () => {
-  assert.throws(() => parseModelsConfig("{ not json", "~/.pi/agent/models.json"), /is not valid JSON/);
+  assert.throws(
+    () => parseModelsConfig("{ not json", "~/.pi/agent/models.json"),
+    /is not valid JSON/,
+  );
   assert.throws(() => parseModelsConfig("[]"), /must contain a top-level object/);
   assert.throws(() => parseModelsConfig('{"providers": []}'), /"providers" key in/);
   assert.throws(() => parseModelsConfig('{"providers": {"a": 1}}'), /The "a" provider in/);
@@ -197,17 +200,28 @@ test("内置供应商没有 baseUrl：照样能加模型（Bedrock / Vertex 没�
 
 test("内置模式给了坏地址照样拦：空可以，错不行", () => {
   assert.throws(
-    () => normalizeCustomModelInput(
-      { providerName: "Amazon Bedrock", providerMode: "builtin", baseUrl: "ftp://a.dev", apiKey: "k", model: "m1" },
-      { requireApiKey: false },
-    ),
+    () =>
+      normalizeCustomModelInput(
+        {
+          providerName: "Amazon Bedrock",
+          providerMode: "builtin",
+          baseUrl: "ftp://a.dev",
+          apiKey: "k",
+          model: "m1",
+        },
+        { requireApiKey: false },
+      ),
     /must be http or https/,
   );
 });
 
 test("自定义端点没 baseUrl 仍然必须报：不能把空地址当合法写进文件", () => {
   assert.throws(
-    () => normalizeCustomModelInput({ providerName: "GW", baseUrl: "", apiKey: "k", model: "m1" }, { requireApiKey: true }),
+    () =>
+      normalizeCustomModelInput(
+        { providerName: "GW", baseUrl: "", apiKey: "k", model: "m1" },
+        { requireApiKey: true },
+      ),
     /Base URL is required/,
   );
 });
@@ -215,7 +229,10 @@ test("自定义端点没 baseUrl 仍然必须报：不能把空地址当合法�
 test("往内置供应商里补行：不会因为没地址给自己造个 amazon-bedrock-2", () => {
   const config = {
     providers: {
-      "amazon-bedrock": { name: "Amazon Bedrock", models: [{ id: "amazon.nova-lite-v1:0", name: "Nova Lite" }] },
+      "amazon-bedrock": {
+        name: "Amazon Bedrock",
+        models: [{ id: "amazon.nova-lite-v1:0", name: "Nova Lite" }],
+      },
     },
   };
   const entry = normalizeCustomModelInput(
@@ -232,10 +249,10 @@ test("往内置供应商里补行：不会因为没地址给自己造个 amazon-
   );
   const result = upsertCustomModel(config, entry);
   assert.equal(result.providerId, "amazon-bedrock");
-  assert.deepEqual(result.config.providers["amazon-bedrock"].models.map((model) => model.id), [
-    "amazon.nova-lite-v1:0",
-    "amazon.nova-2-lite-v1:0",
-  ]);
+  assert.deepEqual(
+    result.config.providers["amazon-bedrock"].models.map((model) => model.id),
+    ["amazon.nova-lite-v1:0", "amazon.nova-2-lite-v1:0"],
+  );
   // 内置供应商不落 provider 级 baseUrl：它会盖到该家每个模型上。
   assert.equal(result.config.providers["amazon-bedrock"].baseUrl, undefined);
 });
@@ -311,7 +328,10 @@ test("同名的第二个模型并进同一个 provider", () => {
 
 test("同名但地址不同就是另一个供应商，不能覆盖别人的 baseUrl", () => {
   const first = upsertCustomModel(emptyModelsConfig(), draftInput());
-  const second = upsertCustomModel(first.config, draftInput({ model: "other" , baseUrl: "https://elsewhere.dev/v1" }));
+  const second = upsertCustomModel(
+    first.config,
+    draftInput({ model: "other", baseUrl: "https://elsewhere.dev/v1" }),
+  );
 
   assert.notEqual(second.providerId, first.providerId);
   assert.equal(first.config.providers[first.providerId].baseUrl, "https://gateway.example.com/v1");
@@ -326,16 +346,23 @@ test("编辑同一行：改模型 id 会换掉旧记录，并保留原 cost", ()
   assert.equal(created.providerId, "bailian");
   assert.equal(created.previousModelId, "qwen3.7-plus");
   const models = created.config.providers.bailian.models;
-  assert.deepEqual(models.map((model) => model.id), ["qwen3.8-flash"]);
+  assert.deepEqual(
+    models.map((model) => model.id),
+    ["qwen3.8-flash"],
+  );
   assert.deepEqual(models[0].cost, bailian.models[0].cost, "价格不是表单字段，编辑时不该被清掉");
   assert.deepEqual(created.config.providers.bailian.compat, bailian.compat);
   assert.equal(created.config.providers.bailian.name, "我的百炼");
 });
 
 test("编辑时没改模型 id 就是原地替换", () => {
-  const created = upsertCustomModel(handWritten, draftInput({ model: "qwen3.7-plus", providerName: "Bailian" }), {
-    target: { providerId: "bailian", model: "qwen3.7-plus" },
-  });
+  const created = upsertCustomModel(
+    handWritten,
+    draftInput({ model: "qwen3.7-plus", providerName: "Bailian" }),
+    {
+      target: { providerId: "bailian", model: "qwen3.7-plus" },
+    },
+  );
   const models = created.config.providers.bailian.models;
   assert.equal(models.length, 1);
   assert.equal(models[0].id, "qwen3.7-plus");
@@ -349,22 +376,34 @@ test("findCustomModel 按 provider+model 定位，provider id 大小写不敏感
 });
 
 test("删除模型：provider 还有别的模型就留着，空了就整体删掉", () => {
-  const two = upsertCustomModel(handWritten, draftInput({ providerName: "Bailian", baseUrl: bailian.baseUrl }));
+  const two = upsertCustomModel(
+    handWritten,
+    draftInput({ providerName: "Bailian", baseUrl: bailian.baseUrl }),
+  );
   const models = two.config.providers.bailian.models;
   assert.equal(models.length, 2, "同名同地址就是往同一个供应商里加一行");
 
   const oneLeft = removeCustomModel(two.config, { providerId: "bailian", model: "qwen3.8-flash" });
   assert.equal(oneLeft.providerRemoved, false);
-  assert.deepEqual(oneLeft.config.providers.bailian.models.map((model) => model.id), ["qwen3.7-plus"]);
+  assert.deepEqual(
+    oneLeft.config.providers.bailian.models.map((model) => model.id),
+    ["qwen3.7-plus"],
+  );
 
-  const noneLeft = removeCustomModel(oneLeft.config, { providerId: "bailian", model: "qwen3.7-plus" });
+  const noneLeft = removeCustomModel(oneLeft.config, {
+    providerId: "bailian",
+    model: "qwen3.7-plus",
+  });
   assert.equal(noneLeft.providerRemoved, true);
   assert.ok(!("bailian" in noneLeft.config.providers));
   assert.ok("local-ollama" in noneLeft.config.providers);
 });
 
 test("删除不存在的模型报错而不是静默成功", () => {
-  assert.throws(() => removeCustomModel(handWritten, { providerId: "nope", model: "x" }), /no longer there/);
+  assert.throws(
+    () => removeCustomModel(handWritten, { providerId: "nope", model: "x" }),
+    /no longer there/,
+  );
   assert.throws(
     () => removeCustomModel(handWritten, { providerId: "bailian", model: "ghost" }),
     /no longer there/,
@@ -373,7 +412,10 @@ test("删除不存在的模型报错而不是静默成功", () => {
 
 test("加完再删回到原点", () => {
   const added = upsertCustomModel(handWritten, draftInput());
-  const removed = removeCustomModel(added.config, { providerId: added.providerId, model: "qwen3.8-flash" });
+  const removed = removeCustomModel(added.config, {
+    providerId: added.providerId,
+    model: "qwen3.8-flash",
+  });
   assert.deepEqual(removed.config, handWritten);
 });
 
@@ -397,10 +439,11 @@ test("resolveProviderTarget 与 upsert 落在同一个 provider 上（决定要�
  * “API key is required.” 打死（OAuth 登录了也没用）。同类还有 10 家，见 providerIds 表。
  */
 test("内置供应商按真 id 落盘：名字和 id 不一致时不能被重算成另一个 id", () => {
-  const builtinDraft = (providerId, providerName) => normalizeCustomModelInput(
-    { providerId, providerName, providerMode: "builtin", baseUrl: "", model: "m1" },
-    { requireApiKey: false },
-  );
+  const builtinDraft = (providerId, providerName) =>
+    normalizeCustomModelInput(
+      { providerId, providerName, providerMode: "builtin", baseUrl: "", model: "m1" },
+      { requireApiKey: false },
+    );
 
   for (const [providerId, providerName] of [
     ["kimi-coding", "Kimi For Coding"],
@@ -418,12 +461,22 @@ test("内置供应商按真 id 落盘：名字和 id 不一致时不能被重算
 
 test("自定义供应商仍然按名字生成 id、并避开已占用的 id（这条不能被上面的修复带偏）", () => {
   const custom = normalizeCustomModelInput(
-    { providerName: "My Gateway", baseUrl: "https://gateway.example.com/v1", apiKey: "sk-test-123", model: "m1" },
+    {
+      providerName: "My Gateway",
+      baseUrl: "https://gateway.example.com/v1",
+      apiKey: "sk-test-123",
+      model: "m1",
+    },
     { requireApiKey: true },
   );
-  assert.equal(resolveProviderTarget({ providers: {} }, custom, undefined).providerId, "my-gateway");
+  assert.equal(
+    resolveProviderTarget({ providers: {} }, custom, undefined).providerId,
+    "my-gateway",
+  );
   // 名字 slug 已被另一家占用（地址不同）= 新的一家，加后缀而不是盖上去。
-  const withExisting = { providers: { "my-gateway": { name: "Other", baseUrl: "https://other.dev/v1", models: [] } } };
+  const withExisting = {
+    providers: { "my-gateway": { name: "Other", baseUrl: "https://other.dev/v1", models: [] } },
+  };
   assert.equal(resolveProviderTarget(withExisting, custom, undefined).providerId, "my-gateway-2");
 });
 
@@ -454,7 +507,7 @@ test("探测失败时给出人能照做的文案，401 不写成 404", () => {
   // 404 的报错体是一段 JSON：贴原文等于没说。要把 message 挑出来，同时留住 /v1 那条提示。
   assert.equal(
     describeTestFailure(404, JSON.stringify({ error: { message: "no such route" } })),
-    'The endpoint returned no model list (404): no such route. Check whether the Base URL should end with /v1.',
+    "The endpoint returned no model list (404): no such route. Check whether the Base URL should end with /v1.",
   );
   // 报体不是合法 JSON：原文贴回去也比什么都没有强
   assert.equal(
@@ -466,12 +519,23 @@ test("探测失败时给出人能照做的文案，401 不写成 404", () => {
 });
 
 test("没连上时报“访问不了哪里”，而不是 fetch failed", () => {
-  const dns = Object.assign(new TypeError("fetch failed"), { cause: new Error("getaddrinfo ENOTFOUND a.dev") });
-  assert.equal(describeConnectionFailure("https://a.dev/v1", dns), "Cannot reach a.dev: getaddrinfo ENOTFOUND a.dev");
+  const dns = Object.assign(new TypeError("fetch failed"), {
+    cause: new Error("getaddrinfo ENOTFOUND a.dev"),
+  });
+  assert.equal(
+    describeConnectionFailure("https://a.dev/v1", dns),
+    "Cannot reach a.dev: getaddrinfo ENOTFOUND a.dev",
+  );
 
-  assert.match(describeConnectionFailure("https://a.dev/v1", { name: "TimeoutError" }), /Connection to a\.dev timed out/);
+  assert.match(
+    describeConnectionFailure("https://a.dev/v1", { name: "TimeoutError" }),
+    /Connection to a\.dev timed out/,
+  );
   // 带状态码的交给 describeTestFailure，别把 HTTP 错说成网络错。
-  assert.match(describeConnectionFailure("https://a.dev/v1", { status: 401, body: "bad key" }), /Authentication failed/);
+  assert.match(
+    describeConnectionFailure("https://a.dev/v1", { status: 401, body: "bad key" }),
+    /Authentication failed/,
+  );
   // 地址本身不合法时也不能抛。
   assert.match(describeConnectionFailure("not a url", new Error("boom")), /not a url/);
 });
@@ -484,15 +548,23 @@ test("prettifyModelId 只按分隔符断词", () => {
 
 /* ----------------------------------------------- 批量添加 / 内置供应商 */
 
-const catalogModel = (id, extra = {}) => ({ model: { id, name: `Cat ${id}`, api: "openai-completions", ...extra } });
+const catalogModel = (id, extra = {}) => ({
+  model: { id, name: `Cat ${id}`, api: "openai-completions", ...extra },
+});
 
 test("批量：一次把多个模型写进同一个 provider，重复勾选只留一条", () => {
-  const entries = normalizeCustomModelInputs({
-    providerName: "Bailian",
-    baseUrl: bailian.baseUrl,
-    models: [catalogModel("qwen-a"), catalogModel("qwen-b"), catalogModel("qwen-a")],
-  }, { requireApiKey: false });
-  assert.deepEqual(entries.map((entry) => entry.model.id), ["qwen-a", "qwen-b"]);
+  const entries = normalizeCustomModelInputs(
+    {
+      providerName: "Bailian",
+      baseUrl: bailian.baseUrl,
+      models: [catalogModel("qwen-a"), catalogModel("qwen-b"), catalogModel("qwen-a")],
+    },
+    { requireApiKey: false },
+  );
+  assert.deepEqual(
+    entries.map((entry) => entry.model.id),
+    ["qwen-a", "qwen-b"],
+  );
 
   const result = upsertCustomModels(handWritten, entries);
   assert.deepEqual(result.providerIds, ["bailian"]);
@@ -508,12 +580,15 @@ test("批量：一次把多个模型写进同一个 provider，重复勾选只�
 test("内置供应商：只补模型行，不写 baseUrl/api/authHeader", () => {
   // models.json 的 provider baseUrl 会盖到该 provider 的每个模型上，一家多地址
   // （xai / azure）会被改坏；鉴权也该由内置 provider 自己决定。
-  const [entry] = normalizeCustomModelInputs({
-    providerName: "Anthropic",
-    baseUrl: "https://api.anthropic.com",
-    providerMode: "builtin",
-    models: [{ model: { id: "claude-x", name: "Claude X", api: "anthropic-messages" } }],
-  }, { requireApiKey: false });
+  const [entry] = normalizeCustomModelInputs(
+    {
+      providerName: "Anthropic",
+      baseUrl: "https://api.anthropic.com",
+      providerMode: "builtin",
+      models: [{ model: { id: "claude-x", name: "Claude X", api: "anthropic-messages" } }],
+    },
+    { requireApiKey: false },
+  );
   const { config } = upsertCustomModels(emptyModelsConfig(), [entry]);
   const provider = config.providers.anthropic;
   assert.equal(provider.baseUrl, undefined);
@@ -552,13 +627,18 @@ test("写内置模型必须整条抄目录：cost / compat / thinkingLevelMap �
   assert.equal(seed.provider, undefined, "runtime 内部字段不能进文件");
   assert.equal(seed.id, undefined);
 
-  const [entry] = normalizeCustomModelInputs({
-    providerName: "Anthropic",
-    baseUrl: "https://api.anthropic.com",
-    providerMode: "builtin",
-    models: [{ model: { id: "claude-sonnet-4-5" } }],
-  }, { requireApiKey: false });
-  const { config } = upsertCustomModels(emptyModelsConfig(), [entry], { seeds: { "claude-sonnet-4-5": seed } });
+  const [entry] = normalizeCustomModelInputs(
+    {
+      providerName: "Anthropic",
+      baseUrl: "https://api.anthropic.com",
+      providerMode: "builtin",
+      models: [{ model: { id: "claude-sonnet-4-5" } }],
+    },
+    { requireApiKey: false },
+  );
+  const { config } = upsertCustomModels(emptyModelsConfig(), [entry], {
+    seeds: { "claude-sonnet-4-5": seed },
+  });
   assert.deepEqual(config.providers.anthropic.models[0], {
     id: "claude-sonnet-4-5",
     name: "Claude Sonnet 4.5 (latest)",
@@ -592,39 +672,67 @@ test("pi 1.0.2 的 samplingParamsByThinkingLevel 不能被编辑器吃掉（它�
   assert.deepEqual(seed?.samplingParamsByThinkingLevel, byLevel);
   assert.deepEqual(seed?.samplingParams, { temperature: 1.0, top_p: 0.95 });
 
-  const [entry] = normalizeCustomModelInputs({
-    providerName: "Seed", baseUrl: "https://seed.dev/v1", providerMode: "builtin",
-    models: [{ model: { id: "qwen-thinking-model" } }],
-  }, { requireApiKey: false });
-  const written = upsertCustomModels(emptyModelsConfig(), [entry], { seeds: { "qwen-thinking-model": seed } })
-    .config.providers.seed.models[0];
+  const [entry] = normalizeCustomModelInputs(
+    {
+      providerName: "Seed",
+      baseUrl: "https://seed.dev/v1",
+      providerMode: "builtin",
+      models: [{ model: { id: "qwen-thinking-model" } }],
+    },
+    { requireApiKey: false },
+  );
+  const written = upsertCustomModels(emptyModelsConfig(), [entry], {
+    seeds: { "qwen-thinking-model": seed },
+  }).config.providers.seed.models[0];
   assert.deepEqual(written.samplingParamsByThinkingLevel, byLevel, "目录→文件那一步不能漏字段");
 
   // 第二次编辑只改名字：文件里已有的那张表优先于目录，且不能被重建掉。
-  const renamed = normalizeCustomModelInputs({
-    providerName: "Seed", baseUrl: "https://seed.dev/v1", providerMode: "builtin",
-    models: [{ model: { id: "qwen-thinking-model", name: "我改的名" } }],
-  }, { requireApiKey: false });
+  const renamed = normalizeCustomModelInputs(
+    {
+      providerName: "Seed",
+      baseUrl: "https://seed.dev/v1",
+      providerMode: "builtin",
+      models: [{ model: { id: "qwen-thinking-model", name: "我改的名" } }],
+    },
+    { requireApiKey: false },
+  );
   const again = upsertCustomModels(
-    upsertCustomModels(emptyModelsConfig(), [entry], { seeds: { "qwen-thinking-model": seed } }).config,
+    upsertCustomModels(emptyModelsConfig(), [entry], { seeds: { "qwen-thinking-model": seed } })
+      .config,
     renamed,
     { seeds: { "qwen-thinking-model": seed } },
   ).config.providers.seed.models[0];
   assert.equal(again.name, "我改的名");
-  assert.deepEqual(again.samplingParamsByThinkingLevel, byLevel, "改一次名字就把按档采样表冲掉 = 用户配置静默丢失");
+  assert.deepEqual(
+    again.samplingParamsByThinkingLevel,
+    byLevel,
+    "改一次名字就把按档采样表冲掉 = 用户配置静默丢失",
+  );
 });
 
 test("用户显式给的字段盖在目录之上，没给的沿用目录", () => {
   const seed = catalogSeedFromModel({
-    id: "m", name: "目录名", api: "openai-completions", baseUrl: "https://seed.dev/v1",
-    contextWindow: 400000, maxTokens: 8000, reasoning: true, input: ["text"],
+    id: "m",
+    name: "目录名",
+    api: "openai-completions",
+    baseUrl: "https://seed.dev/v1",
+    contextWindow: 400000,
+    maxTokens: 8000,
+    reasoning: true,
+    input: ["text"],
     cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
   });
-  const [entry] = normalizeCustomModelInputs({
-    providerName: "Seed", baseUrl: "https://seed.dev/v1", providerMode: "builtin",
-    models: [{ model: { id: "m", name: "我自己起的名字", contextWindow: 128000 } }],
-  }, { requireApiKey: false });
-  const model = upsertCustomModels(emptyModelsConfig(), [entry], { seeds: { m: seed } }).config.providers.seed.models[0];
+  const [entry] = normalizeCustomModelInputs(
+    {
+      providerName: "Seed",
+      baseUrl: "https://seed.dev/v1",
+      providerMode: "builtin",
+      models: [{ model: { id: "m", name: "我自己起的名字", contextWindow: 128000 } }],
+    },
+    { requireApiKey: false },
+  );
+  const model = upsertCustomModels(emptyModelsConfig(), [entry], { seeds: { m: seed } }).config
+    .providers.seed.models[0];
   assert.equal(model.name, "我自己起的名字");
   assert.equal(model.contextWindow, 128000);
   assert.equal(model.maxTokens, 8000, "没改的字段不能被默认值 8192 盖掉");
@@ -633,49 +741,88 @@ test("用户显式给的字段盖在目录之上，没给的沿用目录", () =>
 });
 
 test("编辑已有行时，文件里原有的值优先于目录", () => {
-  const seeded = catalogSeedFromModel({ id: "m", name: "目录名", api: "openai-completions", baseUrl: "https://seed.dev/v1", contextWindow: 400000, maxTokens: 8000, cost: { input: 7, output: 8, cacheRead: 1, cacheWrite: 2 } });
-  const first = normalizeCustomModelInputs({
-    providerName: "Seed", baseUrl: "https://seed.dev/v1", providerMode: "builtin",
-    models: [{ model: { id: "m", name: "手改的名" } }],
-  }, { requireApiKey: false });
+  const seeded = catalogSeedFromModel({
+    id: "m",
+    name: "目录名",
+    api: "openai-completions",
+    baseUrl: "https://seed.dev/v1",
+    contextWindow: 400000,
+    maxTokens: 8000,
+    cost: { input: 7, output: 8, cacheRead: 1, cacheWrite: 2 },
+  });
+  const first = normalizeCustomModelInputs(
+    {
+      providerName: "Seed",
+      baseUrl: "https://seed.dev/v1",
+      providerMode: "builtin",
+      models: [{ model: { id: "m", name: "手改的名" } }],
+    },
+    { requireApiKey: false },
+  );
   const config = upsertCustomModels(emptyModelsConfig(), first, { seeds: { m: seeded } }).config;
 
-  const second = normalizeCustomModelInputs({
-    providerName: "Seed", baseUrl: "https://seed.dev/v1", providerMode: "builtin",
-    models: [{ model: { id: "m" } }],
-  }, { requireApiKey: false });
-  const again = upsertCustomModels(config, second, { seeds: { m: seeded } }).config.providers.seed.models[0];
+  const second = normalizeCustomModelInputs(
+    {
+      providerName: "Seed",
+      baseUrl: "https://seed.dev/v1",
+      providerMode: "builtin",
+      models: [{ model: { id: "m" } }],
+    },
+    { requireApiKey: false },
+  );
+  const again = upsertCustomModels(config, second, { seeds: { m: seeded } }).config.providers.seed
+    .models[0];
   assert.equal(again.name, "手改的名", "第二次保存不该把用户改过的展示名冲掉");
   assert.deepEqual(again.cost, seeded.cost);
 });
 
 test("批量往内置供应商里加：第二条不能变成 anthropic-2", () => {
   // 内置 provider 在文件里没有 baseUrl（写了会盖到该家所有模型上），第二条只能按 id 认。
-  const builtinEntries = (ids) => normalizeCustomModelInputs({
-    providerName: "Anthropic",
-    baseUrl: "https://api.anthropic.com",
-    providerMode: "builtin",
-    models: ids.map((id) => ({ model: { id, name: id, api: "anthropic-messages" } })),
-  }, { requireApiKey: false });
-  const { config } = upsertCustomModels(emptyModelsConfig(), builtinEntries(["claude-a", "claude-b", "claude-c"]));
+  const builtinEntries = (ids) =>
+    normalizeCustomModelInputs(
+      {
+        providerName: "Anthropic",
+        baseUrl: "https://api.anthropic.com",
+        providerMode: "builtin",
+        models: ids.map((id) => ({ model: { id, name: id, api: "anthropic-messages" } })),
+      },
+      { requireApiKey: false },
+    );
+  const { config } = upsertCustomModels(
+    emptyModelsConfig(),
+    builtinEntries(["claude-a", "claude-b", "claude-c"]),
+  );
   assert.deepEqual(Object.keys(config.providers), ["anthropic"]);
-  assert.deepEqual(config.providers.anthropic.models.map((model) => model.id), ["claude-a", "claude-b", "claude-c"]);
+  assert.deepEqual(
+    config.providers.anthropic.models.map((model) => model.id),
+    ["claude-a", "claude-b", "claude-c"],
+  );
 
   // 自定义端点没这个豁免：同名不同地址仍然是两家。
-  const clash = normalizeCustomModelInputs({
-    providerName: "Anthropic",
-    baseUrl: "https://proxy.example.com/v1",
-    models: [{ model: "x" }],
-  }, { requireApiKey: false });
-  assert.notEqual(upsertCustomModels(emptyModelsConfig(), [...builtinEntries(["claude-a"]), ...clash]).providerIds.length, 1);
+  const clash = normalizeCustomModelInputs(
+    {
+      providerName: "Anthropic",
+      baseUrl: "https://proxy.example.com/v1",
+      models: [{ model: "x" }],
+    },
+    { requireApiKey: false },
+  );
+  assert.notEqual(
+    upsertCustomModels(emptyModelsConfig(), [...builtinEntries(["claude-a"]), ...clash]).providerIds
+      .length,
+    1,
+  );
 });
 
 test("自定义端点仍然写全 baseUrl/api/authHeader 并补零价", () => {
-  const [entry] = normalizeCustomModelInputs({
-    providerName: "My Gateway",
-    baseUrl: "https://gw.example.com/v1/",
-    models: [{ model: "chat-large" }],
-  }, { requireApiKey: false });
+  const [entry] = normalizeCustomModelInputs(
+    {
+      providerName: "My Gateway",
+      baseUrl: "https://gw.example.com/v1/",
+      models: [{ model: "chat-large" }],
+    },
+    { requireApiKey: false },
+  );
   const { config } = upsertCustomModels(emptyModelsConfig(), [entry]);
   const provider = config.providers["my-gateway"];
   assert.equal(provider.baseUrl, "https://gw.example.com/v1");
@@ -686,11 +833,14 @@ test("自定义端点仍然写全 baseUrl/api/authHeader 并补零价", () => {
 });
 
 test("脏 api / 脏 baseUrl 不进模型行，别让整个 models.json 加载失败", () => {
-  const [entry] = normalizeCustomModelInputs({
-    providerName: "X",
-    baseUrl: "https://x.dev/v1",
-    models: [{ model: { id: "m", api: "HTTP GET; rm -rf", baseUrl: "javascript:alert(1)" } }],
-  }, { requireApiKey: false });
+  const [entry] = normalizeCustomModelInputs(
+    {
+      providerName: "X",
+      baseUrl: "https://x.dev/v1",
+      models: [{ model: { id: "m", api: "HTTP GET; rm -rf", baseUrl: "javascript:alert(1)" } }],
+    },
+    { requireApiKey: false },
+  );
   const { config } = upsertCustomModels(emptyModelsConfig(), [entry]);
   const model = config.providers.x.models[0];
   assert.equal(model.api, undefined);
@@ -700,17 +850,33 @@ test("脏 api / 脏 baseUrl 不进模型行，别让整个 models.json 加载失
 test("批量条数有上限，超了整批拒绝（不落半批）", () => {
   const models = Array.from({ length: 41 }, (_, index) => ({ model: `m-${index}` }));
   assert.throws(
-    () => normalizeCustomModelInputs({ providerName: "X", baseUrl: "https://x.dev/v1", models }, { requireApiKey: false }),
+    () =>
+      normalizeCustomModelInputs(
+        { providerName: "X", baseUrl: "https://x.dev/v1", models },
+        { requireApiKey: false },
+      ),
     /at most/,
   );
 });
 
 test("单条编辑仍然走同一套：批量入口只有一条时等价于旧行为", () => {
-  const [entry] = normalizeCustomModelInputs({
-    providerName: "Bailian",
-    baseUrl: bailian.baseUrl,
-    models: [{ model: { id: "qwen3.7-plus", name: "Qwen3.7 Plus", contextWindow: 128000, maxTokens: 4096 } }],
-  }, { requireApiKey: false });
+  const [entry] = normalizeCustomModelInputs(
+    {
+      providerName: "Bailian",
+      baseUrl: bailian.baseUrl,
+      models: [
+        {
+          model: {
+            id: "qwen3.7-plus",
+            name: "Qwen3.7 Plus",
+            contextWindow: 128000,
+            maxTokens: 4096,
+          },
+        },
+      ],
+    },
+    { requireApiKey: false },
+  );
   const batched = upsertCustomModels(handWritten, [entry], {
     target: { providerId: "bailian", model: "qwen3.7-plus" },
   });
@@ -724,59 +890,100 @@ test("单条编辑仍然走同一套：批量入口只有一条时等价于旧�
 
 test("provider 目录：脏模型丢掉、按名字排序、默认不带列表", () => {
   const rows = normalizeProviderCatalog([
-    { id: "zeta", name: "Zeta", baseUrl: "https://z.dev", modelCount: 77, models: [{ id: "ok-1" }, { id: "bad id!" }, { id: "" }] },
-    { id: "alpha", name: "Alpha", models: [{ id: "a", contextWindow: 0, maxTokens: -1, input: ["text", "image"], reasoning: true }] },
+    {
+      id: "zeta",
+      name: "Zeta",
+      baseUrl: "https://z.dev",
+      modelCount: 77,
+      models: [{ id: "ok-1" }, { id: "bad id!" }, { id: "" }],
+    },
+    {
+      id: "alpha",
+      name: "Alpha",
+      models: [
+        { id: "a", contextWindow: 0, maxTokens: -1, input: ["text", "image"], reasoning: true },
+      ],
+    },
     { id: "  ", name: "没人要", models: [] },
   ]);
-  assert.deepEqual(rows.map((row) => row.id), ["alpha", "zeta"]);
+  assert.deepEqual(
+    rows.map((row) => row.id),
+    ["alpha", "zeta"],
+  );
   // 没展开列表时数量听调用方的（runtime 目录里数出来的），展开了才按实际算。
-  assert.deepEqual(rows.map((row) => row.modelCount), [1, 77]);
-  assert.deepEqual(rows.map((row) => row.builtin), [false, false]);
-  assert.deepEqual(rows.map((row) => row.authMethods), [[], []]);
+  assert.deepEqual(
+    rows.map((row) => row.modelCount),
+    [1, 77],
+  );
+  assert.deepEqual(
+    rows.map((row) => row.builtin),
+    [false, false],
+  );
+  assert.deepEqual(
+    rows.map((row) => row.authMethods),
+    [[], []],
+  );
   assert.equal(rows[0].models, undefined);
   assert.equal(rows[0].authKind, "none");
   assert.equal(rows[0].name, "Alpha");
 
-test("供应商目录归一化不透出 key：列表口再怎么改都带不出明文", () => {
-  const row = normalizeProviderCatalog([{ id: "alpha", name: "Alpha", apiKey: "sk-secret", authConfigured: true }])[0];
-  assert.equal(row.apiKey, undefined);
-  assert.equal("apiKey" in row, false);
-});
+  test("供应商目录归一化不透出 key：列表口再怎么改都带不出明文", () => {
+    const row = normalizeProviderCatalog([
+      { id: "alpha", name: "Alpha", apiKey: "sk-secret", authConfigured: true },
+    ])[0];
+    assert.equal(row.apiKey, undefined);
+    assert.equal("apiKey" in row, false);
+  });
 
-/* 登录方式的元数据靠 provider.auth 透传（名单在 pi 目录里，不在设置页）：
+  /* 登录方式的元数据靠 provider.auth 透传（名单在 pi 目录里，不在设置页）：
    桥只负责把 oauth / apiKeyLogin 两个字段原样归一化，前端据此决定显示哪些入口。 */
-test("供应商目录：OAuth 元数据原样透传，缺省时 apiKeyLogin 保持 true", () => {
-  const [withOauth, noOauth] = normalizeProviderCatalog([
-    {
-      id: "anthropic",
-      name: "Anthropic",
-      authMethods: ["apiKey", "oauth"],
-      oauth: { name: "Anthropic (Claude Pro/Max)", label: "", subscription: true },
-      apiKeyLogin: true,
-    },
-    { id: "plain", name: "Plain", authMethods: ["apiKey"] },
-  ]);
-  assert.deepEqual(withOauth.oauth, { name: "Anthropic (Claude Pro/Max)", label: "", subscription: true });
-  assert.equal(withOauth.apiKeyLogin, true);
-  // 没给 apiKeyLogin 的行（models.json 自定义 provider）不能因此被判成“不能填 key”。
-  assert.equal(noOauth.oauth, null);
-  assert.equal(noOauth.apiKeyLogin, true);
-});
+  test("供应商目录：OAuth 元数据原样透传，缺省时 apiKeyLogin 保持 true", () => {
+    const [withOauth, noOauth] = normalizeProviderCatalog([
+      {
+        id: "anthropic",
+        name: "Anthropic",
+        authMethods: ["apiKey", "oauth"],
+        oauth: { name: "Anthropic (Claude Pro/Max)", label: "", subscription: true },
+        apiKeyLogin: true,
+      },
+      { id: "plain", name: "Plain", authMethods: ["apiKey"] },
+    ]);
+    assert.deepEqual(withOauth.oauth, {
+      name: "Anthropic (Claude Pro/Max)",
+      label: "",
+      subscription: true,
+    });
+    assert.equal(withOauth.apiKeyLogin, true);
+    // 没给 apiKeyLogin 的行（models.json 自定义 provider）不能因此被判成“不能填 key”。
+    assert.equal(noOauth.oauth, null);
+    assert.equal(noOauth.apiKeyLogin, true);
+  });
 
   const detailed = normalizeProviderCatalog(
-    [{ id: "alpha", name: "Alpha", authConfigured: true, models: [{ id: "a", contextWindow: 0, maxTokens: -1, input: ["text", "image"], reasoning: true }] }],
+    [
+      {
+        id: "alpha",
+        name: "Alpha",
+        authConfigured: true,
+        models: [
+          { id: "a", contextWindow: 0, maxTokens: -1, input: ["text", "image"], reasoning: true },
+        ],
+      },
+    ],
     { withModels: true },
   )[0];
-  assert.deepEqual(detailed.models, [{
-    id: "a",
-    name: "A",
-    api: "",
-    baseUrl: "",
-    contextWindow: DEFAULT_CONTEXT_WINDOW,
-    maxTokens: DEFAULT_MAX_TOKENS,
-    reasoning: true,
-    supportsImages: true,
-  }]);
+  assert.deepEqual(detailed.models, [
+    {
+      id: "a",
+      name: "A",
+      api: "",
+      baseUrl: "",
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+      maxTokens: DEFAULT_MAX_TOKENS,
+      reasoning: true,
+      supportsImages: true,
+    },
+  ]);
   assert.equal(detailed.authKind, "api_key");
 });
 
@@ -791,24 +998,39 @@ test("listingPlan：Anthropic 用 x-api-key + /v1/models，不带 Bearer", () =>
 });
 
 test("listingPlan：base 里已经带了版本段就不重复拼", () => {
-  assert.equal(listingPlan("anthropic-messages", "https://gw.example.com/v1", "k").url, "https://gw.example.com/v1/models");
   assert.equal(
-    listingPlan("google-generative-ai", "https://generativelanguage.googleapis.com/v1beta", "k").url,
+    listingPlan("anthropic-messages", "https://gw.example.com/v1", "k").url,
+    "https://gw.example.com/v1/models",
+  );
+  assert.equal(
+    listingPlan("google-generative-ai", "https://generativelanguage.googleapis.com/v1beta", "k")
+      .url,
     "https://generativelanguage.googleapis.com/v1beta/models",
   );
-  assert.equal(listingPlan("openai-completions", "https://gw.example.com/v1/", "k").url, "https://gw.example.com/v1/models");
+  assert.equal(
+    listingPlan("openai-completions", "https://gw.example.com/v1/", "k").url,
+    "https://gw.example.com/v1/models",
+  );
 });
 
 test("listingPlan：Google 用 x-goog-api-key，OpenAI 家族用 Bearer，留空按 openai-completions", () => {
-  assert.deepEqual(listingPlan("google-generative-ai", "https://a.dev", "k").headers, { "x-goog-api-key": "k" });
+  assert.deepEqual(listingPlan("google-generative-ai", "https://a.dev", "k").headers, {
+    "x-goog-api-key": "k",
+  });
   assert.deepEqual(listingPlan("", "https://a.dev", "k").headers, { authorization: "Bearer k" });
   // 没 key：一个鉴权头都别发。`Bearer ` 这种空头会被严一点的网关直接 400，看着像“拉不到列表”。
   assert.deepEqual(listingPlan("", "https://a.dev", "").headers, {});
   assert.deepEqual(listingPlan("anthropic-messages", "https://a.dev", "").headers, {});
   assert.deepEqual(listingPlan("google-generative-ai", "https://a.dev", "  ").headers, {});
-  assert.deepEqual(listingPlan("anthropic-messages", "https://a.dev", "k").headers["x-api-key"], "k");
+  assert.deepEqual(
+    listingPlan("anthropic-messages", "https://a.dev", "k").headers["x-api-key"],
+    "k",
+  );
   assert.equal(listingPlan("", "https://a.dev", "k").url, "https://a.dev/models");
-  assert.equal(listingPlan("mistral-conversations", "https://a.dev/v1", "k").url, "https://a.dev/v1/models");
+  assert.equal(
+    listingPlan("mistral-conversations", "https://a.dev/v1", "k").url,
+    "https://a.dev/v1/models",
+  );
 });
 
 test("listingPlan：拿不了列表的类型说清楚为什么，而不是硬打一个 404", () => {
@@ -825,21 +1047,41 @@ test("listingPlan：拿不了列表的类型说清楚为什么，而不是硬打
 });
 
 test("parseModelListing：Anthropic 的 display_name 当展示名", () => {
-  const models = parseModelListing({ data: [
-    { id: "claude-sonnet-4-5", display_name: "Claude Sonnet 4.5", type: "model" },
-  ] }, "anthropic-messages");
-  assert.deepEqual(models.map((model) => [model.id, model.name]), [["claude-sonnet-4-5", "Claude Sonnet 4.5"]]);
+  const models = parseModelListing(
+    { data: [{ id: "claude-sonnet-4-5", display_name: "Claude Sonnet 4.5", type: "model" }] },
+    "anthropic-messages",
+  );
+  assert.deepEqual(
+    models.map((model) => [model.id, model.name]),
+    [["claude-sonnet-4-5", "Claude Sonnet 4.5"]],
+  );
 });
 
 test("parseModelListing：Google 去掉 models/ 前缀、带上 token 限制、滤掉不能对话的资源", () => {
-  const models = parseModelListing({ models: [
-    { name: "models/gemini-2.5-pro", displayName: "Gemini 2.5 Pro", inputTokenLimit: 1048576,
-      outputTokenLimit: 65536, supportedGenerationMethods: ["generateContent", "streamGenerateContent"] },
-    { name: "models/embedding-001", supportedGenerationMethods: ["embedContent"] },
-    { name: "models/gemini-2.5-flash", inputTypes: ["TEXT", "IMAGE"],
-      supportedGenerationMethods: ["streamGenerateContent"] },
-  ] }, "google-generative-ai");
-  assert.deepEqual(models.map((model) => model.id), ["gemini-2.5-pro", "gemini-2.5-flash"]);
+  const models = parseModelListing(
+    {
+      models: [
+        {
+          name: "models/gemini-2.5-pro",
+          displayName: "Gemini 2.5 Pro",
+          inputTokenLimit: 1048576,
+          outputTokenLimit: 65536,
+          supportedGenerationMethods: ["generateContent", "streamGenerateContent"],
+        },
+        { name: "models/embedding-001", supportedGenerationMethods: ["embedContent"] },
+        {
+          name: "models/gemini-2.5-flash",
+          inputTypes: ["TEXT", "IMAGE"],
+          supportedGenerationMethods: ["streamGenerateContent"],
+        },
+      ],
+    },
+    "google-generative-ai",
+  );
+  assert.deepEqual(
+    models.map((model) => model.id),
+    ["gemini-2.5-pro", "gemini-2.5-flash"],
+  );
   assert.equal(models[0].contextWindow, 1048576);
   assert.equal(models[0].maxTokens, 65536);
   assert.equal(models[0].name, "Gemini 2.5 Pro");
@@ -847,12 +1089,18 @@ test("parseModelListing：Google 去掉 models/ 前缀、带上 token 限制、�
 });
 
 test("parseModelListing：OpenAI 兼容网关顺手带的 context_window/max_tokens 也收下", () => {
-  const models = parseModelListing({ data: [
-    { id: "qwen3.7-plus", context_window: 131072, max_tokens: 8192 },
-    { id: "bad id", context_window: 1 },
-    { id: "qwen3.7-plus" },
-  ] });
-  assert.deepEqual(models.map((model) => model.id), ["qwen3.7-plus"], "非法 id 与重复项都不该进来");
+  const models = parseModelListing({
+    data: [
+      { id: "qwen3.7-plus", context_window: 131072, max_tokens: 8192 },
+      { id: "bad id", context_window: 1 },
+      { id: "qwen3.7-plus" },
+    ],
+  });
+  assert.deepEqual(
+    models.map((model) => model.id),
+    ["qwen3.7-plus"],
+    "非法 id 与重复项都不该进来",
+  );
   assert.equal(models[0].contextWindow, 131072);
   assert.equal(models[0].maxTokens, 8192);
   assert.equal(models[0].name, "Qwen3.7 Plus");
@@ -873,7 +1121,8 @@ function fakeFetch(response, calls = []) {
     return {
       ok: response.status >= 200 && response.status < 300,
       status: response.status,
-      text: async () => (typeof response.body === "string" ? response.body : JSON.stringify(response.body)),
+      text: async () =>
+        typeof response.body === "string" ? response.body : JSON.stringify(response.body),
     };
   };
   fn.calls = calls;
@@ -888,10 +1137,16 @@ test("requestModelListing：自定义 provider 按 api 类型 GET 列表端点�
     api: "openai-completions",
     baseUrl: liveFetchBase,
     apiKey: "sk-test-123",
-    fetchImpl: fakeFetch({ status: 200, body: { data: [{ id: "qwen3.8-max" }, { id: "kimi-k3" }] } }, calls),
+    fetchImpl: fakeFetch(
+      { status: 200, body: { data: [{ id: "qwen3.8-max" }, { id: "kimi-k3" }] } },
+      calls,
+    ),
   });
   assert.equal(result.ok, true);
-  assert.deepEqual(result.models.map((model) => model.id), ["qwen3.8-max", "kimi-k3"]);
+  assert.deepEqual(
+    result.models.map((model) => model.id),
+    ["qwen3.8-max", "kimi-k3"],
+  );
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, `${liveFetchBase}/models`);
   assert.equal(calls[0].init.headers.authorization, "Bearer sk-test-123");
@@ -899,16 +1154,21 @@ test("requestModelListing：自定义 provider 按 api 类型 GET 列表端点�
 
 test("requestModelListing：没 key / 拿不了列表的类型都不硬发请求", async () => {
   const noKey = fakeFetch({ status: 200, body: { data: [] } });
-  const noKeyCalls = [];
+
   const missing = await requestModelListing({
-    api: "openai-completions", baseUrl: liveFetchBase, apiKey: "", fetchImpl: ((...a) => noKey(...a)),
+    api: "openai-completions",
+    baseUrl: liveFetchBase,
+    apiKey: "",
+    fetchImpl: (...a) => noKey(...a),
   });
   assert.equal(missing.ok, false);
   assert.match(missing.error, /API key/i);
 
   const calls = [];
   const unsupported = await requestModelListing({
-    api: "bedrock-converse-stream", baseUrl: liveFetchBase, apiKey: "sk-test-123",
+    api: "bedrock-converse-stream",
+    baseUrl: liveFetchBase,
+    apiKey: "sk-test-123",
     fetchImpl: fakeFetch({ status: 200, body: { data: [] } }, calls),
   });
   assert.equal(unsupported.ok, false);
@@ -932,28 +1192,32 @@ test("requestModelListing：没地址时兑成 {ok:false}，不把异常抛成 5
 
 test("requestModelListing：401/404/非 JSON/空列表都说清原因，不假装成功", async () => {
   const unauthorized = await requestModelListing({
-    baseUrl: liveFetchBase, apiKey: "sk-x",
+    baseUrl: liveFetchBase,
+    apiKey: "sk-x",
     fetchImpl: fakeFetch({ status: 401, body: { error: "bad key" } }),
   });
   assert.equal(unauthorized.ok, false);
   assert.match(unauthorized.error, /Authentication failed/);
 
   const notFound = await requestModelListing({
-    baseUrl: liveFetchBase, apiKey: "sk-x",
+    baseUrl: liveFetchBase,
+    apiKey: "sk-x",
     fetchImpl: fakeFetch({ status: 404, body: "nope" }),
   });
   assert.equal(notFound.ok, false);
   assert.equal(notFound.status, 404);
 
   const garbage = await requestModelListing({
-    baseUrl: liveFetchBase, apiKey: "sk-x",
+    baseUrl: liveFetchBase,
+    apiKey: "sk-x",
     fetchImpl: fakeFetch({ status: 200, body: "<html>proxy said</html>" }),
   });
   assert.equal(garbage.ok, false);
   assert.match(garbage.error, /JSON/);
 
   const empty = await requestModelListing({
-    baseUrl: liveFetchBase, apiKey: "sk-x",
+    baseUrl: liveFetchBase,
+    apiKey: "sk-x",
     fetchImpl: fakeFetch({ status: 200, body: { data: [] } }),
   });
   assert.equal(empty.ok, false, "空列表是“没拿到”，不是“这个端点只有这些”");
@@ -961,8 +1225,11 @@ test("requestModelListing：401/404/非 JSON/空列表都说清原因，不假�
 
 test("requestModelListing：连不上时给“访问不了哪里”，不是 fetch failed", async () => {
   const result = await requestModelListing({
-    baseUrl: liveFetchBase, apiKey: "sk-x",
-    fetchImpl: async () => { throw Object.assign(new Error("fetch failed"), { cause: { code: "ENOTFOUND" } }); },
+    baseUrl: liveFetchBase,
+    apiKey: "sk-x",
+    fetchImpl: async () => {
+      throw Object.assign(new Error("fetch failed"), { cause: { code: "ENOTFOUND" } });
+    },
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /llm.example.com/);
@@ -972,22 +1239,44 @@ test("mergeListingRows：端点列表 + 文件里已存的行合并，重复项�
   const rows = mergeListingRows({
     listing: [
       { id: "qwen3.8-max", name: "Qwen3.8 Max", contextWindow: 0, maxTokens: 0, input: ["text"] },
-      { id: "kimi-k3", name: "Kimi K3", contextWindow: 262144, maxTokens: 32768, input: ["text", "image"] },
+      {
+        id: "kimi-k3",
+        name: "Kimi K3",
+        contextWindow: 262144,
+        maxTokens: 32768,
+        input: ["text", "image"],
+      },
     ],
-    localModels: [{
-      id: "qwen3.7-plus", name: "Qwen3.7 Plus", api: "openai-completions", baseUrl: liveFetchBase,
-      contextWindow: 256000, maxTokens: 65536, reasoning: true, supportsImages: true,
-    }, {
-      id: "qwen3.8-max", name: "旧名字", contextWindow: 128000, maxTokens: 8192, reasoning: false, supportsImages: false,
-    }],
+    localModels: [
+      {
+        id: "qwen3.7-plus",
+        name: "Qwen3.7 Plus",
+        api: "openai-completions",
+        baseUrl: liveFetchBase,
+        contextWindow: 256000,
+        maxTokens: 65536,
+        reasoning: true,
+        supportsImages: true,
+      },
+      {
+        id: "qwen3.8-max",
+        name: "旧名字",
+        contextWindow: 128000,
+        maxTokens: 8192,
+        reasoning: false,
+        supportsImages: false,
+      },
+    ],
     api: "openai-completions",
     baseUrl: liveFetchBase,
   });
-  assert.deepEqual(rows.map((row) => row.id), ["kimi-k3", "qwen3.7-plus", "qwen3.8-max"], "按 id 排，顺序不随供应商变");
-  // 端点没报数值 → 本地手调过的值优先，不能把 256k 冲成默认 128k
   assert.deepEqual(
-    rows.find((row) => row.id === "qwen3.7-plus").contextWindow, 256000,
+    rows.map((row) => row.id),
+    ["kimi-k3", "qwen3.7-plus", "qwen3.8-max"],
+    "按 id 排，顺序不随供应商变",
   );
+  // 端点没报数值 → 本地手调过的值优先，不能把 256k 冲成默认 128k
+  assert.deepEqual(rows.find((row) => row.id === "qwen3.7-plus").contextWindow, 256000);
   const overlap = rows.find((row) => row.id === "qwen3.8-max");
   assert.equal(overlap.name, "Qwen3.8 Max", "同 id 以端点报的名字为准");
   assert.equal(overlap.contextWindow, 128000, "端点没报上下文时保留本地值，而不是盖成默认");
@@ -997,11 +1286,21 @@ test("mergeListingRows：端点列表 + 文件里已存的行合并，重复项�
 });
 
 test("mergeListingRows：脏 id 丢掉、空输入也不炸", () => {
-  assert.deepEqual(mergeListingRows({ listing: [{ id: "bad id" }, { id: "" }, null], localModels: undefined }), []);
+  assert.deepEqual(
+    mergeListingRows({ listing: [{ id: "bad id" }, { id: "" }, null], localModels: undefined }),
+    [],
+  );
   assert.deepEqual(mergeListingRows({}), []);
   const onlyLocal = mergeListingRows({ listing: [], localModels: [{ id: "llama3" }] });
-  assert.deepEqual(onlyLocal.map((row) => row.id), ["llama3"]);
-  assert.equal(onlyLocal[0].contextWindow, DEFAULT_CONTEXT_WINDOW, "两边都没给时补默认值，别让表单里出现 0");
+  assert.deepEqual(
+    onlyLocal.map((row) => row.id),
+    ["llama3"],
+  );
+  assert.equal(
+    onlyLocal[0].contextWindow,
+    DEFAULT_CONTEXT_WINDOW,
+    "两边都没给时补默认值，别让表单里出现 0",
+  );
 });
 
 /* ------------------------------------------------------------- 编辑 provider */
@@ -1022,7 +1321,11 @@ test("编辑 provider：改名字/端点/api 只动这一家，别人的配置�
   assert.deepEqual(provider.compat, bailian.compat);
   assert.equal(provider.authHeader, true);
   assert.deepEqual(result.config.providers["local-ollama"], handWritten.providers["local-ollama"]);
-  assert.deepEqual(result.config.providers.bailian.models, bailian.models, "编辑 provider 不该动模型行");
+  assert.deepEqual(
+    result.config.providers.bailian.models,
+    bailian.models,
+    "编辑 provider 不该动模型行",
+  );
 });
 
 test("编辑 provider：模型行里显式写了 baseUrl/api 的必须跟着改，没写的别凭空补", () => {
@@ -1051,7 +1354,10 @@ test("编辑 provider：模型行里显式写了 baseUrl/api 的必须跟着改�
     { id: "explicit", api: "openai-completions", baseUrl: "https://new.example.com/v1" },
     "行级 baseUrl 会盖过 provider 级（pi 是 definition.baseUrl 优先），不跟着改就是继续打老地址",
   );
-  assert.deepEqual(provider.models.find((model) => model.id === "inherits"), { id: "inherits" });
+  assert.deepEqual(
+    provider.models.find((model) => model.id === "inherits"),
+    { id: "inherits" },
+  );
 });
 
 test("编辑 provider：脏 api 不落盘（脏值会让整个 models.json 加载失败）", () => {
@@ -1067,10 +1373,37 @@ test("编辑 provider：脏 api 不落盘（脏值会让整个 models.json 加�
 
 test("编辑 provider：不存在的供应商 / 空名字 / 坏地址都报错，不静默成功", () => {
   const config = { providers: { bailian: JSON.parse(JSON.stringify(bailian)) } };
-  assert.throws(() => updateProviderSettings(config, { providerId: "nope", name: "X", baseUrl: "https://x.dev/v1" }), /no longer there/);
-  assert.throws(() => updateProviderSettings(config, { providerId: "bailian", name: "  ", baseUrl: "https://x.dev/v1" }), /name is required/);
-  assert.throws(() => updateProviderSettings(config, { providerId: "bailian", name: "Bailian", baseUrl: "ftp://x.dev" }), /http or https/);
-  assert.throws(() => updateProviderSettings(config, { providerId: "bailian", name: "Bailian", baseUrl: "" }), /Base URL is required/);
+  assert.throws(
+    () =>
+      updateProviderSettings(config, {
+        providerId: "nope",
+        name: "X",
+        baseUrl: "https://x.dev/v1",
+      }),
+    /no longer there/,
+  );
+  assert.throws(
+    () =>
+      updateProviderSettings(config, {
+        providerId: "bailian",
+        name: "  ",
+        baseUrl: "https://x.dev/v1",
+      }),
+    /name is required/,
+  );
+  assert.throws(
+    () =>
+      updateProviderSettings(config, {
+        providerId: "bailian",
+        name: "Bailian",
+        baseUrl: "ftp://x.dev",
+      }),
+    /http or https/,
+  );
+  assert.throws(
+    () => updateProviderSettings(config, { providerId: "bailian", name: "Bailian", baseUrl: "" }),
+    /Base URL is required/,
+  );
 });
 
 test("编辑 provider：provider id 大小写不敏感，改完也不会多出一个新 provider", () => {
@@ -1080,7 +1413,11 @@ test("编辑 provider：provider id 大小写不敏感，改完也不会多出�
     name: "Bailian 2",
     baseUrl: "https://y.example.com/v1",
   });
-  assert.deepEqual(Object.keys(result.config.providers), ["bailian"], "不能因为大小写写错就复制出一家");
+  assert.deepEqual(
+    Object.keys(result.config.providers),
+    ["bailian"],
+    "不能因为大小写写错就复制出一家",
+  );
   assert.equal(result.providerId, "bailian");
   assert.equal(result.config.providers.bailian.name, "Bailian 2");
 });
@@ -1088,7 +1425,11 @@ test("编辑 provider：provider id 大小写不敏感，改完也不会多出�
 test("resolveListingApiKey：这一轮填的优先，留空才退到已存的那份", () => {
   assert.equal(resolveListingApiKey({ apiKey: " sk-a ", storedKey: "sk-b" }), "sk-a");
   assert.equal(resolveListingApiKey({ apiKey: "", storedKey: "sk-b" }), "sk-b");
-  assert.equal(resolveListingApiKey({ apiKey: "   ", storedKey: "sk-b" }), "sk-b", "只有空白也算没填");
+  assert.equal(
+    resolveListingApiKey({ apiKey: "   ", storedKey: "sk-b" }),
+    "sk-b",
+    "只有空白也算没填",
+  );
   assert.equal(resolveListingApiKey({}), "");
 });
 
@@ -1102,7 +1443,11 @@ test("思考档位:选档写映射表并自动开 effort,换档整表重写", ()
   assert.deepEqual(row.thinkingLevels, ["low"], "列表按 pi 档位顺序回传选中的档");
   const rawRow = first.config.providers[pid].models[0];
   assert.equal(rawRow.thinkingLevelMap.low, "low");
-  assert.equal(rawRow.thinkingLevelMap.off, null, "没勾的档必须显式写成 null(否则 pi 默认放行基础档)");
+  assert.equal(
+    rawRow.thinkingLevelMap.off,
+    null,
+    "没勾的档必须显式写成 null(否则 pi 默认放行基础档)",
+  );
   assert.equal(rawRow.compat.supportsReasoningEffort, true, "选了非 off 档位要自动开强度参数");
 
   const edited = draftInput({
@@ -1111,7 +1456,9 @@ test("思考档位:选档写映射表并自动开 effort,换档整表重写", ()
     reasoning: true,
     thinkingLevels: ["high", "max"],
   });
-  const second = upsertCustomModel(first.config, edited, { target: { providerId: pid, model: "m1" } });
+  const second = upsertCustomModel(first.config, edited, {
+    target: { providerId: pid, model: "m1" },
+  });
   row = findCustomModel(second.config, pid, "m1");
   assert.deepEqual(row.thinkingLevels, ["high", "max"], "换档后整表重写,回传新选的档");
   assert.deepEqual(second.config.providers[pid].models[0].thinkingLevelMap, {
@@ -1126,7 +1473,10 @@ test("思考档位:选档写映射表并自动开 effort,换档整表重写", ()
 });
 
 test("思考档位:空选=清除映射;不给字段=保留原值;非法档报错", () => {
-  let current = upsertCustomModel(emptyModelsConfig(), draftInput({ model: "m1", reasoning: true, thinkingLevels: ["low"] }));
+  let current = upsertCustomModel(
+    emptyModelsConfig(),
+    draftInput({ model: "m1", reasoning: true, thinkingLevels: ["low"] }),
+  );
   const pid = current.providerId;
 
   // 空数组 = 明确清掉映射表，退回 pi 默认
@@ -1179,13 +1529,36 @@ function mapDraft(overrides = {}) {
 }
 
 test("档位映射:填值就是发的值，留空 = 该档不存在", () => {
-  const saved = upsertCustomModel(emptyModelsConfig(), mapDraft({
-    thinkingLevelMap: { off: null, minimal: null, low: "low", medium: null, high: null, xhigh: "xhigh", max: null },
-  }));
+  const saved = upsertCustomModel(
+    emptyModelsConfig(),
+    mapDraft({
+      thinkingLevelMap: {
+        off: null,
+        minimal: null,
+        low: "low",
+        medium: null,
+        high: null,
+        xhigh: "xhigh",
+        max: null,
+      },
+    }),
+  );
   const pid = saved.providerId;
   const raw = saved.config.providers[pid].models[0].thinkingLevelMap;
-  assert.deepEqual(raw, { off: null, minimal: null, low: "low", medium: null, high: null, xhigh: "xhigh", max: null });
-  assert.equal(saved.config.providers[pid].models[0].compat.supportsReasoningEffort, true, "有非 off 档位就自动开强度参数");
+  assert.deepEqual(raw, {
+    off: null,
+    minimal: null,
+    low: "low",
+    medium: null,
+    high: null,
+    xhigh: "xhigh",
+    max: null,
+  });
+  assert.equal(
+    saved.config.providers[pid].models[0].compat.supportsReasoningEffort,
+    true,
+    "有非 off 档位就自动开强度参数",
+  );
   assert.deepEqual(
     findCustomModel(saved.config, pid, "m1").thinkingLevels,
     ["low", "xhigh"],
@@ -1194,25 +1567,58 @@ test("档位映射:填值就是发的值，留空 = 该档不存在", () => {
 
   // 编辑器回填的表是七档全给的（这里给的本来就是全表，null 原样保留）
   assert.deepEqual(listCustomModels(saved.config).find((e) => e.model === "m1").thinkingLevelMap, {
-    off: null, minimal: null, low: "low", medium: null, high: null, xhigh: "xhigh", max: null,
+    off: null,
+    minimal: null,
+    low: "low",
+    medium: null,
+    high: null,
+    xhigh: "xhigh",
+    max: null,
   });
   // 把手写的「未声明」摊平后原样写回：行为不变（pi 原本就按同名放行 off..high）
-  const partial = upsertCustomModel(emptyModelsConfig(), mapDraft({
-    model: "m2",
-    thinkingLevelMap: { high: "xhigh" },
-  }));
-  assert.deepEqual(findCustomModel(partial.config, partial.providerId, "m2").thinkingLevels,
-    ["off", "minimal", "low", "medium", "high"]);
-  assert.deepEqual(listCustomModels(partial.config).find((e) => e.model === "m2").thinkingLevelMap, {
-    off: "off", minimal: "minimal", low: "low", medium: "medium", high: "xhigh", xhigh: null, max: null,
-  });
+  const partial = upsertCustomModel(
+    emptyModelsConfig(),
+    mapDraft({
+      model: "m2",
+      thinkingLevelMap: { high: "xhigh" },
+    }),
+  );
+  assert.deepEqual(findCustomModel(partial.config, partial.providerId, "m2").thinkingLevels, [
+    "off",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+  ]);
+  assert.deepEqual(
+    listCustomModels(partial.config).find((e) => e.model === "m2").thinkingLevelMap,
+    {
+      off: "off",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "xhigh",
+      xhigh: null,
+      max: null,
+    },
+  );
 });
 
 test("档位映射:高→xhigh 这种改名映射往返编辑不丢(语义不变)", () => {
-  const first = upsertCustomModel(emptyModelsConfig(), mapDraft({
-    model: "qwen3.8-max",
-    thinkingLevelMap: { minimal: null, low: "low", medium: "medium", high: null, xhigh: "xhigh", max: null },
-  }));
+  const first = upsertCustomModel(
+    emptyModelsConfig(),
+    mapDraft({
+      model: "qwen3.8-max",
+      thinkingLevelMap: {
+        minimal: null,
+        low: "low",
+        medium: "medium",
+        high: null,
+        xhigh: "xhigh",
+        max: null,
+      },
+    }),
+  );
   const pid = first.providerId;
 
   // 复刻编辑器的一次保存：回填桥下发的表 → 用户没动 → 原样写回。
@@ -1222,8 +1628,16 @@ test("档位映射:高→xhigh 这种改名映射往返编辑不丢(语义不变
     mapDraft({ providerId: pid, model: "qwen3.8-max", thinkingLevelMap: entry.thinkingLevelMap }),
     { target: { providerId: pid, model: "qwen3.8-max" } },
   );
-  assert.equal(second.config.providers[pid].models[0].thinkingLevelMap.high, null, "high 仍然是不存在");
-  assert.equal(second.config.providers[pid].models[0].thinkingLevelMap.xhigh, "xhigh", "换名映射保留");
+  assert.equal(
+    second.config.providers[pid].models[0].thinkingLevelMap.high,
+    null,
+    "high 仍然是不存在",
+  );
+  assert.equal(
+    second.config.providers[pid].models[0].thinkingLevelMap.xhigh,
+    "xhigh",
+    "换名映射保留",
+  );
   assert.deepEqual(
     findCustomModel(second.config, pid, "qwen3.8-max").thinkingLevels,
     ["off", "low", "medium", "xhigh"],
@@ -1232,14 +1646,32 @@ test("档位映射:高→xhigh 这种改名映射往返编辑不丢(语义不变
 });
 
 test("档位映射:全部留空 = 该模型没有思考档位", () => {
-  const cleared = upsertCustomModel(emptyModelsConfig(), mapDraft({
-    thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, high: null, xhigh: null, max: null },
-  }));
-  assert.deepEqual(findCustomModel(cleared.config, cleared.providerId, "m1").thinkingLevels, [], "一档都不显示");
+  const cleared = upsertCustomModel(
+    emptyModelsConfig(),
+    mapDraft({
+      thinkingLevelMap: {
+        off: null,
+        minimal: null,
+        low: null,
+        medium: null,
+        high: null,
+        xhigh: null,
+        max: null,
+      },
+    }),
+  );
+  assert.deepEqual(
+    findCustomModel(cleared.config, cleared.providerId, "m1").thinkingLevels,
+    [],
+    "一档都不显示",
+  );
 });
 
 test("档位映射:空对象=清掉映射表;不给字段=保留;关掉推理时不动它", () => {
-  const withMap = upsertCustomModel(emptyModelsConfig(), mapDraft({ thinkingLevelMap: { high: "high", max: "max" } }));
+  const withMap = upsertCustomModel(
+    emptyModelsConfig(),
+    mapDraft({ thinkingLevelMap: { high: "high", max: "max" } }),
+  );
   const pid = withMap.providerId;
 
   const cleared = upsertCustomModel(
@@ -1247,7 +1679,11 @@ test("档位映射:空对象=清掉映射表;不给字段=保留;关掉推理时
     mapDraft({ providerId: pid, thinkingLevelMap: {} }),
     { target: { providerId: pid, model: "m1" } },
   ).config;
-  assert.equal("thinkingLevelMap" in cleared.providers[pid].models[0], false, "空对象 = 明确清掉映射表");
+  assert.equal(
+    "thinkingLevelMap" in cleared.providers[pid].models[0],
+    false,
+    "空对象 = 明确清掉映射表",
+  );
 
   // 关掉推理再保存：编辑器不回传 thinkingLevelMap ⇒ 文件里的旧表要活着（下次打开思考还能接着用）。
   const off = upsertCustomModel(
@@ -1255,18 +1691,33 @@ test("档位映射:空对象=清掉映射表;不给字段=保留;关掉推理时
     draftInput({ providerId: pid, model: "m1", reasoning: false }),
     { target: { providerId: pid, model: "m1" } },
   ).config;
-  assert.deepEqual(off.providers[pid].models[0].thinkingLevelMap, { high: "high", max: "max" }, "关掉推理不该抹掉映射表");
+  assert.deepEqual(
+    off.providers[pid].models[0].thinkingLevelMap,
+    { high: "high", max: "max" },
+    "关掉推理不该抹掉映射表",
+  );
   assert.deepEqual(findCustomModel(off, pid, "m1").thinkingLevels, ["off"], "关掉推理后只剩 off");
 });
 
 test("档位映射:坏输入报错而不是截断/静默丢", () => {
-  assert.throws(() => mapDraft({ thinkingLevelMap: { high: "x high" } }), /must not contain spaces/);
-  assert.throws(() => mapDraft({ thinkingLevelMap: { high: "x".repeat(41) } }), /at most 40 characters/);
+  assert.throws(
+    () => mapDraft({ thinkingLevelMap: { high: "x high" } }),
+    /must not contain spaces/,
+  );
+  assert.throws(
+    () => mapDraft({ thinkingLevelMap: { high: "x".repeat(41) } }),
+    /at most 40 characters/,
+  );
   assert.throws(() => mapDraft({ thinkingLevelMap: { bogus: "high" } }), /Unknown thinking levels/);
   assert.throws(() => mapDraft({ thinkingLevelMap: ["high"] }), /must be an object/);
   // 空串/纯空白当「未声明」丢掉（编辑器发的是 null，这条只管手写的 payload）
-  const saved = upsertCustomModel(emptyModelsConfig(), mapDraft({ thinkingLevelMap: { high: "  ", low: "low" } }));
-  assert.deepEqual(saved.config.providers[saved.providerId].models[0].thinkingLevelMap, { low: "low" });
+  const saved = upsertCustomModel(
+    emptyModelsConfig(),
+    mapDraft({ thinkingLevelMap: { high: "  ", low: "low" } }),
+  );
+  assert.deepEqual(saved.config.providers[saved.providerId].models[0].thinkingLevelMap, {
+    low: "low",
+  });
 });
 
 test("描述层档位与 pi 的 getSupportedThinkingLevels 完全一致", async () => {
@@ -1274,7 +1725,17 @@ test("描述层档位与 pi 的 getSupportedThinkingLevels 完全一致", async 
   const cases = [
     { reasoning: true, thinkingLevelMap: undefined },
     { reasoning: true, thinkingLevelMap: { off: null, high: "high", max: "max" } },
-    { reasoning: true, thinkingLevelMap: { minimal: null, low: "low", medium: null, high: null, xhigh: "xhigh", max: null } },
+    {
+      reasoning: true,
+      thinkingLevelMap: {
+        minimal: null,
+        low: "low",
+        medium: null,
+        high: null,
+        xhigh: "xhigh",
+        max: null,
+      },
+    },
     { reasoning: false, thinkingLevelMap: { high: "high" } },
   ];
   for (const model of cases) {
@@ -1282,7 +1743,15 @@ test("描述层档位与 pi 的 getSupportedThinkingLevels 完全一致", async 
     const row = findCustomModel(saved.config, saved.providerId, "m");
     assert.deepEqual(
       row.thinkingLevels,
-      getSupportedThinkingLevels({ ...model, provider: "x", id: "m", input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192 }),
+      getSupportedThinkingLevels({
+        ...model,
+        provider: "x",
+        id: "m",
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128000,
+        maxTokens: 8192,
+      }),
       `档位表必须与 pi 同规则: ${JSON.stringify(model)}`,
     );
   }
