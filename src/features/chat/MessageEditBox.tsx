@@ -27,11 +27,13 @@ import {
   type ClipboardBadge,
 } from "./badgeClipboard";
 import {
+  applyManualSkillCommand,
   buildSlashMenuItems,
   findSlashStart,
   matchSlashTrigger,
   moveHighlight,
   readTriggerText,
+  skillCommandsDisabled,
   type SlashMenuItem,
 } from "./slashMenu";
 import {
@@ -62,7 +64,7 @@ export interface MessageEditBoxProps {
   parts: ChatMessagePart[];
   attachments: ChatAttachment[];
   fallbackText: string;
-  capabilities: Pick<CapabilitiesState, "skills" | "packages">;
+  capabilities: Pick<CapabilitiesState, "skills" | "packages" | "skillCommandsEnabled">;
   canSubmit: boolean;
   submitting?: boolean;
   /**
@@ -219,6 +221,8 @@ export function MessageEditBox({
 
   const [text, setText] = useState("");
   const [attachmentCount, setAttachmentCount] = useState(0);
+  /** 技能徽标数量：只挂徽标不打字也是一次合法提交（等价于 TUI 的 `/skill:name` 无参数）。 */
+  const [capabilityCount, setCapabilityCount] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -244,6 +248,7 @@ export function MessageEditBox({
     const next = readEditorParts(editor, attachmentByIdRef.current, capabilityByKeyRef.current);
     setText(editorText(next));
     setAttachmentCount(editorAttachments(next).length);
+    setCapabilityCount(next.filter((part) => part.kind === "capability").length);
   }, []);
 
   const focusEditor = useCallback(() => {
@@ -762,7 +767,14 @@ export function MessageEditBox({
     const partsNow = readEditorParts(editor, attachmentByIdRef.current, capabilityByKeyRef.current);
     const nextText = editorText(partsNow);
     const attachmentList = editorAttachments(partsNow);
-    if (!nextText.trim() && !attachmentList.length) {
+    const editorParts = toPromptMessageParts(partsNow);
+    // 与主 composer 同一套语义（共用 applyManualSkillCommand）：`/skill:<名字> [args]` 翻译成
+    // 「徽标 + 参数」；只有徽标、没有文字也算提交。两处不一致，同一条消息编辑重发后的行为
+    // 就会和首次发送不同。
+    const manualSkillCommand = applyManualSkillCommand(nextText, capabilities.skills, editorParts);
+    const promptText = manualSkillCommand.text;
+    const promptParts = manualSkillCommand.parts;
+    if (!promptText.trim() && !attachmentList.length && !promptParts.some((part) => part.kind === "capability")) {
       return;
     }
     setError("");
@@ -770,8 +782,8 @@ export function MessageEditBox({
     try {
       const attachmentInputs = await toAttachmentInputs(attachmentList, (attachment) => fileByIdRef.current.get(attachment.id));
       const accepted = await onSubmit(messageId, {
-        text: nextText,
-        messageParts: toPromptMessageParts(partsNow),
+        text: promptText,
+        messageParts: promptParts,
         attachments: attachmentInputs,
       });
       if (!accepted) {
@@ -783,7 +795,7 @@ export function MessageEditBox({
   }
 
   const submitDisabled =
-    busy || submitting || !canSubmit || (!text.trim() && attachmentCount === 0);
+    busy || submitting || !canSubmit || (!text.trim() && attachmentCount === 0 && capabilityCount === 0);
 
   return (
     <div
@@ -877,6 +889,12 @@ export function MessageEditBox({
             </div>
           </div>
 
+          {menuQuery != null && skillCommandsDisabled(capabilities) ? (
+            // 技能被 pi 设置藏掉时得说一声，并且把仍然可用的手打入口写出来。
+            <div className="capability-picker slash-menu" role="status">
+              <p className="slash-menu-hint">{t("capability.slashMenu.skillCommandsDisabled")}</p>
+            </div>
+          ) : null}
           {menuQuery != null && skillItems.length ? (
             <div className="capability-picker slash-menu" role="listbox" aria-label={t("message.editSkills")}>
               <div className="slash-menu-section">

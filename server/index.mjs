@@ -10,10 +10,12 @@ import { agentRuntimePathEntries, mergePath, packageManagerBinDirs, selectAgentR
 import { removeBundledShims, runtimeShimSpecs } from "./agentShimFiles.mjs";
 import { createAgentShims } from "./agentShims.mjs";
 import { capabilityReloadPlan, reloadRuntimeSkills, sameCapabilityIds } from "./capabilityReload.mjs";
-import { canonicalPath, extensionCapabilityId, isPathInside, isReadOnlySkillSource, isSkillPathUnderRoots, skillSourceForPath } from "./capabilityPathIdentity.mjs";
+import { canonicalPath, extensionCapabilityId, isCrossClientSkillPath, isPathInside, isReadOnlySkillSource, isSkillPathUnderRoots, projectAgentsSkillRoots, skillPathTarget, skillSourceForPath } from "./capabilityPathIdentity.mjs";
 import { applySkillSelection, createSkillSelectionPolicy, replaceSkillSelectionPolicy, skillEnabledBySelection } from "./capabilitySkillSelection.mjs";
+import { normalizeSkillDiagnostics } from "./capabilitySkillDiagnostics.mjs";
 import { describeLoadStatus, isUnhealthyLoadStatus, summarizePackageHealth } from "./capabilityHealth.mjs";
 import { normalizeCommandArgumentItems } from "./commandArguments.mjs";
+import { manualSkillPromptPrefix } from "./manualSkillPrompt.mjs";
 import { PI_DESKTOP_BUILTIN_COMMANDS, planBuiltinCommand } from "./builtinCommands.mjs";
 import { absolutizeInstalledUserPackage, installTargetPath, packageSourceForPi } from "./capabilityPackageSource.mjs";
 import { emptyPackageResources, findPackageResourceEntry, MAX_RESOURCE_PREVIEW_BYTES, packageProgressEvent, packageResourceDetails, resourcePreview, summarizePackageResources } from "./capabilityPackageResources.mjs";
@@ -2468,7 +2470,8 @@ async function resolveRuntimeCapabilityPaths({ project, settingsManager, session
     projectId: project.id,
     settingsManager,
   });
-  const allSkills = await discoverAllProjectSkills(project, settingsManager);
+  const skillResources = await discoverAllProjectSkillResources(project, settingsManager);
+  const allSkills = skillResources.skills;
   const config = ensureCapabilitiesConfigInitialized(managedSkills(allSkills, project));
   const selection = activeSessionCapabilitySelection(sessionManager, allSkills, config, {
     projectId: project.id,
@@ -2528,6 +2531,9 @@ async function resolveRuntimeCapabilityPaths({ project, settingsManager, session
     // The full set pi's loader discovers, captured from its own pass (seeded with the
     // pre-resolve so the page has data even before the loader runs).
     skillInventory: allSkills,
+    // pi 加载器对技能的诊断（重名冲突、frontmatter 非法…）。跟 skillInventory 同源同刻，
+    // 所以在能力页里「少了哪个技能」和「为什么少」永远对得上。
+    skillDiagnostics: skillResources.diagnostics,
   };
 }
 
@@ -2547,6 +2553,7 @@ async function refreshRuntimeCapabilityPaths(targetRuntime) {
   current.activeSkillIds = next.activeSkillIds;
   replaceSkillSelectionPolicy(current.skillSelection, next.skillSelection);
   current.skillInventory = next.skillInventory;
+  current.skillDiagnostics = next.skillDiagnostics;
   return current;
 }
 
@@ -3633,7 +3640,20 @@ function managedSkills(skills, project = activeProject()) {
 }
 
 function isManagedSkillPath(filePath, project = activeProject()) {
-  return isSkillPathUnderRoots(filePath, [appSkillsDir, agentSkillsDir, agentsSkillsDir, join(project.cwd, ".pi", "skills")]);
+  return isSkillPathUnderRoots(filePath, managedSkillRoots(project));
+}
+
+/**
+ * 受管的技能根。除了内置 / 用户 / 项目 `.pi/skills`，还包括项目里任意一层的
+ * `<dir>/.agents/skills`（pi 从 cwd 一路收到 git 仓库根，见 projectAgentsSkillRoots 的注释）。
+ * 不把后者算进来，这类技能在能力页里就是「查无此技能」：来源、会话开关、删除守卫全都对不上号。
+ */
+function managedSkillRoots(project = activeProject()) {
+  return [appSkillsDir, agentSkillsDir, agentsSkillsDir, ...projectAgentsSkillsDirs(project), join(project.cwd, ".pi", "skills")];
+}
+
+function projectAgentsSkillsDirs(project = activeProject()) {
+  return projectAgentsSkillRoots(project.cwd, homedir());
 }
 
 function packageCapabilityId(pkg) {
@@ -3815,6 +3835,17 @@ function allDiscoveredSkillsForLoader(resourceLoader) {
 }
 
 async function discoverAllProjectSkills(project, settingsManager = undefined) {
+  return (await discoverAllProjectSkillResources(project, settingsManager)).skills;
+}
+
+/**
+ * 技能清单 + pi 加载器自己的诊断。
+ *
+ * `getSkills()` 返回 `{ skills, diagnostics }`，诊断里除了 frontmatter 非法，还包括**重名冲突**
+ * （pi 保留先发现的、丢掉后来的，只说一声）。以前只取 `.skills`，于是用户看到「少了一个技能」
+ * 而没有任何解释；现在把诊断一路带到能力页。
+ */
+async function discoverAllProjectSkillResources(project, settingsManager = undefined) {
   const effectiveSettingsManager = settingsManager ?? SettingsManager.create(project.cwd, agentDir, { projectTrusted: false });
   const loader = new DefaultResourceLoader({
     ...basePiDesktopResourceLoaderOptions(project, effectiveSettingsManager),
@@ -3824,7 +3855,8 @@ async function discoverAllProjectSkills(project, settingsManager = undefined) {
     extensionFactories: [],
   });
   await loader.reload();
-  return loader.getSkills().skills;
+  const result = loader.getSkills();
+  return { skills: result?.skills ?? [], diagnostics: normalizeSkillDiagnostics(result?.diagnostics) };
 }
 
 function loadedExtensionReport(targetRuntime = runtime) {
@@ -3886,8 +3918,14 @@ async function buildCapabilitiesSnapshot(targetRuntime = runtime, options = {}) 
   // Re-running a discovery pass here would cost a full resource resolve per snapshot *and*
   // could disagree with what the session really loaded - which is exactly how project
   // skills went missing while the page still claimed they were active.
+  const fallbackSkillResources = targetRuntime.capabilityPaths?.skillInventory
+    ? null
+    : await discoverAllProjectSkillResources(project, targetRuntime.settingsManager);
   const allSkills = targetRuntime.capabilityPaths?.skillInventory
-    ?? await discoverAllProjectSkills(project, targetRuntime.settingsManager);
+    ?? fallbackSkillResources?.skills
+    ?? [];
+  // pi 加载器的诊断跟清单同源：重名冲突时它保留先发现的那份，丢掉的必须有个解释。
+  const skillDiagnostics = targetRuntime.capabilityPaths?.skillDiagnostics ?? fallbackSkillResources?.diagnostics ?? [];
   const managed = managedSkills(allSkills, project);
   const config = ensureCapabilitiesConfigInitialized(managed);
   const sessionSelection = activeSessionCapabilitySelection(targetRuntime.session.sessionManager, allSkills, config, targetRuntime);
@@ -3941,6 +3979,7 @@ async function buildCapabilitiesSnapshot(targetRuntime = runtime, options = {}) 
           builtin: appSkillsDir,
           piAgent: agentSkillsDir,
           agents: agentsSkillsDir,
+          projectAgents: projectAgentsSkillsDirs(project),
         });
         return {
           id,
@@ -4007,6 +4046,11 @@ async function buildCapabilitiesSnapshot(targetRuntime = runtime, options = {}) 
     mcpServers,
     builtinCommands: PI_DESKTOP_BUILTIN_COMMANDS,
     session: sessionSelection,
+    // pi 设置 `enableSkillCommands`（default true）：false 时 TUI 不把技能注册成命令。
+    // 桌面 `/` 菜单跟着不列技能项，但手打 `/skill:<名字>` 仍然可用（见 slashMenu.ts）。
+    skillCommandsEnabled: targetRuntime.settingsManager?.getEnableSkillCommands?.() !== false,
+    // 技能加载告警：重名冲突时 pi 保留先发现的那份，用户只会看到「某个技能不见了」。
+    skillDiagnostics,
     extensionErrors: loadHealth.unattributedErrors.map((error) => (error.path ? `${error.message}（${error.path}）` : error.message)),
   };
 }
@@ -4643,8 +4687,11 @@ async function deleteSkillFromCapabilityPage(body) {
     throw new Error("Skill not found.");
   }
 
-  const skillRoot = dirname(skill.filePath);
-  assertWritableSkillRoot(skillRoot);
+  // 目录技能删整个目录；独立 markdown 技能（技能根下直接放的 *.md）只删那个文件。
+  // 以前一律 `dirname(filePath)`：独立 md 技能会让目标变成整个 skills 根目录。
+  const skillRoot = skillPathTarget(skill.filePath);
+  assertWritableSkillTarget(skillRoot);
+  assertExistingSkillTarget(skillRoot);
   await snapshotInstalledSkillVersion(project, body?.scope === "user" ? "user" : inferInstalledSkillScope(project, skillRoot), basename(skillRoot), skillRoot, "before-delete");
   rmSync(skillRoot, { recursive: true, force: true });
 
@@ -4686,7 +4733,7 @@ function readSkillContent(filePath) {
 }
 
 function discoverSkillFromKnownRoots(project, filePath) {
-  const roots = [appSkillsDir, agentSkillsDir, agentsSkillsDir, join(project.cwd, ".pi", "skills")];
+  const roots = managedSkillRoots(project);
   if (!isSkillPathUnderRoots(filePath, roots)) {
     return null;
   }
@@ -5181,13 +5228,30 @@ function assertSkillDirectory(path) {
 
 function assertWritableSkillRoot(skillRoot) {
   assertWritableSkillTarget(skillRoot);
+  assertExistingSkillTarget(skillRoot, { directoryOnly: true });
+}
 
-  if (!existsSync(skillRoot)) {
-    throw new Error(`Installed skill not found: ${skillRoot}`);
+/**
+ * 删除目标必须真的存在，且只能是目录（目录技能）或文件（独立 markdown 技能）。
+ *
+ * @param {string} targetPath
+ * @param {{ directoryOnly?: boolean }} [options] 写/恢复流程按技能目录操作，传 `directoryOnly`。
+ */
+function assertExistingSkillTarget(targetPath, options = {}) {
+  if (!existsSync(targetPath)) {
+    throw new Error(`Installed skill not found: ${targetPath}`);
   }
 
-  if (!statSync(skillRoot).isDirectory()) {
-    throw new Error(`Installed skill must be a directory: ${skillRoot}`);
+  const stats = statSync(targetPath);
+  if (options.directoryOnly) {
+    if (!stats.isDirectory()) {
+      throw new Error(`Installed skill must be a directory: ${targetPath}`);
+    }
+    return;
+  }
+
+  if (!stats.isDirectory() && !stats.isFile()) {
+    throw new Error(`Installed skill must be a directory or a markdown file: ${targetPath}`);
   }
 }
 
@@ -5195,10 +5259,12 @@ function assertWritableSkillTarget(skillRoot) {
   if (isBuiltinSkillPath(skillRoot)) {
     throw new Error("Built-in skills are read-only. Copy the skill to the user or current project skills directory before editing it.");
   }
-  // 只按字面路径拦 `~/.agents/skills` 那侧：`~/.pi/agent/skills/x` 指向它的软链仍然可删
-  // （删掉的只是软链本身），而直接住在这个跨客户端目录里的技能不允许从这里删除。
-  if (isPathInside(resolve(agentsSkillsDir), resolve(skillRoot))) {
-    throw new Error("Skills in ~/.agents/skills are shared across agents and read-only here.");
+  // `.agents/skills` 是 Agent Skills 的跨客户端共享目录（用户的 `~/.agents/skills`，以及项目里
+  // 任意一层的 `<dir>/.agents/skills`），Codex / Gemini / 百炼都从同一份目录读技能：从这个
+  // 客户端删会把别人的入口一起删掉。守卫只看字面路径，所以 `~/.pi/agent/skills/x` 指向它的
+  // 软链仍然可删 —— 删掉的只是那条软链本身。
+  if (isCrossClientSkillPath(skillRoot)) {
+    throw new Error("Skills in .agents/skills are shared across agents and read-only here.");
   }
 }
 
@@ -6559,8 +6625,16 @@ async function streamPrompt(req, res, requestId, options = {}) {
     ...sessionDetails(activeRuntime),
   });
   const attachments = persistPromptAttachments(activeRuntime, body?.attachments);
-  const messageParts = await normalizePromptMessageParts(activeRuntime, body?.messageParts, displayInput, attachments);
-  if (!rawInput.trim() && !attachments.length) {
+  const { parts: messageParts, manualSkillPrefix } = await normalizePromptMessageParts(
+    activeRuntime,
+    body?.messageParts,
+    displayInput,
+    attachments,
+  );
+  // 只挂了技能徽标、一个字没写也算一次提交（TUI 的 `/skill:name` 无参数形态）：此时
+  // baseInput 由 capabilityOnlyPrompt 顶上一个短句，别把空消息交给模型。
+  const requestedCapabilities = messageParts.filter((part) => part?.kind === "capability");
+  if (!rawInput.trim() && !attachments.length && !requestedCapabilities.length) {
     throw new Error("input is required");
   }
   if (!isUsableModel(activeRuntime.session.model)) {
@@ -6570,8 +6644,16 @@ async function streamPrompt(req, res, requestId, options = {}) {
     throw new Error(`请先配置 ${activeRuntime.session.model.provider} 的 API key。`);
   }
 
-  const baseInput = rawInput || attachmentOnlyPrompt(attachments);
-  const input = appendAttachmentContext(baseInput, displayInput, attachments, messageParts);
+  const baseInput = rawInput
+    || (attachments.length ? attachmentOnlyPrompt(attachments) : capabilityOnlyPrompt(requestedCapabilities));
+  // manual-only 技能的正文得顶在用户消息最前面（见 manualSkillPrompt.mjs）；
+  // metadata 里的 displayInput 不变，所以气泡里仍然只显示用户打的那句话 + 徽标。
+  const input = appendAttachmentContext(
+    manualSkillPrefix ? `${manualSkillPrefix}${baseInput}` : baseInput,
+    displayInput,
+    attachments,
+    messageParts,
+  );
   const images = activeRuntime.session.model.input?.includes("image")
     ? attachments
         .filter((attachment) => attachment.kind === "image")
@@ -7642,7 +7724,7 @@ async function normalizePromptMessageParts(activeRuntime, parts, displayInput, a
     .filter((part) => part.kind === "capability")
     .map((part) => part.capability);
   if (!requestedCapabilities.length) {
-    return normalized;
+    return { parts: normalized, manualSkillPrefix: "" };
   }
 
   const context = await readRuntimeCapabilityContext(activeRuntime);
@@ -7674,7 +7756,7 @@ async function normalizePromptMessageParts(activeRuntime, parts, displayInput, a
         };
       });
   const activeSkills = new Set(selection.skills);
-  return normalized.map((part) => {
+  const activeParts = normalized.map((part) => {
     if (part.kind !== "capability") {
       return part;
     }
@@ -7687,6 +7769,45 @@ async function normalizePromptMessageParts(activeRuntime, parts, displayInput, a
       },
     };
   });
+  return {
+    parts: activeParts,
+    manualSkillPrefix: manualSkillPrefixFor(context.allSkills, requestedSkills),
+  };
+}
+
+/**
+ * 用户显式附上的 manual-only 技能 → 要拼进这条 prompt 的 skill block 前缀。
+ *
+ * 读不到 SKILL.md 就跳过这一个（pi 的 `_expandSkillCommand` 同样放弃展开并上报），
+ * 不能让一条附件把整次提交打挂。注意这里不依赖 pi 的 loaded skills：服务端自己读文件，
+ * 所以流式中途附上一个没使能的 manual-only 技能也照样能展开。
+ */
+function manualSkillPrefixFor(allSkills, requestedSkills) {
+  const byId = new Map((allSkills ?? []).map((skill) => [skillCapabilityId(skill), skill]));
+  const entries = [];
+  for (const capability of requestedSkills ?? []) {
+    const skill = byId.get(normalizeCapabilityId(capability?.id));
+    if (!skill || skill.disableModelInvocation !== true) {
+      continue;
+    }
+    try {
+      entries.push({
+        name: skill.name,
+        filePath: skill.filePath,
+        // 用内核自己算的 baseDir（`<skill ...>` 里 "References are relative to …" 就是它），
+        // 只在它缺失时才退回 dirname(filePath) —— 包里的技能这两者可以不同。
+        baseDir: skill.baseDir || dirname(skill.filePath),
+        content: readFileSync(skill.filePath, "utf8"),
+      });
+    } catch (error) {
+      diagnosticLog("prompt.manual_skill_read_failed", {
+        skill: skill.name,
+        path: skill.filePath,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return manualSkillPromptPrefix(entries);
 }
 
 function normalizeMessageParts(parts, displayInput, attachments) {
@@ -7851,6 +7972,22 @@ function attachmentOnlyPrompt(attachments) {
     return `Please review the attached ${only?.kind === "directory" ? "folder" : "file"}: ${only?.name}`;
   }
   return `Please review these ${attachments.length} attached files.`;
+}
+
+/**
+ * 只挂了能力徽标、一个字没写时给模型的那句话。
+ *
+ * 只挂技能时等价于 TUI 的 `/skill:name`（无参数） —— 技能正文由 manualSkillPrompt 顶在
+ * 最前面（manual-only 技能），或者由模型自己从 `<available_skills>` 里读（已使能的技能），
+ * 这里只需要给一个不空的指令，避免把空消息丢给模型。
+ */
+function capabilityOnlyPrompt(capabilities) {
+  const names = capabilities
+    .map((part) => String(part?.capability?.name ?? "").trim())
+    .filter((name) => name.length > 0);
+  return names.length
+    ? `Please use the attached skill: ${names.join(", ")}`
+    : "Please use the attached capability.";
 }
 
 function inferAttachmentMimeType(path) {

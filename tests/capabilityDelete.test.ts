@@ -49,6 +49,36 @@ test("kinds without a removal path are never deletable", () => {
 /* -------------------------------- wiring --------------------------------- */
 
 const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+
+/* ------------------------------- what gets removed ------------------------------- */
+
+// 技能有两种落盘形态，能力页都列：目录技能（<root>/<name>/SKILL.md）和独立 markdown 技能
+// （pi 的 loadSkillsFromDir 会把技能根目录下直接放的 *.md 也收成技能）。删除目标必须按形态算，
+// 不能统一取 dirname(filePath) —— 独立 md 技能那样算出来是整个 skills 根目录。
+test("删除技能删的是技能本体，不是整个 skills 目录", () => {
+  const body = functionBody(serverSource, "function deleteSkillFromCapabilityPage(");
+  assert.match(
+    body,
+    /const skillRoot = skillPathTarget\(skill\.filePath\)/,
+    "删除目标要由 skillPathTarget 按技能形态算（目录技能→目录，独立 md 技能→那个文件）",
+  );
+  assert.doesNotMatch(
+    body,
+    /dirname\(skill\.filePath\)/,
+    "dirname(SKILL.md) 对独立 md 技能会退化成 skills 根目录，等于 rm -rf 所有技能",
+  );
+  // 独立 md 技能的目标是文件，存在性守卫不能再要求必须是目录。
+  assert.match(body, /assertExistingSkillTarget\(skillRoot\)/);
+});
+
+test("写入 / 版本回滚仍然只针对技能目录", () => {
+  assert.match(
+    functionBody(serverSource, "function assertWritableSkillRoot("),
+    /directoryOnly: true/,
+    "write_skill_file / restore_skill_version 是按技能目录操作的，继续要求目录",
+  );
+});
 
 test("the card list, the detail sheet and the context panel share one eligibility rule", () => {
   const card = functionBody(appSource, "function CapabilityMarketCard");

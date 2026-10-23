@@ -54,6 +54,10 @@ import {
   streamingBubbleId,
 } from "../../shared/chatStreamProjection";
 import { perfCount, perfMark, perfMeasure } from "../../lib/perf";
+import {
+  hasCapabilityPart,
+  promptFallback,
+} from "./promptFallbacks";
 import type {
   AppSnapshot,
   ChatAttachment,
@@ -1420,10 +1424,12 @@ export function usePiDesktopApp() {
       const displayInput = rawInput;
       const attachments = attachmentInputs.map(toChatAttachment);
       const contentParts = normalizeMessageParts(messageParts, displayInput, attachments);
-      const input = displayInput || attachmentOnlyPrompt(attachments);
+      // 只挂了技能徽标也算一次提交；input 必须是服务端会算出的同一句话。
+      const capabilityPart = hasCapabilityPart(contentParts);
+      const input = promptFallback(displayInput, attachments, contentParts);
       const sessionPath = bootstrap.activeSessionPath ?? conversation.sessionFile;
       if (
-        (!displayInput.trim() && !attachments.length) ||
+        (!displayInput.trim() && !attachments.length && !capabilityPart) ||
         !sessionPath ||
         state.isBootstrapping ||
         state.isStopping
@@ -1770,10 +1776,11 @@ export function usePiDesktopApp() {
       const displayInput = rawInput;
       const attachments = attachmentInputs.map(toChatAttachment);
       const contentParts = normalizeMessageParts(messageParts, displayInput, attachments);
-      const input = displayInput || attachmentOnlyPrompt(attachments);
+      const capabilityPart = hasCapabilityPart(contentParts);
+      const input = promptFallback(displayInput, attachments, contentParts);
       const sessionPath = bootstrap.activeSessionPath ?? conversation.sessionFile;
       if (
-        (!displayInput.trim() && !attachments.length) ||
+        (!displayInput.trim() && !attachments.length && !capabilityPart) ||
         !sessionPath ||
         state.isBootstrapping ||
         state.isStopping ||
@@ -2906,13 +2913,6 @@ function normalizeMessageParts(
     ...(displayInput ? [{ kind: "text" as const, text: displayInput }] : []),
     ...attachments.map((attachment) => ({ kind: "attachment" as const, attachmentId: attachment.id })),
   ];
-}
-
-function attachmentOnlyPrompt(attachments: ChatAttachment[]) {
-  if (attachments.length === 1) {
-    return `Please review the attached ${attachments[0].kind === "directory" ? "folder" : "file"}: ${attachments[0].name}`;
-  }
-  return `Please review these ${attachments.length} attached files.`;
 }
 
 function createDefaultBootstrap(): BootstrapResponse {

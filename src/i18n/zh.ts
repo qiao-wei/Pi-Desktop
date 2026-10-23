@@ -26,10 +26,18 @@ export const zh = {
   "capability.source.builtin": "内置",
   "capability.source.piAgent": "Pi agent",
   "capability.source.agents": "agent",
+  "capability.source.projectAgents": "项目 agent",
   "capability.source.agent": "agent级",
   "capability.source.project": "项目级",
   "capability.source.discovered": "已发现",
   "capability.kind.skill": "技能",
+  /* 技能卡片徽标：声明了 disable-model-invocation 的技能只能手动调用（见 skills.md）。
+     别写成「工具」——它会让人以为这个技能会进模型的自动选择清单。 */
+  "capability.badge.manualOnly": "仅手动",
+  "capability.skillDiagnostics.title": "技能加载告警",
+  "capability.skillDiagnostics.hint": "pi 的加载器在下面这些技能上打了警告：同名技能只保留先发现的那份（后者会被丢掉），frontmatter 非法的技能根本不会加载。",
+  "capability.skillDiagnostics.kept": "实际保留：{path}",
+  "capability.slashMenu.skillCommandsDisabled": "技能命令已在 pi 设置里关闭（enableSkillCommands: false），所以这里不列技能；直接输入 /skill:<技能名> 仍然可用。",
 
   /* ---- usage（用量面板） ---- */
   "usage.cacheDetail": "(输入 {read}，输出 {write})",
@@ -546,6 +554,7 @@ export const zh = {
   "capability.detail.detailAndSettings": "{name} 的详情与设置",
   "capability.detail.fillSourceHint": "填写来源以安装 Package",
   "capability.detail.readingContent": "正在读取技能内容...",
+  "capability.detail.manualOnlyNote": "该技能声明了 disable-model-invocation: true，不会出现在模型的自动选择列表里。",
   "capability.detail.packageSource": "Package 来源",
   "capability.detail.packageSourcePlaceholder": "npm:@scope/package 或 git:github.com/user/repo",
   "capability.detail.installScope": "安装范围",
