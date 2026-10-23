@@ -293,10 +293,15 @@ test("runtime-time snapshots reuse the loader's inventory instead of re-running 
   const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
 
   assert.match(source, /const allSkills = targetRuntime\.capabilityPaths\?\.skillInventory/);
-  const total = source.match(/await discoverAllProjectSkills\(project, targetRuntime\.settingsManager\)/g)?.length ?? 0;
+  // 快照与删除/读内容路径都只能把重新发现当兜底，两种写法都算：
+  // - `?? await discoverAllProjectSkills(...)`（只要技能清单）；
+  // - `capabilityPaths?.skillInventory ? null : await discoverAllProjectSkillResources(...)`
+  //   （诊断要和清单同源，所以走 Resources 版本拿 { skills, diagnostics }）。
   const guarded = source.match(/\?\?\s*await discoverAllProjectSkills\(project, targetRuntime\.settingsManager\)/g)?.length ?? 0;
+  const explicitFallback = source.match(/capabilityPaths\?\.skillInventory\s*\?\s*null\s*:\s*await discoverAllProjectSkillResources\(project, targetRuntime\.settingsManager\)/g)?.length ?? 0;
+  const total = source.match(/await discoverAllProjectSkill(?:s|Resources)\(project, targetRuntime\.settingsManager\)/g)?.length ?? 0;
   assert.ok(total >= 3, "the runtime-time call sites must still exist");
-  assert.equal(guarded, total, "every one of them must be a fallback behind the captured inventory");
+  assert.equal(guarded + explicitFallback, total, "every one of them must be a fallback behind the captured inventory");
 });
 
 test("trust is resolved before the capability inventory", () => {

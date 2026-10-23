@@ -26,10 +26,20 @@ function region(source, startMark, endMark) {
 }
 
 test("index.mjs 从 capabilityPathIdentity 取路径身份，不再自己 resolve", () => {
-  assert.match(
-    serverSource,
-    /import \{ canonicalPath, extensionCapabilityId, isPathInside, isReadOnlySkillSource, isSkillPathUnderRoots, skillSourceForPath \} from "\.\/capabilityPathIdentity\.mjs";/,
-  );
+  // 只钉「这些身份函数必须来自那个模块」，不钉 import 列表的完整字面量 —— 列表增删一个符号
+  // 不该红；真正要防的是本地又抄一份 resolve 版实现（下面两条负面断言）。
+  const importLine = serverSource.match(/import \{[^}]+\} from "\.\/capabilityPathIdentity\.mjs";/)?.[0] ?? "";
+  for (const symbol of [
+    "canonicalPath",
+    "extensionCapabilityId",
+    "isPathInside",
+    "isReadOnlySkillSource",
+    "isSkillPathUnderRoots",
+    "skillPathTarget",
+    "skillSourceForPath",
+  ]) {
+    assert.ok(importLine.includes(symbol), `capabilityPathIdentity 的 ${symbol} 必须从那个模块取，不要在 index.mjs 里另写一份`);
+  }
   assert.doesNotMatch(serverSource, /function extensionCapabilityId\(/, "本地的 resolve 版 id 已删除");
   assert.match(
     serverSource,

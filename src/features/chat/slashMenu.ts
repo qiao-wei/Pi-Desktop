@@ -1,4 +1,4 @@
-import type { CapabilitiesState } from "../../types";
+import type { CapabilitiesState, ChatMessagePart } from "../../types";
 
 /** Structural input shape so callers can pass a full CapabilitiesState or a test fixture. */
 export interface SlashMenuSkill {
@@ -25,6 +25,11 @@ export interface CapabilitiesLike {
   skills: SlashMenuSkill[];
   packages: SlashMenuPackage[];
   builtinCommands?: SlashMenuBuiltinCommand[];
+  /**
+   * pi 设置 `enableSkillCommands`（default true）。false 表示「不要把技能当命令注册」，
+   * TUI 里就不进补全。桌面跟着不列在 `/` 菜单里（`/skill:<名字>` 手打仍然可用）。
+   */
+  skillCommandsEnabled?: boolean;
 }
 
 /**
@@ -102,6 +107,89 @@ export function matchSlashCommandArgs(text: string): SlashCommandArgs | null {
   return { name, prefix };
 }
 
+/**
+ * TUI 语义的技能手动调用：`/skill:<name> [args]`（pi docs/skills.md —— 「manually entered
+ * /skill:name commands still work」，也正是 `enableSkillCommands: false` 时的唯一入口）。
+ *
+ * 桌面没有命令注册表（聊天路径刻意保持 `expandPromptTemplates: false`），所以这句话在提交时
+ * 被**翻译成附件**：挂上这个技能的徽标，后面的文字当参数。之后的路径和从 `/` 菜单里选技能
+ * 完全一样 —— manual-only 技能的正文由服务端顶在最前面，已使能的技能照旧只写 enabledSkills。
+ *
+ * 名字必须精确命中已加载的技能；打错的 `/skill:xxx` 原样当普通提问（与 pi 的 fall through 一致）。
+ *
+ * 比内核宽松的地方（有意）：名字按**任意空白**切开并 trim，内核只按第一个空格切、且不 trim。
+ * 也就是说 `/skill:alpha\nargs`、`/skill: alpha` 我们认而内核不认；内核认得的所有写法我们
+ * 都认得，且结果相同（`tests/manualSkillPrompt.test.ts` 拿内核的 `_expandSkillCommand` 当 oracle）。
+ */
+export function matchManualSkillCommand(
+  text: string,
+  skills: readonly SlashMenuSkill[],
+): { capability: { id: string; kind: "skill"; name: string; description: string; active: boolean }; args: string } | null {
+  const cleaned = text.replaceAll("\u200b", "");
+  if (!cleaned.startsWith(SKILL_COMMAND_PREFIX)) {
+    return null;
+  }
+  const rest = cleaned.slice(SKILL_COMMAND_PREFIX.length);
+  const firstSpace = rest.search(/\s/u);
+  const name = (firstSpace === -1 ? rest : rest.slice(0, firstSpace)).trim();
+  const args = firstSpace === -1 ? "" : rest.slice(firstSpace + 1).trim();
+  if (!name) {
+    return null;
+  }
+  const skill = skills.find((candidate) => candidate.name === name);
+  if (!skill) {
+    return null;
+  }
+  return {
+    capability: {
+      id: skill.id,
+      kind: "skill",
+      name: skill.name,
+      description: skill.description,
+      active: skill.active,
+    },
+    args,
+  };
+}
+
+/**
+ * 把 `/skill:<name> [args]` 落成「徽标 + 参数」的**纯函数**，App 与编辑框共用。
+ *
+ * 两处提交路径（composer 与 `MessageEditBox`）必须给出同一结果，否则同一条消息「首次发送」
+ * 与「编辑后重发」的行为会不一样。规则：
+ * - 命中：只把那段 `/skill:…` 文字换成 args，**其它徽标/附件原样保留**（它们在编辑器里的
+ *   位置就是气泡里的位置）；同一个技能的徽标已经挂着就不重复挂。
+ * - 未命中：原样返回（`matched: false`），调用方据此保持普通提问路径。
+ */
+export function applyManualSkillCommand(
+  text: string,
+  skills: readonly SlashMenuSkill[],
+  parts: readonly ChatMessagePart[],
+): { matched: boolean; text: string; parts: ChatMessagePart[] } {
+  const match = matchManualSkillCommand(text, skills);
+  if (!match) {
+    return { matched: false, text, parts: [...parts] };
+  }
+  const attached = parts.some((part) => part.kind === "capability" && part.capability?.id === match.capability.id);
+  return {
+    matched: true,
+    text: match.args,
+    parts: [
+      ...parts.filter((part) => part.kind !== "text"),
+      ...(attached ? [] : [{ kind: "capability" as const, capability: match.capability }]),
+      ...(match.args ? [{ kind: "text" as const, text: match.args }] : []),
+    ],
+  };
+}
+
+/** pi 注册技能命令用的前缀（跟 pi 的 `_expandSkillCommand` 同一个字面量）。 */
+export const SKILL_COMMAND_PREFIX = "/skill:";
+
+/** pi 设置 `enableSkillCommands` 是否为 false（undefined 视为开启，兼容旧快照）。 */
+export function skillCommandsDisabled(capabilities: { skillCommandsEnabled?: boolean }): boolean {
+  return capabilities.skillCommandsEnabled === false;
+}
+
 export interface PackageCommandRef {
   packageId: string;
   packageName: string;
@@ -146,7 +234,7 @@ export function findBuiltinCommand(
 export const SLASH_MENU_LIMIT = 50;
 
 export function buildSlashMenuItems(
-  capabilities: Pick<CapabilitiesState, "skills" | "packages"> & { builtinCommands?: SlashMenuBuiltinCommand[] } | CapabilitiesLike,
+  capabilities: (Pick<CapabilitiesState, "skills" | "packages"> & { builtinCommands?: SlashMenuBuiltinCommand[]; skillCommandsEnabled?: boolean }) | CapabilitiesLike,
   query: string,
   limit = SLASH_MENU_LIMIT,
 ): SlashMenuItem[] {
@@ -154,6 +242,7 @@ export function buildSlashMenuItems(
     skills: capabilities.skills,
     packages: capabilities.packages,
     builtinCommands: capabilities.builtinCommands,
+    skillCommandsEnabled: capabilities.skillCommandsEnabled,
   };
   const needle = query.trim().toLowerCase();
 
@@ -173,7 +262,12 @@ export function buildSlashMenuItems(
     return description.toLowerCase().includes(needle) ? 2 : 3;
   };
 
-  const rankedSkills = source.skills
+  const rankedSkills = (source.skillCommandsEnabled === false ? [] : source.skills)
+    // 注意到这里**不等价**于 pi TUI 的 `enableSkillCommands: false`：那边只是不进补全，
+    // 技能仍然是命令；桌面这边的 `/` 菜单是**唯一的附件入口** —— 徽标带上去服务端才把
+    // manual-only 技能的正文顶进本次请求（server/manualSkillPrompt.mjs）。所以跟着那个
+    // 设置藏掉技能项时，手打 `/skill:<名字>` 必须仍然能调用（matchManualSkillCommand），
+    // 菜单里也要把这件事说出来（capability.slashMenu.skillCommandsDisabled）。
     .map((skill) => ({ skill, rank: rankOf(skill.name, skill.description) }))
     .filter(({ rank }) => rank < 3)
     .sort((left, right) =>

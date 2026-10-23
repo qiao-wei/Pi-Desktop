@@ -22,6 +22,7 @@ import {
   isPathInsideCanonical,
   isReadOnlySkillSource,
   isSkillPathUnderRoots,
+  skillPathTarget,
   skillSourceForPath,
 } from "../server/capabilityPathIdentity.mjs";
 
@@ -175,4 +176,21 @@ test("isReadOnlySkillSource：内置与跨客户端只读，piAgent / project �
   assert.equal(isReadOnlySkillSource("agents"), true);
   assert.equal(isReadOnlySkillSource("piAgent"), false);
   assert.equal(isReadOnlySkillSource("project"), false);
+});
+
+test("skillPathTarget：目录技能删目录，独立 markdown 技能只删那个文件", () => {
+  const userSkills = resolve("proj", ".pi", "skills");
+  assert.equal(
+    skillPathTarget(join(userSkills, "grilling", "SKILL.md")),
+    join(userSkills, "grilling"),
+    "目录技能的目标是技能目录（SKILL.md 的父目录）",
+  );
+  // 独立 md 技能：pi 的 loadSkillsFromDir 会把技能根目录下直接放的 *.md 也收成技能
+  // （includeRootFiles）。目标是那个文件。
+  const flat = join(userSkills, "flat.md");
+  assert.equal(skillPathTarget(flat), flat);
+  // 回归钉子：以前统一 `dirname(filePath)`，独立 md 技能算出来的目标是整个 skills 根目录，
+  // 删一个技能 = 把用户所有技能一起 rm -rf（~/.pi/agent/skills 下还全是指向别处的软链）。
+  assert.notEqual(skillPathTarget(flat), userSkills);
+  assert.equal(skillPathTarget(""), resolve("."));
 });

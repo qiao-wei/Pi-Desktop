@@ -219,11 +219,13 @@ import {
   buildSlashMenuItems,
   findBuiltinCommand,
   findSlashCommand,
+  applyManualSkillCommand,
   findSlashStart,
   matchSlashCommandArgs,
   matchSlashTrigger,
   moveHighlight,
   readTriggerText,
+  skillCommandsDisabled,
   type SlashMenuItem,
 } from "../features/chat/slashMenu";
 import {
@@ -516,6 +518,8 @@ export function App() {
   const [resizingSide, setResizingSide] = useState<"left" | "right" | null>(null);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [composerText, setComposerText] = useState("");
+  /** 编辑器里挂着的技能/扩展徽标数量。只挂徽标不打字也是一次合法提交，发送按钮要跟着亮。 */
+  const [composerCapabilityCount, setComposerCapabilityCount] = useState(0);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [isPreparingAttachments, setIsPreparingAttachments] = useState(false);
   const [composerError, setComposerError] = useState("");
@@ -981,7 +985,21 @@ export function App() {
       .join("");
     const messageParts = toPromptMessageParts(orderedParts);
 
-    if ((!orderedText.trim() && orderedAttachments.length === 0) || isPreparingAttachments) {
+    // TUI 语义的手动技能调用：`/skill:<名字> [args]`（pi docs/skills.md）——
+    // 桌面没有命令注册表，所以这里把它翻译成「挂上这个技能的徽标 + 后面的字当参数」
+    // （纯函数在 slashMenu.ts，编辑框那条路共用同一份规则）。翻译完之后，后续路径与从
+    // `/` 菜单选技能完全一致：manual-only 技能的正文由服务端顶进本次请求，已使能的技能
+    // 只写 enabledSkills。名字打错则原样当普通提问。
+    const manualSkillCommand = applyManualSkillCommand(orderedText, capabilities.skills, messageParts);
+    const manualSkill = manualSkillCommand.matched;
+    const promptText = manualSkillCommand.text;
+    const promptParts = manualSkillCommand.parts;
+
+    // 只有徽标（技能/扩展）也能提交，等价于 TUI 的 `/skill:name` 无参数形态：
+    // 文字为空时服务端会用 capabilityOnlyPrompt 顶上一句，manual-only 技能的正文
+    // 自己会顶在最前面（server/manualSkillPrompt.mjs）。
+    const hasCapabilityPart = promptParts.some((part) => part.kind === "capability");
+    if ((!promptText.trim() && orderedAttachments.length === 0 && !hasCapabilityPart) || isPreparingAttachments) {
       return;
     }
     if (state.isStopping) {
@@ -992,13 +1010,14 @@ export function App() {
     // TUI 语义：提交的如果是已加载的包命令（`/name [args]`）或 Pi Desktop 实现了的内置命令
     // （目前 `/reload`），执行动作而不是当问题发给模型。只认精确命中的；未知的 `/xxx` 仍走
     // 聊天（服务端 expandPromptTemplates:false），所以「问题里以 / 开头」不会再触发意外命令。
-    const submittedCommand = matchSlashCommandArgs(orderedText);
+    const submittedCommand = matchSlashCommandArgs(promptText);
     const builtinCommand = submittedCommand ? findBuiltinCommand(capabilities, submittedCommand.name) : null;
     const slashCommand = submittedCommand && !builtinCommand
       ? findSlashCommand(capabilities, submittedCommand.name)
       : null;
     if (
-      (slashCommand || builtinCommand)
+      !manualSkill
+      && (slashCommand || builtinCommand)
       && !state.isBootstrapping
       && orderedAttachments.length === 0
       && !orderedParts.some((part) => part.kind === "capability")
@@ -1062,7 +1081,7 @@ export function App() {
           }),
         ),
       );
-      const submitPromise = submitTurn(orderedText, payload, messageParts);
+      const submitPromise = submitTurn(promptText, payload, promptParts);
       const preservedPreviewUrls = new Set(
         orderedAttachments.map((attachment) => attachment.previewUrl).filter((url): url is string => Boolean(url)),
       );
@@ -1723,6 +1742,7 @@ export function App() {
 
     setAttachments(nextAttachments);
     setComposerText(nextText);
+    setComposerCapabilityCount(parts.filter((part) => part.kind === "capability").length);
     clearEmptyComposerMarkers(editor, nextAttachments, nextText);
   }
 
@@ -3094,7 +3114,7 @@ export function App() {
                 <button
                   className="send-button"
                   type="submit"
-                  disabled={(!composerText.trim() && attachments.length === 0) || isPreparingAttachments || state.isStopping}
+                  disabled={(!composerText.trim() && attachments.length === 0 && composerCapabilityCount === 0) || isPreparingAttachments || state.isStopping}
                   aria-label={state.isStreaming ? "Queue follow-up" : "Send"}
                   title={state.isStreaming ? "Queue follow-up" : "Send"}
                 >
@@ -3109,6 +3129,7 @@ export function App() {
               highlightIndex={visibleSlashHighlight}
               onSelect={selectSlashItem}
               onHighlight={setSlashHighlight}
+              skillCommandsHidden={skillCommandsDisabled(capabilities)}
             />
           ) : null}
           {extensionBelowWidgets.length ? <ExtensionWidgetStack widgets={extensionBelowWidgets} /> : null}
@@ -4186,11 +4207,14 @@ function SlashMenu({
   highlightIndex,
   onSelect,
   onHighlight,
+  skillCommandsHidden = false,
 }: {
   items: SlashMenuItem[];
   highlightIndex: number;
   onSelect: (item: SlashMenuItem) => void;
   onHighlight: (index: number) => void;
+  /** pi 设置 `enableSkillCommands: false`：技能不在菜单里，但仍可手打 `/skill:<名字>`。 */
+  skillCommandsHidden?: boolean;
 }) {
   const t = useT();
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -4260,6 +4284,8 @@ function SlashMenu({
       {!items.length ? <p className="empty-text">{t("capability.slashMenu.empty")}</p> : null}
       {commands.length || builtins.length ? <p className="slash-menu-hint">{t("capability.slashMenu.commandHint")}</p> : null}
       {argumentEntries.length ? <p className="slash-menu-hint">{t("capability.slashMenu.argumentHint")}</p> : null}
+      {/* 技能被 pi 设置藏掉时得说一声：否则「菜单里没有技能」看起来像技能丢了。 */}
+      {skillCommandsHidden ? <p className="slash-menu-hint">{t("capability.slashMenu.skillCommandsDisabled")}</p> : null}
     </div>
   );
 }
@@ -4774,6 +4800,9 @@ function CapabilityDetailDialog({
             <>
               <p className="text-sm">{item.description || item.path}</p>
               <code className="rounded-md bg-muted px-2 py-1 font-mono text-xs break-all">{item.path}</code>
+              {item.disableModelInvocation ? (
+                <p className="text-sm text-muted-foreground">{t("capability.detail.manualOnlyNote")}</p>
+              ) : null}
               {isReadingSkill ? <p className="text-sm text-muted-foreground">{t("capability.detail.readingContent")}</p> : null}
               {skillContent ? <MarkdownContent text={skillContent} /> : null}
             </>
@@ -4875,6 +4904,8 @@ function CapabilitiesPage({
     && (tab !== "skill" || matchesSkillCategory(item, skillCategory))
   ));
   const selected = globalItems.find((item) => `${item.kind}:${item.id}` === selectedKey);
+  // 只看关键：诊断源是**整个**技能清单（含项目级），所以它只管当前这个 tab 上的那条告警。
+  const skillDiagnostics = capabilities.skillDiagnostics ?? [];
 
   async function run(label: string, action: () => Promise<unknown>) {
     setBusy(label);
@@ -5110,6 +5141,40 @@ function CapabilitiesPage({
                     {t(SKILL_SOURCE_CATEGORY_LABEL_KEYS[category])}
                   </Button>
                 ))}
+              </div>
+            ) : null}
+            {tab === "skill" && skillDiagnostics.length ? (
+              // 重名冲突时 pi 保留先发现的那份、丢掉后来的：只看到一个技能不见了而没有任何
+              // 解释，是用户最不能自解的一类问题，所以把加载器的诊断原样贴出来。
+              <div
+                className="grid gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5"
+                role="status"
+                aria-label={t("capability.skillDiagnostics.title")}
+              >
+                <p className="text-[12.5px] font-medium text-foreground">
+                  {t("capability.skillDiagnostics.title")}
+                </p>
+                <p className="text-[11.5px] text-muted-foreground">{t("capability.skillDiagnostics.hint")}</p>
+                <ul className="grid gap-1">
+                  {skillDiagnostics.map((diagnostic, index) => (
+                    <li key={`${diagnostic.type}:${diagnostic.path}:${index}`} className="grid gap-0.5">
+                      <span className="text-[11.5px] text-foreground">{diagnostic.message}</span>
+                      {diagnostic.path ? (
+                        <code className="truncate text-[11px] text-muted-foreground" title={diagnostic.path}>
+                          {diagnostic.path}
+                        </code>
+                      ) : null}
+                      {diagnostic.collision?.winnerPath ? (
+                        <code
+                          className="truncate text-[11px] text-muted-foreground"
+                          title={diagnostic.collision.winnerPath}
+                        >
+                          {t("capability.skillDiagnostics.kept", { path: diagnostic.collision.winnerPath })}
+                        </code>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
               </div>
             ) : null}
             <div className="grid min-w-0 grid-cols-3 gap-3.5 max-[1350px]:grid-cols-2 max-[920px]:grid-cols-1">
@@ -5503,7 +5568,13 @@ function CapabilityMarketCard({
           {item.kind === "extension" ? (
             <Badge variant="secondary">standalone</Badge>
           ) : null}
-          {item.kind === "skill" && item.disableModelInvocation ? <Badge variant="secondary">工具</Badge> : null}
+          {/* manual-only 技能（disable-model-invocation）不会进模型的自动选择清单，徽标必须这么说，
+              别写成「工具」——那会让人以为它在模型技能列表里。 */}
+          {item.kind === "skill" && item.disableModelInvocation ? (
+            <Badge variant="secondary" title={t("capability.detail.manualOnlyNote")}>
+              {t("capability.badge.manualOnly")}
+            </Badge>
+          ) : null}
         </div>
         <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
           {item.kind === "package" ? (

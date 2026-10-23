@@ -79,10 +79,10 @@ test("composer only dispatches an exact, currently loaded package command", () =
   assert.match(args, /findCapabilityPackageCommand\(targetRuntime, packageId, commandName\)/);
 
   const submit = functionBody(appSource, "handleSubmit");
-  assert.match(submit, /matchSlashCommandArgs\(orderedText\)/);
+  assert.match(submit, /matchSlashCommandArgs\(promptText\)/);
   assert.match(submit, /findSlashCommand\(capabilities, submittedCommand\.name\)/);
   // 派发必须早于聊天提交，命中命令时 `return`，不会落到 submitTurn。
   const dispatch = submit.indexOf("findSlashCommand(capabilities, submittedCommand.name)");
-  const chatSubmit = submit.indexOf("submitTurn(orderedText");
+  const chatSubmit = submit.indexOf("submitTurn(promptText");
   assert.ok(dispatch !== -1 && chatSubmit !== -1 && dispatch < chatSubmit);
 });

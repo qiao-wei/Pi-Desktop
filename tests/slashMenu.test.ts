@@ -14,6 +14,8 @@ import {
   buildSlashMenuItems,
   findBuiltinCommand,
   findSlashCommand,
+  applyManualSkillCommand,
+  matchManualSkillCommand,
   matchSlashCommandArgs,
   matchSlashTrigger,
   moveHighlight,
@@ -614,13 +616,15 @@ test("App: applying an argument candidate appends a space and chains the next le
 
 test("App: form submit dispatches an exact known package command instead of chatting", () => {
   const body = functionBody(appSource, "handleSubmit");
-  assert.match(body, /const submittedCommand = matchSlashCommandArgs\(orderedText\)/);
+  // 命令识别跑在提示词文本（promptText）上：`/skill:<名字>` 已被解析成技能徽标，
+  // 剩下的字才是命令候选，所以这里不会再看到 `/skill:` 前缀。
+  assert.match(body, /const submittedCommand = matchSlashCommandArgs\(promptText\)/);
   assert.match(body, /const slashCommand = submittedCommand && !builtinCommand/);
   assert.match(body, /findSlashCommand\(capabilities, submittedCommand\.name\)/);
   assert.match(body, /runPackageCommand\(slashCommand\.packageId, slashCommand\.name, submittedCommand\?\.prefix \?\? ""\)/);
   // 派发必须发生在聊天提交（submitTurn）之前，且不走 canSubmitPrompt 的模型门槛。
-  const dispatch = body.indexOf("matchSlashCommandArgs(orderedText)");
-  const chatSubmit = body.indexOf("submitTurn(orderedText");
+  const dispatch = body.indexOf("matchSlashCommandArgs(promptText)");
+  const chatSubmit = body.indexOf("submitTurn(promptText");
   const modelGate = body.indexOf("if (!canSubmitPrompt)");
   assert.ok(dispatch !== -1 && chatSubmit !== -1 && modelGate !== -1);
   assert.ok(dispatch < modelGate && dispatch < chatSubmit);
@@ -633,10 +637,12 @@ test("App: form submit dispatches a known built-in command to /api/builtin-comma
   // 内置命令优先于同名包命令（和 pi 一样，内置遮蔽扩展命令）。
   assert.match(body, /const slashCommand = submittedCommand && !builtinCommand/);
   assert.match(body, /runBuiltinCommand\(builtinCommand!\.name, submittedCommand\?\.prefix \?\? ""\)/);
-  assert.match(body, /if \(\s*\(slashCommand \|\| builtinCommand\)/);
+  // `!manualSkill` 是手打 `/skill:<名字>` 的闸：那是技能调用，不是扩展/内置命令，
+  // 不能被同名包命令抢走（见 matchManualSkillCommand）。
+  assert.match(body, /if \(\s*!manualSkill\s*&& \(slashCommand \|\| builtinCommand\)/);
   // 同样在 submitTurn 之前、不走模型门槛。
   const dispatch = body.indexOf("findBuiltinCommand(capabilities");
-  assert.ok(dispatch !== -1 && dispatch < body.indexOf("submitTurn(orderedText"));
+  assert.ok(dispatch !== -1 && dispatch < body.indexOf("submitTurn(promptText"));
 });
 
 test("App: argument items render in their own labeled section", () => {
@@ -664,4 +670,104 @@ test("App: selecting a skill keeps the badge + session-enable path", () => {
   const skillBranch = body.indexOf('item.kind === "skill"');
   assert.ok(skillBranch !== -1);
   assert.match(body, /insertCapabilityAtCursor\(/);
+});
+
+/* ------------------------------------------- 手打 /skill:<name>（TUI 语义） */
+
+test("matchManualSkillCommand: 名字后的文字是参数，名字精确命中", () => {
+  const skills = capabilities.skills;
+  assert.deepEqual(matchManualSkillCommand("/skill:alpha 帮我看一下这个方案", skills), {
+    capability: { id: "s3", kind: "skill", name: "alpha", description: "Alpha skill", active: false },
+    args: "帮我看一下这个方案",
+  });
+  // 无参数（TUI 的 `/skill:name`）：args 是空串，正文由服务端顶在最前面。
+  assert.equal(matchManualSkillCommand("/skill:alpha", skills)?.args, "");
+  assert.equal(matchManualSkillCommand("/skill:alpha\nsecond line", skills)?.args, "second line");
+});
+
+test("matchManualSkillCommand: 打错的名字 / 别的斜杠命令原样落空（和 pi 一样 fall through）", () => {
+  const skills = capabilities.skills;
+  assert.equal(matchManualSkillCommand("/skill:alp", skills), null, "不做前缀匹配：pi 只认精确名字");
+  assert.equal(matchManualSkillCommand("/skill:ALPHA", skills), null, "大小写不同就是另一个命令");
+  assert.equal(matchManualSkillCommand("/skill:", skills), null);
+  assert.equal(matchManualSkillCommand("/ope", skills), null);
+  assert.equal(matchManualSkillCommand("请看 /skill:alpha", skills), null, "必须是消息开头");
+  assert.equal(matchManualSkillCommand("/skill:alpha", []), null, "技能没加载时不认识这个名字");
+});
+
+test("matchManualSkillCommand: 零宽占位符（光标标记）不参与匹配", () => {
+  assert.equal(matchManualSkillCommand("/skill:alpha\u200b", capabilities.skills)?.capability.name, "alpha");
+});
+
+test("applyManualSkillCommand: 翻译成徽标 + args，其它徽标/附件原样保留", () => {
+  const parts = [
+    { kind: "attachment", attachmentId: "att-1" },
+    { kind: "text", text: "/skill:alpha 帮我看一下" },
+  ];
+  const applied = applyManualSkillCommand("/skill:alpha 帮我看一下", capabilities.skills, parts);
+  assert.equal(applied.matched, true);
+  assert.equal(applied.text, "帮我看一下");
+  assert.deepEqual(applied.parts, [
+    { kind: "attachment", attachmentId: "att-1" },
+    { kind: "capability", capability: { id: "s3", kind: "skill", name: "alpha", description: "Alpha skill", active: false } },
+    { kind: "text", text: "帮我看一下" },
+  ]);
+});
+
+test("applyManualSkillCommand: 无参数时不补 text 段；同一个技能已挂徽标时不重复挂", () => {
+  const bare = applyManualSkillCommand("/skill:alpha", capabilities.skills, []);
+  assert.deepEqual(bare.parts, [
+    { kind: "capability", capability: { id: "s3", kind: "skill", name: "alpha", description: "Alpha skill", active: false } },
+  ]);
+  const already = applyManualSkillCommand("/skill:alpha 再来一次", capabilities.skills, [
+    { kind: "capability", capability: { id: "s3", kind: "skill", name: "alpha", description: "Alpha skill", active: false } },
+  ]);
+  assert.equal(already.parts.filter((part) => part.kind === "capability").length, 1, "不能挂两遍同一个技能");
+  assert.deepEqual(already.parts.at(-1), { kind: "text", text: "再来一次" });
+});
+
+test("applyManualSkillCommand: 没命中就原样返回（普通提问路径不受影响）", () => {
+  const parts = [{ kind: "text", text: "/skill:nope 你好" }];
+  const applied = applyManualSkillCommand("/skill:nope 你好", capabilities.skills, parts);
+  assert.equal(applied.matched, false);
+  assert.equal(applied.text, "/skill:nope 你好");
+  assert.deepEqual(applied.parts, parts);
+});
+
+test("buildSlashMenuItems: pi 关掉 enableSkillCommands 后不列技能（手打入口仍在）", () => {
+  const items = buildSlashMenuItems({ ...capabilities, skillCommandsEnabled: false }, "");
+  assert.equal(items.some((item) => item.kind === "skill"), false);
+  // 命令还是照列：被关掉的只是「技能当命令注册」这件事。
+  assert.ok(items.some((item) => item.kind === "command"));
+  // 旧快照没有这个字段 → 视为开启，兼容。
+  assert.ok(buildSlashMenuItems(capabilities, "").some((item) => item.kind === "skill"));
+  assert.ok(buildSlashMenuItems({ ...capabilities, skillCommandsEnabled: true }, "").some((item) => item.kind === "skill"));
+});
+
+test("App: 关掉技能命令时菜单要说出来，不能静默少一栏", () => {
+  const menuBody = functionBody(appSource, "SlashMenu");
+  // 提示行在 menu body 里；prop 默认值在参数表里（functionBody 不含参数）。
+  assert.match(menuBody, /skillCommandsHidden \? <p className="slash-menu-hint">\{t\("capability\.slashMenu\.skillCommandsDisabled"\)\}/);
+  assert.match(appSource, /skillCommandsHidden = false,\n\}: \{/);
+  assert.match(appSource, /skillCommandsHidden=\{skillCommandsDisabled\(capabilities\)\}/);
+});
+
+test("App: handleSubmit 把 /skill:<name> 翻译成徽标 + 参数，且不让它落到命令派发", () => {
+  const body = functionBody(appSource, "handleSubmit");
+  // 规则本身是纯函数（上面有行为测试）；这里只钉 App 真的走那条路。
+  assert.match(body, /const manualSkillCommand = applyManualSkillCommand\(orderedText, capabilities\.skills, messageParts\)/);
+  assert.match(body, /const promptText = manualSkillCommand\.text/);
+  assert.match(body, /const promptParts = manualSkillCommand\.parts/);
+  // 翻译之后的文本/徽标才是这条消息的正文（`submitTurn(promptText, payload, promptParts)`）。
+  assert.match(body, /submitTurn\(promptText, payload, promptParts\)/);
+});
+
+test("App: 聊天路径绝不打开 expandPromptTemplates（/run 之类的命令派发不能被重新打开）", () => {
+  const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+  const streamPrompt = functionBody(serverSource, "streamPrompt");
+  assert.match(streamPrompt, /\n\s*expandPromptTemplates: false,/);
+  // 只认真的选项行：那条注释（"// expandPromptTemplates: true），技能走徽标激活"）不算。
+  assert.doesNotMatch(streamPrompt, /\n\s*expandPromptTemplates: true,/);
+  // manual-only 技能的正文由我们自己拼（server/manualSkillPrompt.mjs），不靠内核展开。
+  assert.match(streamPrompt, /manualSkillPrefix/);
 });

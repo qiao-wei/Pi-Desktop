@@ -5,7 +5,7 @@
  * - "global" (the Global skills & packages page): everything the agent itself
  *   provides — builtin + agent-level skills, user-scope packages.
  * - "project" (the conversation context panel): only what this project adds —
- *   `.pi/skills` and project-scope packages.
+ *   `.pi/skills`, project-level `.agents/skills`, project-scope packages.
  *
  * Pure functions live here so the partition can be tested without a browser.
  */
@@ -19,7 +19,7 @@ export type SkillSourceCategory = "all" | "builtin" | "piAgent" | "agents";
 /** Minimal shape the partition needs from `CapabilitySkill` / `CapabilityPackage`. */
 export interface ScopedCapability {
   kind: string;
-  /** Skills: "builtin" | "piAgent" | "agents" | "project". */
+  /** Skills: "builtin" | "piAgent" | "agents" | "projectAgents" | "project". */
   source?: string;
   /** Packages: "user" | "project". */
   scope?: string;
@@ -45,7 +45,9 @@ export function isProjectScopedCapability(item: ScopedCapability): boolean {
     return item.scope === "project";
   }
 
-  return item.source === "project";
+  // `projectAgents` = `<dir>/.agents/skills`（cwd 及其祖先目录）。它是**这个项目带来的**技能，
+  // 所以归项目视图；但它是跨客户端共享目录，来源上仍然只读（见 isReadOnlySkillSource）。
+  return item.source === "project" || item.source === "projectAgents";
 }
 
 export function scopedCapabilityItems<T extends ScopedCapability>(items: readonly T[], view: CapabilityView): T[] {
@@ -108,6 +110,7 @@ export function capabilitySourceLabel(item: ScopedCapability): string {
     if (item.source === "builtin") return t("capability.source.builtin");
     if (item.source === "piAgent") return t("capability.source.piAgent");
     if (item.source === "agents") return t("capability.source.agents");
+    if (item.source === "projectAgents") return t("capability.source.projectAgents");
     if (item.source === "project") return t("capability.source.project");
   }
 

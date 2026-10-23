@@ -13,6 +13,7 @@ import {
   CAPABILITY_TABS,
   SKILL_SOURCE_CATEGORIES,
   SKILL_SOURCE_CATEGORY_LABEL_KEYS,
+  canDeleteCapability,
   capabilitySourceLabel,
   isProjectScopedCapability,
   matchesCapabilityQuery,
@@ -46,6 +47,15 @@ const projectSkill = (name: string, extra: Record<string, unknown> = {}) => ({
   kind: "skill" as const,
   name,
   source: "project",
+  ...extra,
+});
+/** `<dir>/.agents/skills`：项目带来的，但和 `~/.agents/skills` 一样是跨客户端共享目录（只读）。 */
+const projectAgentsSkill = (name: string, extra: Record<string, unknown> = {}) => ({
+  id: name,
+  kind: "skill" as const,
+  name,
+  source: "projectAgents",
+  readonly: true,
   ...extra,
 });
 const userPackage = (name: string, extra: Record<string, unknown> = {}) => ({
@@ -86,6 +96,16 @@ test("skills are split by source, packages by scope", () => {
   assert.deepEqual(scopedCapabilityItems(skills, "project").map((i) => i.name), ["c"]);
   assert.deepEqual(scopedCapabilityItems(packages, "global").map((i) => i.name), ["d"]);
   assert.deepEqual(scopedCapabilityItems(packages, "project").map((i) => i.name), ["e"]);
+});
+
+test("项目 .agents/skills 归项目视图，但来源标签与只读状态跟着「跨客户端」走", () => {
+  const skill = projectAgentsSkill("x");
+  assert.equal(isProjectScopedCapability(skill), true, "它只在这个项目里有，归项目面板");
+  assert.deepEqual(scopedCapabilityItems([skill], "project").map((i) => i.name), ["x"]);
+  assert.equal(scopedCapabilityItems([skill], "global").length, 0);
+  assert.equal(capabilitySourceLabel(skill), "项目 agent");
+  // 只读由服务端给的 readonly 决定（跨客户端目录不允许从这里删，和 ~/.agents 一致）。
+  assert.equal(canDeleteCapability(skill), false);
 });
 
 test("MCP servers split by scope, exactly like packages", () => {
