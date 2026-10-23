@@ -25,7 +25,7 @@ import {
   type TriggerTextNode,
 } from "../src/features/chat/slashMenu.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 
 /** Extract the body of a named function: skip the parameter list first, then
  *  count braces (a destructured `function F({ a }: P) {}` param would otherwise
@@ -405,6 +405,7 @@ import {
   htmlToSanitizedMarkup,
   type SanitizeNode,
 } from "../src/features/chat/pasteSanitize.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
 function el(name: string, children: SanitizeNode[] = [], text?: string): SanitizeNode {
   return { nodeName: name, childNodes: children, textContent: text };
@@ -461,7 +462,7 @@ test("htmlToSanitizedMarkup: leading and trailing breaks are trimmed", () => {
 /* ------------------------------------------------- App wiring (structural) */
 
 test("App: composer input does two-phase detection — /query then /command args", () => {
-  const body = functionBody(appSource, "handleComposerInput");
+  const body = functionBody(appSourceText, "handleComposerInput");
   assert.match(body, /const query = matchSlashTrigger\(triggerText\)/);
   assert.match(body, /const commandArgs = editor \? matchSlashCommandArgs\(triggerText\) : null/);
   assert.match(body, /findSlashCommand\(capabilities, commandArgs\.name\)/);
@@ -473,7 +474,7 @@ test("App: composer input does two-phase detection — /query then /command args
 });
 
 test("App: keydown intercepts arrows, Tab and enter only while the menu is open", () => {
-  const body = functionBody(appSource, "handleComposerKeyDown");
+  const body = functionBody(appSourceText, "handleComposerKeyDown");
   const guard = body.indexOf("if (showCapabilityPicker)");
   assert.ok(guard !== -1, "slash handling must be gated on the menu being open");
   assert.ok(guard < body.indexOf("removeAttachmentBeforeCaret()"), "slash handling comes first");
@@ -491,7 +492,7 @@ test("App: keydown intercepts arrows, Tab and enter only while the menu is open"
 });
 
 test("App: unarmed argument menu submits the command on Enter; arrows/click arm selection", () => {
-  const body = functionBody(appSource, "handleComposerKeyDown");
+  const body = functionBody(appSourceText, "handleComposerKeyDown");
   // 参数菜单弹出但用户没动过选择 → 回车直接提交（参数可空）。
   assert.match(body, /if \(item\?\.kind === "argument" && !slashArgumentArmed\)/);
   const submitBranch = body.indexOf("if (item?.kind === \"argument\" && !slashArgumentArmed)");
@@ -504,21 +505,21 @@ test("App: unarmed argument menu submits the command on Enter; arrows/click arm 
 });
 
 test("App: enter selection must come before form submit", () => {
-  const keyDown = functionBody(appSource, "handleComposerKeyDown");
+  const keyDown = functionBody(appSourceText, "handleComposerKeyDown");
   const selectIndex = keyDown.indexOf("selectSlashItem(item)");
   const submitIndex = keyDown.indexOf("requestSubmit()");
   assert.ok(selectIndex !== -1 && submitIndex !== -1 && selectIndex < submitIndex);
 });
 
 test("App: menu renders grouped items with the live highlight and selection handler", () => {
-  const renderIndex = appSource.indexOf("<SlashMenu\n");
+  const renderIndex = appSourceText.indexOf("<SlashMenu\n");
   assert.notEqual(renderIndex, -1, "SlashMenu must be rendered");
-  const renderBlock = appSource.slice(renderIndex, renderIndex + 400);
+  const renderBlock = appSourceText.slice(renderIndex, renderIndex + 400);
   assert.match(renderBlock, /items=\{slashItems\}/);
   assert.match(renderBlock, /highlightIndex=\{visibleSlashHighlight\}/);
   assert.match(renderBlock, /onSelect=\{selectSlashItem\}/);
 
-  const menuBody = functionBody(appSource, "SlashMenu");
+  const menuBody = functionBody(appSourceText, "SlashMenu");
   // 分组标题/占位文案走 i18n（zh 基准包的措辞在 i18n.test.ts 里锁），这里只钉接线。
   assert.match(menuBody, /renderSection\("capability\.slashMenu\.skills", skills\)/);
   assert.match(menuBody, /renderSection\("capability\.slashMenu\.commands", commands\)/);
@@ -529,14 +530,14 @@ test("App: menu renders grouped items with the live highlight and selection hand
 });
 
 test("App: slash removal covers the full /query, not just a bare slash", () => {
-  const body = functionBody(appSource, "removeSlashBeforeRange");
+  const body = functionBody(appSourceText, "removeSlashBeforeRange");
   // 定位逻辑抽到了纯函数 findSlashStart（对零宽标记不可见），这里只验接线。
   assert.match(body, /findSlashStart\(text\.slice\(0, range\.startOffset\)\)/);
   assert.ok(!body.includes('before.endsWith("/")'), "legacy single-char removal must not survive");
 });
 
 test("App: paste sanitizes rich HTML and preserves newlines for plain text", () => {
-  const body = functionBody(appSource, "handlePaste");
+  const body = functionBody(appSourceText, "handlePaste");
   assert.match(body, /htmlToSanitizedMarkup\(parsedBody\(html\), \{ badges \}\)/);
   assert.match(body, /insertPastedMarkup\(markup, badges\)/);
   // 纯文本路径：换行转 <br>，避免浏览器默认粘贴丢结构。
@@ -545,22 +546,22 @@ test("App: paste sanitizes rich HTML and preserves newlines for plain text", () 
 });
 
 test("App: submission serialization keeps line breaks from br and block boundaries", () => {
-  const append = functionBody(appSource, "appendComposerParts");
+  const append = functionBody(appSourceText, "appendComposerParts");
   assert.match(append, /tagName === "BR" \|\| COMPOSER_BLOCK_TAGS\.has\(tagName\)/);
   assert.match(append, /kind: "text", text: "\\n"/);
 
-  const read = functionBody(appSource, "readComposerParts");
+  const read = functionBody(appSourceText, "readComposerParts");
   assert.match(read, /normalizeComposerTextParts\(compactComposerParts\(parts\)\)/);
 
-  const normalize = functionBody(appSource, "normalizeComposerTextParts");
+  const normalize = functionBody(appSourceText, "normalizeComposerTextParts");
   assert.match(normalize, /\\n\{3,\}/); // collapse runs of 3+ newlines
   assert.match(normalize, /\\s\+\$\/u/);
 });
 
 test("App: deleting an attachment dismisses its hover preview card", () => {
   // 徽章移除时 mouseleave 不会触发，必须主动收预览卡，否则悬浮大图残留。
-  assert.match(functionBody(appSource, "removeAttachment"), /hideAttachmentHover\(\)/);
-  assert.match(functionBody(appSource, "clearComposer"), /hideAttachmentHover\(\)/);
+  assert.match(functionBody(appSourceText, "removeAttachment"), /hideAttachmentHover\(\)/);
+  assert.match(functionBody(appSourceText, "clearComposer"), /hideAttachmentHover\(\)/);
 });
 
 /* ------------------------------------------------------------- findSlashStart */
@@ -586,15 +587,15 @@ test("findSlashStart: mid-word slash and empty text find nothing", () => {
 });
 
 test("App: selecting a command item only inserts /name — never executes", () => {
-  const select = functionBody(appSource, "selectSlashItem");
+  const select = functionBody(appSourceText, "selectSlashItem");
   assert.doesNotMatch(select, /runPackageCommand/, "菜单点选/回车不得直接执行命令");
   assert.match(select, /insertCommandAtCursor\(item\)/);
-  const insert = functionBody(appSource, "insertCommandAtCursor");
+  const insert = functionBody(appSourceText, "insertCommandAtCursor");
   assert.doesNotMatch(insert, /runPackageCommand/);
 });
 
 test("App: Tab/Enter completing a command drops /name text and opens arg completion", () => {
-  const body = functionBody(appSource, "insertCommandAtCursor");
+  const body = functionBody(appSourceText, "insertCommandAtCursor");
   assert.match(body, /const trailingSpace = options\?\.trailingSpace \?\? true/);
   assert.match(body, /document\.createTextNode\(`\$\{separator\}\/\$\{item\.name\}\$\{trailingSpace \? " " : ""\}`\)/);
   assert.match(body, /removeSlashBeforeRange\(range\)/);
@@ -603,7 +604,7 @@ test("App: Tab/Enter completing a command drops /name text and opens arg complet
 });
 
 test("App: applying an argument candidate appends a space and chains the next level", () => {
-  const body = functionBody(appSource, "applyArgumentCompletion");
+  const body = functionBody(appSourceText, "applyArgumentCompletion");
   assert.match(body, /lastIndexOf\(`\/\$\{context\.name\}`\)/);
   assert.match(body, /const trailing = \/\\s\$\/u\.test\(item\.value\) \? "" : " "/);
   assert.match(body, /const replacement = `\/\$\{context\.name\} \$\{item\.value\}\$\{trailing\}`/);
@@ -613,7 +614,7 @@ test("App: applying an argument candidate appends a space and chains the next le
 });
 
 test("App: form submit dispatches an exact known package command instead of chatting", () => {
-  const body = functionBody(appSource, "handleSubmit");
+  const body = functionBody(appSourceText, "handleSubmit");
   assert.match(body, /const submittedCommand = matchSlashCommandArgs\(orderedText\)/);
   assert.match(body, /const slashCommand = submittedCommand && !builtinCommand/);
   assert.match(body, /findSlashCommand\(capabilities, submittedCommand\.name\)/);
@@ -627,7 +628,7 @@ test("App: form submit dispatches an exact known package command instead of chat
 });
 
 test("App: form submit dispatches a known built-in command to /api/builtin-command", () => {
-  const body = functionBody(appSource, "handleSubmit");
+  const body = functionBody(appSourceText, "handleSubmit");
 
   assert.match(body, /const builtinCommand = submittedCommand \? findBuiltinCommand\(capabilities, submittedCommand\.name\) : null/);
   // 内置命令优先于同名包命令（和 pi 一样，内置遮蔽扩展命令）。
@@ -640,7 +641,7 @@ test("App: form submit dispatches a known built-in command to /api/builtin-comma
 });
 
 test("App: argument items render in their own labeled section", () => {
-  const menuBody = functionBody(appSource, "SlashMenu");
+  const menuBody = functionBody(appSourceText, "SlashMenu");
   assert.match(menuBody, /renderSection\("capability\.slashMenu\.arguments", argumentEntries\)/);
   assert.match(menuBody, /item\.kind === "argument" \? item\.label : item\.name/);
   assert.match(menuBody, /t\("capability\.slashMenu\.argumentHint"\)/);
@@ -648,19 +649,19 @@ test("App: argument items render in their own labeled section", () => {
 
 test("App: unarmed argument menu renders no active row", () => {
   assert.match(
-    appSource,
+    appSourceText,
     /const visibleSlashHighlight = slashItems\[0\]\?\.kind === "argument" && !slashArgumentArmed \? -1 : activeSlashIndex;/,
   );
 });
 
 test("App: command menu shows the Tab/Enter hint", () => {
-  const menuBody = functionBody(appSource, "SlashMenu");
+  const menuBody = functionBody(appSourceText, "SlashMenu");
   assert.match(menuBody, /t\("capability\.slashMenu\.commandHint"\)/);
   assert.match(menuBody, /commands\.length \|\| builtins\.length \? <p className="slash-menu-hint"/);
 });
 
 test("App: selecting a skill keeps the badge + session-enable path", () => {
-  const body = functionBody(appSource, "selectSlashItem");
+  const body = functionBody(appSourceText, "selectSlashItem");
   const skillBranch = body.indexOf('item.kind === "skill"');
   assert.ok(skillBranch !== -1);
   assert.match(body, /insertCapabilityAtCursor\(/);

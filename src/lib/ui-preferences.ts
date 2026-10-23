@@ -1,4 +1,5 @@
 import { normalizeProjectCommandTerminal, PROJECT_COMMAND_BACKGROUND } from "../shared/projectCommandTerminal.ts";
+import { getStoragePort } from "./storage.ts";
 
 const UI_PREFS_KEY = "pi-desktop.ui.v1";
 
@@ -76,11 +77,10 @@ const defaultUiPreferences: UiPreferences = {
 };
 
 export function loadUiPreferences(): UiPreferences {
-  if (typeof window === "undefined") {
-    return defaultUiPreferences;
-  }
-
-  const raw = window.localStorage.getItem(UI_PREFS_KEY);
+  // 「有没有 DOM」不再是这里的问题：端口在无 window 时自己回退到内存实现
+  // （见 src/lib/storage.ts）。当初的 `typeof window === "undefined"` 早退就是在替实现做决定，
+  // 副作用是这个模块在 node 里没法测 —— 现在它能被假端口驱动。
+  const raw = getStoragePort().read(UI_PREFS_KEY);
   if (!raw) {
     return defaultUiPreferences;
   }
@@ -101,9 +101,5 @@ export function loadUiPreferences(): UiPreferences {
 }
 
 export function saveUiPreferences(prefs: Partial<UiPreferences>): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.setItem(UI_PREFS_KEY, JSON.stringify({ ...loadUiPreferences(), ...prefs }));
+  getStoragePort().write(UI_PREFS_KEY, JSON.stringify({ ...loadUiPreferences(), ...prefs }));
 }

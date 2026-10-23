@@ -7,10 +7,8 @@
  * is), which means `/api/bootstrap` revalidation needs it listed here - keeping this
  * list in sync with what `src/lib/api.ts` actually sends is asserted by
  * `tests/corsPreflight.test.ts`.
- */
-
-/**
- * Headers the client is allowed to send. Matched case-insensitively by browsers,
+ *
+ ** Headers the client is allowed to send. Matched case-insensitively by browsers,
  * so the spelling here is only for humans.
  */
 export const ALLOWED_REQUEST_HEADERS = ["Content-Type", "If-None-Match", "X-Pi-Desktop-Trace-Id"];

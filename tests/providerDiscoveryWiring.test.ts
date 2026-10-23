@@ -11,7 +11,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-const source = readFileSync(join(import.meta.dirname, "..", "server", "index.mjs"), "utf8");
+import { bridgeSource } from "./lib/bridgeSource.ts";
+
+const source = bridgeSource();
 
 function functionBody(name) {
   const start = source.indexOf(`async function ${name}(`) === -1

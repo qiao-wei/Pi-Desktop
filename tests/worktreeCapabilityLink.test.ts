@@ -13,8 +13,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { bridgeEntrySource, bridgeSource } from "./lib/bridgeSource.ts";
 
-const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+// 正向断言（这段代码在桥里）看整棵树 —— 桥已按领域拆文件，钉具体文件会让每次拆分假红；
+// 否定断言（入口里不许再自己实现一份）才看 `server/index.mjs`。
+const bridgeTree = bridgeSource();
+const serverSource = bridgeEntrySource();
 
 /** 取 `start 标记` 到 `end 标记` 之间的源码区间（两个锚点都必须唯一且有序）。 */
 function region(source, startMark, endMark) {
@@ -27,18 +31,18 @@ function region(source, startMark, endMark) {
 
 test("index.mjs 从 capabilityPathIdentity 取路径身份，不再自己 resolve", () => {
   assert.match(
-    serverSource,
+    bridgeTree,
     /import \{ canonicalPath, extensionCapabilityId, isPathInside, isReadOnlySkillSource, isSkillPathUnderRoots, skillSourceForPath \} from "\.\/capabilityPathIdentity\.mjs";/,
   );
   assert.doesNotMatch(serverSource, /function extensionCapabilityId\(/, "本地的 resolve 版 id 已删除");
   assert.match(
-    serverSource,
+    bridgeTree,
     /function isManagedSkillPath\(filePath, project = activeProject\(\)\) \{\s*return isSkillPathUnderRoots\(/,
   );
 });
 
 test("override 用 canonicalPath 判身份：软链侧的 extension / skill 才对得上能力清单", () => {
-  const overrides = region(serverSource, "extensionsOverride: (base) => ({", "appendSystemPromptOverride:");
+  const overrides = region(bridgeTree, "extensionsOverride: (base) => ({", "appendSystemPromptOverride:");
   assert.match(overrides, /const normalized = canonicalPath\(extension\.path\);/);
   assert.doesNotMatch(overrides, /const normalized = resolve\(/, "不能再退回 resolve");
   // 技能走 capabilitySkillSelection 的活策略（主分支的修复），但禁用包的守卫要按 realpath 比，
@@ -49,9 +53,9 @@ test("override 用 canonicalPath 判身份：软链侧的 extension / skill 才�
 });
 
 test("能力清单里的路径按 realpath 算（含 disabledPackageRoots 的前缀匹配）", () => {
-  assert.match(serverSource, /skillPaths: \[appSkillsDir, \.\.\.new Set\(skillPaths\.map\(\(path\) => canonicalPath\(path\)\)\)\]/);
-  assert.match(serverSource, /disabledPackageRoots: packages[\s\S]{0,220}\.map\(\(path\) => canonicalPath\(path\)\)/);
-  assert.match(serverSource, /\.map\(\(resource\) => canonicalPath\(resource\.path\)\)/);
+  assert.match(bridgeTree, /skillPaths: \[appSkillsDir, \.\.\.new Set\(skillPaths\.map\(\(path\) => canonicalPath\(path\)\)\)\]/);
+  assert.match(bridgeTree, /disabledPackageRoots: packages[\s\S]{0,220}\.map\(\(path\) => canonicalPath\(path\)\)/);
+  assert.match(bridgeTree, /\.map\(\(resource\) => canonicalPath\(resource\.path\)\)/);
 });
 
 test("开会话与重载能力时都会幂等补项目 .pi 的软链", () => {
@@ -64,7 +68,7 @@ test("开会话与重载能力时都会幂等补项目 .pi 的软链", () => {
   assert.match(create, /const workspaceCwd = sessionWorkspaceCwd\(project, sessionManager\);/);
   assert.match(create, /ensureWorktreePiLink\(project, workspaceCwd/, "会话打开时补链");
 
-  const reload = region(serverSource, "async function reloadRuntimeTargets", "function skillSummaries");
+  const reload = region(serverSource, "async function reloadRuntimeTargets", "\nfunction ");
   assert.match(reload, /ensureWorktreePiLink\(project, candidate\.workspaceCwd\)/, "刚装的项目技能能到已开的 worktree 会话");
 });
 

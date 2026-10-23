@@ -14,16 +14,17 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 
 /** Source of a top-level `function name(...) { ... }`, delimited at the next flush-left brace. */
 function topLevelFunctionSource(name: string): string {
-  const start = appSource.indexOf(`function ${name}(`);
+  const start = appSourceText.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} is gone from App.tsx`);
-  const end = appSource.indexOf("\n}\n", start);
+  const end = appSourceText.indexOf("\n}\n", start);
   assert.notEqual(end, -1, `${name} body could not be delimited`);
-  return appSource.slice(start, end);
+  return appSourceText.slice(start, end);
 }
 
 function countOccurrences(haystack: string, needle: string): number {
@@ -32,12 +33,12 @@ function countOccurrences(haystack: string, needle: string): number {
 
 test("目录 URL 只有一份常量，两个入口共用", () => {
   assert.match(
-    appSource,
+    appSourceText,
     /const PACKAGE_CATALOG_URL = "https:\/\/pi\.dev\/packages";/,
     "https://pi.dev/packages 必须以常量形式定义一次",
   );
   assert.equal(
-    countOccurrences(appSource, "https://pi.dev/packages"),
+    countOccurrences(appSourceText, "https://pi.dev/packages"),
     1,
     "不要再在别的入口里手写一遍 URL —— 改了常量却漏改字符串就会指错地方",
   );

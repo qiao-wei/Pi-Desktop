@@ -14,33 +14,34 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 
 function functionBody(name: string): string {
-  const start = appSource.indexOf(`function ${name}(`);
+  const start = appSourceText.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} is gone from App.tsx`);
   // 先跳过参数表再数花括号：解构参数里的 `{}` 会被误当成函数体开头，
   // 而第一个 `\n  }\n` 也不是可靠终点（组件里有更早出现的 2 空格缩进闭合）。
-  const openParen = appSource.indexOf("(", start);
+  const openParen = appSourceText.indexOf("(", start);
   let depth = 0;
   let cursor = openParen;
-  for (; cursor < appSource.length; cursor += 1) {
-    if (appSource[cursor] === "(") depth += 1;
-    if (appSource[cursor] === ")") {
+  for (; cursor < appSourceText.length; cursor += 1) {
+    if (appSourceText[cursor] === "(") depth += 1;
+    if (appSourceText[cursor] === ")") {
       depth -= 1;
       if (depth === 0) break;
     }
   }
-  const openBrace = appSource.indexOf("{", cursor);
+  const openBrace = appSourceText.indexOf("{", cursor);
   assert.notEqual(openBrace, -1, `${name} body could not be delimited`);
   depth = 0;
-  for (let index = openBrace; index < appSource.length; index += 1) {
-    if (appSource[index] === "{") depth += 1;
-    if (appSource[index] === "}") {
+  for (let index = openBrace; index < appSourceText.length; index += 1) {
+    if (appSourceText[index] === "{") depth += 1;
+    if (appSourceText[index] === "}") {
       depth -= 1;
       if (depth === 0) {
-        return appSource.slice(openBrace, index + 1);
+        return appSourceText.slice(openBrace, index + 1);
       }
     }
   }
@@ -48,7 +49,7 @@ function functionBody(name: string): string {
 }
 
 test("the sidebar chat switch selects the chat view", () => {
-  assert.match(appSource, /onOpenChat=\{\(\) => setActiveMainView\("chat"\)\}/);
+  assert.match(appSourceText, /onOpenChat=\{\(\) => setActiveMainView\("chat"\)\}/);
 });
 
 test("the sidebar section titles come from the language pack", () => {
@@ -60,11 +61,11 @@ test("the sidebar section titles come from the language pack", () => {
 });
 
 test("the project row's new-session button goes through the sidebar handler", () => {
-  const rowStart = appSource.indexOf('"group relative"');
+  const rowStart = appSourceText.indexOf('"group relative"');
   assert.notEqual(rowStart, -1, "project row markup changed");
   // The row now also has an earlier `isExpanded ?` (the folder icon), so delimit at the
   // end of the project section instead of the first expansion check.
-  const rowBlock = appSource.slice(rowStart, appSource.indexOf("</section>", rowStart));
+  const rowBlock = appSourceText.slice(rowStart, appSourceText.indexOf("</section>", rowStart));
   assert.match(rowBlock, /aria-label=\{t\("sidebar\.newSession"\)\}/, "new-session button markup changed");
   // 「＋」一次点击就建会话（会先把主区域切到 chat）；⌥/Alt 点击才是 worktree。
   assert.match(

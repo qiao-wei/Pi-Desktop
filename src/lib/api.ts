@@ -13,6 +13,19 @@ import type {
   ToolToggleState,
 } from "../types";
 
+/**
+ * 边界 `bridge` 的渲染进程侧：这里只保留**类型**与薄封装，真正的传输在
+ * `src/lib/bridge/transport.ts`（换实现 = 换 transport，调用点不动）。
+ */
+import {
+  createHttpBridgeTransport,
+  getBridgeTransport,
+  setBridgeTransport,
+} from "./bridge/transport.ts";
+import { protocolMismatch } from "../shared/protocol/version.ts";
+import { getStoragePort } from "./storage.ts";
+import type { BridgeHandshake } from "../shared/protocol/bridgeEndpoints.ts";
+
 const DEFAULT_API_BASE = "http://127.0.0.1:6474";
 
 export interface ToolSettingsPayload {
@@ -58,6 +71,11 @@ export interface BootstrapResponse {
    */
   existingProject?: { id: string; name: string; cwd: string };
   personalization: PersonalizationSettings;
+  /**
+   * 边界 `bridge` 的版本声明（见 `src/shared/protocol/version.ts`）。渲染进程在接管任何状态
+   * 之前先比对它：不一致就报错，而不是让被改名/删掉的字段以 `undefined` 的形式静默穿过 UI。
+   */
+  protocolVersion?: number;
   error?: string;
 }
 
@@ -397,8 +415,12 @@ const API_BASE = pickApiBase({
   env: envApiBase() || envApiBaseLegacy(),
 });
 
+// 默认传输在这里装配一次。测试或别的宿主想换实现，调 setBridgeTransport() 就行，
+// 上层（features/components/app）不认识 HTTP，只认识 BridgeTransport。
+setBridgeTransport(createHttpBridgeTransport(API_BASE));
+
 export function getApiBase() {
-  return API_BASE;
+  return getBridgeTransport().apiBase;
 }
 
 /**
@@ -435,71 +457,76 @@ export function reportDiagnostic(event: string, details: Record<string, unknown>
   if (diagnosticConsoleEnabled()) {
     console.warn("[pi-desktop-diagnostic]", payload);
   }
-  void fetch(`${API_BASE}/api/diagnostic`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  }).catch(() => undefined);
+  // 遥测走 transport 的 fire-and-forget：它不会抛，也不会因为桥不在而拖垮一轮对话。
+  try {
+    getBridgeTransport().fireAndForget("/api/diagnostic", payload);
+  } catch {
+    // transport 未安装（例如纯模块单测）：诊断不该成为失败原因。
+  }
 }
 
 function diagnosticConsoleEnabled(): boolean {
   try {
-    return globalThis.localStorage?.getItem("pi-desktop.diag.console") === "1";
+    return getStoragePort().read("pi-desktop.diag.console") === "1";
   } catch {
     return false;
   }
 }
 
-/** Last `ETag` seen per path, so a caller can revalidate without a second round trip. */
-const lastEtagByPath = new Map<string, string>();
-
+/**
+ * Thin wrapper over the transport. Kept because ~40 call sites already speak this shape; the
+ * HTTP details (status codes, ETag, NDJSON framing, the perf probe) live in the transport.
+ */
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  // Reached through the global handle: `perf.ts` imports this module, so a
-  // static import here would be a cycle.
-  const perf = path.startsWith("/api/bootstrap") ? globalThis.__piDesktopPerf : undefined;
-  const probe = perf?.enabled ? perf : null;
-  const started = probe ? performance.now() : 0;
-  const base = API_BASE;
-  // A JSON `Content-Type` is not a CORS-safelisted value, so attaching it to a bodyless
-  // GET would make every bootstrap poll pay for a preflight round trip first.
-  const response = await fetch(`${base}${path}`, {
-    ...init,
-    headers: {
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
+  return (await getBridgeTransport().request<T>(path, {
+    method: init?.method,
+    body: init?.body,
+    headers: init?.headers as Record<string, string> | undefined,
+    signal: init?.signal ?? undefined,
+  })) as T;
+}
 
-  const tag = response.headers.get("etag");
-  if (tag) {
-    lastEtagByPath.set(path, tag);
+/**
+ * 边界 `bridge` 的握手闸门：拿到的快照自称哪个协议版本。
+ *
+ * 只在携带版本号的响应上调用（bootstrap / ambient）。不一致就**抛**，而不是继续用一份
+ * 字段对不上的快照 —— 这才是那个字段存在的意义（见 `src/shared/protocol/version.ts`）。
+ */
+function assertProtocolVersion(response: { protocolVersion?: number } | null, path: string): number | undefined {
+  if (!response) {
+    return undefined;
   }
-
-  // A 304 carries no body by definition; the caller that asked the conditional
-  // question (`fetchBootstrap`) treats `null` as "keep what you already have".
-  if (response.status === 304) {
-    return null as T;
+  const mismatch = protocolMismatch(response.protocolVersion);
+  if (mismatch) {
+    throw new Error(`${mismatch.message} (path: ${path})`);
   }
+  return response.protocolVersion;
+}
 
-  if (!response.ok) {
-    throw new Error(await readError(response));
+/**
+ * 最便宜的一条握手：`GET /api/protocol` 不构建快照（bootstrap 是几百 KB 到 1 MB），
+ * 所以在把那一大坨传过来之前就能知道对面对不对版。结果按 transport 实例缓存：
+ * 同一个桥只问一次；换 transport（测试/别的宿主）会重新问。
+ */
+let probedTransport: unknown = null;
+let probedVersion: number | undefined;
+
+export async function probeBridgeProtocol(): Promise<BridgeHandshake> {
+  const transport = getBridgeTransport();
+  const handshake = await transport.request<BridgeHandshake>("/api/protocol");
+  probedVersion = assertProtocolVersion(handshake, "/api/protocol");
+  probedTransport = transport;
+  return handshake as BridgeHandshake;
+}
+
+/** 首次握手（只走一次）：换过 transport 或还没问过时问一次。 */
+async function ensureProtocolProbe(): Promise<void> {
+  const transport = getBridgeTransport();
+  if (transport === probedTransport) {
+    return;
   }
-
-  if (!probe) {
-    return (await response.json()) as T;
-  }
-
-  // The bootstrap payload is megabytes-sized; `response.json()` hides whether a
-  // stall is the transfer or the parse, and both land on the main thread.
-  const text = await response.text();
-  const netMs = performance.now() - started;
-  const parsed = JSON.parse(text) as T;
-  probe.mark("bootstrap.fetch", performance.now() - started, {
-    netMs,
-    parseMs: performance.now() - started - netMs,
-    bytes: text.length,
-  });
-  return parsed;
+  probedTransport = transport;
+  await probeBridgeProtocol();
 }
 
 /**
@@ -517,10 +544,14 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
 export async function fetchBootstrap(options: { force: true }): Promise<BootstrapResponse>;
 export async function fetchBootstrap(options?: { force?: boolean }): Promise<BootstrapResponse | null>;
 export async function fetchBootstrap(options: { force?: boolean } = {}): Promise<BootstrapResponse | null> {
-  const etag = !options.force ? lastEtagByPath.get("/api/bootstrap") : undefined;
-  const next = await fetchJson<BootstrapResponse | null>("/api/bootstrap", {
+  // 先握手再搬大包：协议不对版时，不必先传完 MB 级快照再报错。
+  await ensureProtocolProbe();
+  const transport = getBridgeTransport();
+  const etag = !options.force ? transport.lastEtag("/api/bootstrap") : undefined;
+  const next = await transport.request<BootstrapResponse>("/api/bootstrap", {
     headers: etag ? { "If-None-Match": etag } : {},
   });
+  assertProtocolVersion(next, "/api/bootstrap");
   return next;
 }
 
@@ -546,14 +577,17 @@ export interface AmbientBootstrap {
 
 export async function fetchAmbientBootstrap(): Promise<AmbientBootstrap> {
   // No revalidation tag: the answer is small and legitimately changes every tick.
-  return fetchJson<AmbientBootstrap>("/api/bootstrap?view=ambient");
+  const next = await fetchJson<AmbientBootstrap & { protocolVersion?: number }>(
+    "/api/bootstrap?view=ambient",
+  );
+  assertProtocolVersion(next, "/api/bootstrap?view=ambient");
+  return next;
 }
 
 export async function postJson<T>(path: string, body: unknown): Promise<T> {
-  return fetchJson<T>(path, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  // `body` stays an object: serialisation is the transport's job, so a non-HTTP transport
+  // (or a mock) never has to parse a string it did not create.
+  return fetchJson<T>(path, { method: "POST", body: body as BodyInit });
 }
 
 export async function postExtensionUiResponse<T>(body: ExtensionUiResponse): Promise<T> {
@@ -566,78 +600,5 @@ export async function streamNdjson<T = PromptStreamEvent>(
   onEvent: (event: T) => void,
   options: { signal?: AbortSignal } = {},
 ): Promise<void> {
-  const response = await fetch(`${getApiBase()}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-    signal: options.signal,
-  });
-
-  if (!response.ok || !response.body) {
-    throw new Error(await readError(response));
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
-
-    buffer += decoder.decode(value, { stream: true });
-    let newlineIndex = buffer.indexOf("\n");
-
-    while (newlineIndex >= 0) {
-      const line = buffer.slice(0, newlineIndex).trim();
-      buffer = buffer.slice(newlineIndex + 1);
-      newlineIndex = buffer.indexOf("\n");
-
-      if (!line) {
-        continue;
-      }
-
-      try {
-        onEvent(JSON.parse(line) as T);
-      } catch {
-        onEvent({ type: "error", message: line } as T);
-      }
-    }
-  }
-
-  const tail = buffer.trim();
-  if (tail) {
-    try {
-      onEvent(JSON.parse(tail) as T);
-    } catch {
-      onEvent({ type: "error", message: tail } as T);
-    }
-  }
-}
-
-async function readError(response: Response): Promise<string> {
-  const text = await response.text();
-  if (!text) {
-    return `${response.status} ${response.statusText}`;
-  }
-  // 桥报错统一是 `{"error":"..."}`（或 `message`）。把整串 JSON 直接丢进红框，
-  // 用户看到的是一堆引号，看不到到底哪儿不对 —— 先把人话抽出来，抽不到才原文上。
-  try {
-    const parsed = JSON.parse(text) as { error?: unknown; message?: unknown };
-    const message = typeof parsed?.error === "string" && parsed.error.trim()
-      ? parsed.error
-      : typeof parsed?.message === "string" && parsed.message.trim()
-        ? parsed.message
-        : "";
-    if (message) {
-      return message;
-    }
-  } catch {
-    // 不是 JSON（反代 HTML 错误页之类），原文更有用。
-  }
-  return text;
+  return getBridgeTransport().stream<T>(path, body, onEvent, { signal: options.signal });
 }

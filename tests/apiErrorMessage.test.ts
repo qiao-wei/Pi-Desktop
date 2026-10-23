@@ -74,8 +74,9 @@ test("成功响应不受影响：照常解析 JSON，带 body 的请求仍然发
     assert.equal(calls.length, 1);
     assert.equal(calls[0].init.method, "POST");
     assert.equal(calls[0].init.headers["Content-Type"], "application/json");
-    // 无 body 的 GET 不发 Content-Type：那是每次预检的代价。
+    // 无 body 的 GET 完全不发 headers：那是每次预检的代价。
+    // （断言从 `{}` 改成 `undefined`：传输层现在不放空对象，语义更强 —— 连 headers 键都没有。）
     await fetchJson("/api/custom-models");
-    assert.deepEqual(calls[1].init.headers, {});
+    assert.equal(calls[1].init.headers, undefined, "无 body 的 GET 不该带任何请求头");
   });
 });

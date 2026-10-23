@@ -1,0 +1,962 @@
+{
+  "version": 1,
+  "routes": {
+    "/api/attachments": {
+      "methods": [
+        "GET"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": []
+    },
+    "/api/bootstrap": {
+      "methods": [
+        "GET"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/lib/api.ts",
+        "src/lib/bridge/transport.ts"
+      ]
+    },
+    "/api/builtin-command": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities": {
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": []
+    },
+    "/api/capabilities/default": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/extension/add": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/extension/remove": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/mcp/import": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/mcp/inspect": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/mcp/read": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/mcp/remove": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/mcp/save": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/package/command": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/package/command/arguments": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/package/file": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/app/CapabilityDetail.tsx"
+      ]
+    },
+    "/api/capabilities/package/install": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/package/remove": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/package/resources": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/app/CapabilityDetail.tsx"
+      ]
+    },
+    "/api/capabilities/package/update": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/pin": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/session/extension": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/session/package": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/session/skill": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/skills/delete": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/capabilities/skills/import": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/compact": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/custom-models": {
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/models/customModelsApi.ts"
+      ]
+    },
+    "/api/custom-models/key": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/models/customModelsApi.ts"
+      ]
+    },
+    "/api/custom-models/reload": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/models/customModelsApi.ts"
+      ]
+    },
+    "/api/custom-models/remove": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/models/customModelsApi.ts"
+      ]
+    },
+    "/api/custom-models/test": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/models/customModelsApi.ts"
+      ]
+    },
+    "/api/diagnostic": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "ndjson",
+      "bridge": true,
+      "callers": [
+        "src/lib/api.ts"
+      ]
+    },
+    "/api/extension-ui/response": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/lib/api.ts"
+      ]
+    },
+    "/api/local-media": {
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": []
+    },
+    "/api/messages/edit": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/model": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/model-providers": {
+      "methods": [
+        "GET"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/models/customModelsApi.ts"
+      ]
+    },
+    "/api/model-providers/:param": {
+      "methods": [
+        "GET"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/models/customModelsApi.ts"
+      ]
+    },
+    "/api/model-providers/:param/login": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/models/customModelsApi.ts"
+      ]
+    },
+    "/api/model-providers/:param/logout": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/models/customModelsApi.ts"
+      ]
+    },
+    "/api/model-providers/:param/verify-key": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/models/customModelsApi.ts"
+      ]
+    },
+    "/api/model-providers/discover": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/models/customModelsApi.ts"
+      ]
+    },
+    "/api/model-providers/login/cancel": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/models/customModelsApi.ts"
+      ]
+    },
+    "/api/model-providers/login/respond": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/models/customModelsApi.ts"
+      ]
+    },
+    "/api/model-providers/update": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/models/customModelsApi.ts"
+      ]
+    },
+    "/api/models": {
+      "methods": [
+        "GET"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": []
+    },
+    "/api/personalization": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/projects": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/projects/commands": {
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectCommands.ts"
+      ]
+    },
+    "/api/projects/commands/detect": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectCommands.ts"
+      ]
+    },
+    "/api/projects/commands/reveal-log": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/app/App.tsx"
+      ]
+    },
+    "/api/projects/commands/run": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectCommands.ts"
+      ]
+    },
+    "/api/projects/commands/select": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectCommands.ts"
+      ]
+    },
+    "/api/projects/commands/status": {
+      "methods": [
+        "GET"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectCommands.ts"
+      ]
+    },
+    "/api/projects/commands/stop": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectCommands.ts"
+      ]
+    },
+    "/api/projects/commands/terminals": {
+      "methods": [
+        "GET"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/components/ProjectCommandControls.tsx"
+      ]
+    },
+    "/api/projects/git": {
+      "methods": [
+        "GET"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectGit.ts"
+      ]
+    },
+    "/api/projects/git/commit": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectGit.ts"
+      ]
+    },
+    "/api/projects/git/commit-message": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectGit.ts"
+      ]
+    },
+    "/api/projects/git/conflicts": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectGit.ts"
+      ]
+    },
+    "/api/projects/git/create-branch": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectGit.ts"
+      ]
+    },
+    "/api/projects/git/delete-branch": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectGit.ts"
+      ]
+    },
+    "/api/projects/git/init": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectGit.ts"
+      ]
+    },
+    "/api/projects/git/merge": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectGit.ts"
+      ]
+    },
+    "/api/projects/git/open-diff": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectGit.ts"
+      ]
+    },
+    "/api/projects/git/open-file": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectGit.ts"
+      ]
+    },
+    "/api/projects/git/pull": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectGit.ts"
+      ]
+    },
+    "/api/projects/git/push": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectGit.ts"
+      ]
+    },
+    "/api/projects/git/rename-branch": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectGit.ts"
+      ]
+    },
+    "/api/projects/git/switch": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useProjectGit.ts"
+      ]
+    },
+    "/api/projects/pin": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/projects/remove": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/projects/reorder": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/projects/reveal": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/projects/select": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/projects/trust": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/projects/update": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/prompt": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "ndjson",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/protocol": {
+      "methods": [
+        "GET"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/lib/api.ts"
+      ]
+    },
+    "/api/search": {
+      "methods": [
+        "GET"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/search/globalSearch.ts"
+      ]
+    },
+    "/api/sessions": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/sessions/archive": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/sessions/delete": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/sessions/delete-archived": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/sessions/pin": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/sessions/select": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/sessions/update": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/sessions/worktree": {
+      "methods": [
+        "GET"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useSessionWorktree.ts"
+      ]
+    },
+    "/api/sessions/worktree/branch": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useSessionWorktree.ts"
+      ]
+    },
+    "/api/sessions/worktree/remove": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useSessionWorktree.ts"
+      ]
+    },
+    "/api/sessions/worktree/reveal": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/useSessionWorktree.ts"
+      ]
+    },
+    "/api/skills/content": {
+      "methods": [
+        "GET"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/app/CapabilityDetail.tsx",
+        "src/app/CapabilitySurfaces.tsx"
+      ]
+    },
+    "/api/skills/reload": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": []
+    },
+    "/api/stop": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/thinking-level": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/tools/settings": {
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/features/chat/usePiDesktopApp.ts"
+      ]
+    }
+  }
+}

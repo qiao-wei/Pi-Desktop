@@ -44,6 +44,7 @@ import {
   verifyRuntimeRelocatable,
   walkTree,
 } from "../scripts/lib/pythonRuntime.mjs";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
 // Stands in for the machine that builds the runtime.
 const HOST = join(tmpdir(), "build-machine-host");
@@ -379,7 +380,7 @@ test("the build scripts actually run the relocatability pipeline", () => {
 });
 
 test("the sidecar puts the bundled runtimes and their install dirs on PATH", () => {
-  const source = readFileSync("server/index.mjs", "utf8");
+  const source = bridgeSource();
   assert.match(
     source,
     /import \{ agentRuntimePathEntries, mergePath, packageManagerBinDirs, selectAgentRuntimes \} from "\.\/agentEnv\.mjs"/,

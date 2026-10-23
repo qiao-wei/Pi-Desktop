@@ -13,6 +13,8 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { describeLoadStatus, isUnhealthyLoadStatus, summarizePackageHealth } from "../server/capabilityHealth.mjs";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const NPM_ROOT = join(process.env.HOME ?? "", ".pi/agent/npm/node_modules");
@@ -136,7 +138,7 @@ test("empty pi results do not crash the classifier", () => {
 });
 
 test("the server reads pi's real load result and ships it with every package card", () => {
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+  const source = bridgeSource();
 
   assert.match(source, /resourceLoader\?\.getExtensions\?\.\(\)/);
   assert.match(source, /summarizePackageHealth\(\{/, "the snapshot must classify against pi's result");
@@ -147,7 +149,8 @@ test("the server reads pi's real load result and ships it with every package car
 });
 
 test("the panel no longer equates 'selected' with 'loaded'", () => {
-  const card = readFileSync(join(ROOT, "src/app/App.tsx"), "utf8");
+  // 能力卡片/加载标签已按簇拆到 src/app/ 下的多个文件 —— 按整个目录读文本。
+  const card = readAppSource();
   const types = readFileSync(join(ROOT, "src/types/domain.ts"), "utf8");
 
   assert.ok(!/item\.active \? "当前会话已加载"/.test(card), "active must not be labelled as loaded");

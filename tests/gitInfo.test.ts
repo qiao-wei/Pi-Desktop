@@ -18,7 +18,6 @@ import {
   GIT_TIMEOUT_MS,
   MAX_COMMIT_MESSAGE_CHARS,
   MAX_CONFLICT_FILES,
-  commitGitChanges,
   commitablePaths,
   createGitBranch,
   deleteGitBranch,
@@ -47,6 +46,7 @@ import {
   switchGitBranch,
   upstreamRemoteName,
 } from "../server/gitInfo.mjs";
+import { commitGitChanges } from "../server/gitCommit.mjs";
 
 /** 假 `execFile`：记录调用，按 argv 返回计划好的结果（callback 风格，和真的一样）。 */
 function fakeExecFile(plan) {

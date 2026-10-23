@@ -11,9 +11,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { functionBody } from "./lib/sourceText.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
 const read = (path: string): string => readFileSync(join(import.meta.dirname, "..", path), "utf8");
-const app = read("src/app/App.tsx");
+const app = readAppSource();
 const styles = read("src/app/styles.css");
 const prefs = read("src/lib/ui-preferences.ts");
 

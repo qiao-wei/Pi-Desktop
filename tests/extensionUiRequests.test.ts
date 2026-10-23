@@ -17,8 +17,9 @@ import test from "node:test";
 
 import { extensionWidgetRequest } from "../server/extensionUiRequests.mjs";
 import { functionBody } from "./lib/sourceText.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
-const server = readFileSync(join(import.meta.dirname, "../server/index.mjs"), "utf8");
+const server = bridgeSource();
 const hook = readFileSync(join(import.meta.dirname, "../src/features/chat/usePiDesktopApp.ts"), "utf8");
 
 test("纯文本行原样透传，默认放在编辑器上方", () => {

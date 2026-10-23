@@ -31,6 +31,8 @@ import {
   validateDraft,
 } from "../src/features/models/customModelForm.ts";
 import * as serverRules from "../server/customModels.mjs";
+import { bridgeFiles, bridgeSource as readBridgeSource } from "./lib/bridgeSource.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
 const customEntry = {
   providerId: "bailian",
@@ -219,24 +221,24 @@ test("校验边界：前端拦下的桥也拦，前端放过的桥也放过", ()
 
 /* ------------------------------------------------------------ C. 接线契约 */
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 const hookSource = readFileSync(new URL("../src/features/chat/usePiDesktopApp.ts", import.meta.url), "utf8");
-const bridgeSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const bridgeSource = readBridgeSource();
 const panelSource = readFileSync(new URL("../src/features/models/CustomModelsSettings.tsx", import.meta.url), "utf8");
 
 test("切换器挂在提交按钮同一个动作区里", () => {
   // 不能再用「第一个 </div>」收块：动作区里现在还有状态锚点 div，会提前截断。
   // 以同一动作区内的发送按钮结尾，拿到完整的 .composer-actions。
-  const start = appSource.indexOf('<div className="composer-actions">');
-  const end = appSource.indexOf('className="send-button"', start);
+  const start = appSourceText.indexOf('<div className="composer-actions">');
+  const end = appSourceText.indexOf('className="send-button"', start);
   assert.ok(start >= 0 && end > start, "找不到 .composer-actions 边界");
-  const block = appSource.slice(start, end);
+  const block = appSourceText.slice(start, end);
   assert.match(block, /<ComposerModelSelect/, "ComposerModelSelect 必须在 .composer-actions 内");
   assert.match(block, /onChange=\{handleComposerModelChange\}/);
 });
 
 test("设置 → 模型 这一页只剩自定义模型编辑器", () => {
-  const tab = appSource.slice(appSource.indexOf('<TabsContent value="models">'));
+  const tab = appSourceText.slice(appSourceText.indexOf('<TabsContent value="models">'));
   assert.match(tab.slice(0, tab.indexOf("</TabsContent>")), /<CustomModelsSettings/);
 });
 
@@ -317,7 +319,7 @@ test("没记住过选择时，新会话从列表第一个模型开始（两端�
     /return model && isUsableModel\(model\) && modelRuntime\.hasConfiguredAuth\(model\.provider\) \? model : undefined;/,
   );
   // 前端兜底：会话没有模型时取第一个可用的。
-  assert.match(appSource, /composerModelOptions\.find\(\(option\) => option\.available\)/);
+  assert.match(appSourceText, /composerModelOptions\.find\(\(option\) => option\.available\)/);
 });
 
 /**
@@ -358,8 +360,14 @@ test("打开会话不许改写起点；只有新建会话里改才记到项目�
     assert.match(body, /rememberProjectComposerDefaults\(targetRuntime\.projectId/, `${name} 要把选择记到项目上`);
     assert.ok(!body.includes("setDefaultThinkingLevel"), `${name} 不许再写全局 defaultThinkingLevel`);
   }
-  // 桥里不再有「记全局」的入口。
-  assert.equal((bridgeSource.match(/MODEL_APPLY_REASONS\.userSwitch/g) ?? []).length, 0, "user-switch 已不再由桥使用");
+  // 桥的处理器层不再用「记全局」那条理由。注意 `MODEL_APPLY_REASONS` / `shouldRememberModelChoice`
+  // 本身合法地住在 `server/sessionModelPolicy.mjs`（策略模块），所以这条断言要排除它 ——
+  // 对整个桥源码树做否定断言会把「策略模块里定义了它」当成违规。
+  const userSwitchUsers = bridgeFiles()
+    .filter(([name]) => name !== "server/sessionModelPolicy.mjs")
+    .filter(([, text]) => /MODEL_APPLY_REASONS\.userSwitch/.test(text))
+    .map(([name]) => name);
+  assert.deepEqual(userSwitchUsers, [], "user-switch 已不再由桥的处理器使用");
 });
 
 /** 从桥源码抠函数体（结构性断言必须限定在目标函数内，否则别处的同名写法会让它永久假绿）。 */
@@ -374,7 +382,7 @@ function bridgeFunctionBody(name: string): string {
 test("保存/删除后就地刷新控制器：设置页与输入框共用同一份列表", () => {
   assert.match(panelSource, /apply\(await saveCustomModel\(/);
   assert.match(panelSource, /apply\(await removeCustomModel\(/);
-  assert.match(appSource, /<CustomModelsSettings models=\{models\}/);
+  assert.match(appSourceText, /<CustomModelsSettings models=\{models\}/);
 });
 
 test("列表拉不下来时要在面板上吼出来，不能静默显示空列表", () => {

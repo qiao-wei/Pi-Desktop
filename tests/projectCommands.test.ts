@@ -32,19 +32,21 @@ import {
   type ProjectCommand,
 } from "../src/shared/projectCommands.ts";
 import { functionBody } from "./lib/sourceText.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
-const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const appSourceText = readAppSource();
+const serverSource = bridgeSource();
 const hookSource = readFileSync(new URL("../src/features/chat/useProjectCommands.ts", import.meta.url), "utf8");
 const controlsSource = readFileSync(new URL("../src/components/ProjectCommandControls.tsx", import.meta.url), "utf8");
 const dialogSource = readFileSync(new URL("../src/components/ProjectCommandDialog.tsx", import.meta.url), "utf8");
 
 function conversationHeaderSource(): string {
-  const start = appSource.indexOf('<header className="conversation-header');
+  const start = appSourceText.indexOf('<header className="conversation-header');
   assert.notEqual(start, -1, "the conversation header is gone from App.tsx");
-  const end = appSource.indexOf("</header>", start);
+  const end = appSourceText.indexOf("</header>", start);
   assert.notEqual(end, -1, "the conversation header body could not be delimited");
-  return appSource.slice(start, end);
+  return appSourceText.slice(start, end);
 }
 
 function command(patch: Partial<ProjectCommand> = {}): ProjectCommand {
@@ -359,7 +361,7 @@ test("命令控件渲染在 git 徽标左边，且整条链路都接上了", () 
 
 test("App 用当前项目 + 会话工作区实例化 useProjectCommands", () => {
   assert.match(
-    appSource,
+    appSourceText,
     /useProjectCommands\(\{\s*projectId: bootstrap\.activeProjectId,\s*sessionPath: visibleSessionPath,/,
   );
 });

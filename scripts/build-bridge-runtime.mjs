@@ -147,10 +147,19 @@ function runNpm(cwd) {
   return result.stdout ?? "";
 }
 
+/**
+ * @param {{
+ *   skipInstall?: boolean,
+ *   target?: string,
+ *   targetPlatform?: { os: string, cpu: string } | null,
+ * }} [options]
+ * @returns {{ bridgeDir: string, launcherPath: string, manifest: Record<string, any>, problems: string[] }}
+ */
 export function buildBridgeRuntime({ skipInstall = false, target = "", targetPlatform = null } = {}) {
   const sources = listServerSources(join(repoRoot, "server")).map((path) => readFileSync(path, "utf8"));
   const imports = collectBareImports(sources);
   const packages = [...new Set(imports.map(packageNameOf))].filter(Boolean);
+  /** @type {Record<string, string>} */
   const versions = {};
   for (const pkg of packages) {
     const version = installedVersion(pkg);

@@ -183,6 +183,19 @@ function isolatedNodeEnv() {
   return env;
 }
 
+/** 写出 `pi-desktop-runtime.json`：载荷的来源与指纹，供打包侧与 `runtimePins` 对账。
+ *
+ * `layout` 是解包后的目录布局（`bin` / `npmCli` 的绝对路径）；`relocated` 是搬迁时被改写的
+ * 三类文件（符号链接 / 脚本 / 启动器），它们要按 `outputDir` 相对化后才能随包发布。
+ *
+ * @param {{ bin: string, npmCli: string }} layout
+ * @param {string} target
+ * @param {{
+ *   relocated?: { symlinks?: string[], scripts?: string[], wrappers?: string[] },
+ *   sha256?: string,
+ *   url?: string,
+ * }} [options]
+ */
 function writeRuntimeMetadata(layout, target, { relocated, sha256, url } = {}) {
   writeFileSync(join(outputDir, "pi-desktop-runtime.json"), `${JSON.stringify({
     kind: "node",

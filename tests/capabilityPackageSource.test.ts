@@ -19,6 +19,7 @@ import {
   resolveEntryCandidates,
   selectEntriesToAbsolutize,
 } from "../server/capabilityPackageSource.mjs";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const CWD = "/Users/dev/Desktop/tmp/aaa";
@@ -151,7 +152,7 @@ test("registry installs and already-absolute entries are left untouched", () => 
 });
 
 test("the install handler straightens user-scope packages and matches them by where they landed", () => {
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+  const source = bridgeSource();
 
   assert.match(source, /straightenInstalledPackage\(targetRuntime, source\)/);
   assert.match(source, /settingsManager: targetRuntime\.settingsManager/, "the rewrite must run against live settings");
@@ -203,7 +204,7 @@ test("missing sources and surrounding whitespace are handled", () => {
 });
 
 test("the remove handler resolves the stored source and refuses a silent no-op", () => {
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+  const source = bridgeSource();
 
   assert.match(source, /const removableSource = packageSourceForPi\(\{/);
   assert.match(source, /removeAndPersist\(removableSource, \{ local \}\)/);

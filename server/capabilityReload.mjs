@@ -8,9 +8,8 @@
  *
  * Both pieces live here, away from the HTTP server, so they can be tested without
  * booting a session.
- */
-
-/** Order-insensitive, duplicate-insensitive id comparison (the caller builds ordered arrays). */
+ *
+ *Order-insensitive, duplicate-insensitive id comparison (the caller builds ordered arrays). */
 export function sameCapabilityIds(left, right) {
   if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
     return false;

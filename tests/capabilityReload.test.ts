@@ -16,6 +16,7 @@ import { join, resolve } from "node:path";
 
 import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
 import { capabilityReloadPlan, reloadRuntimeSkills, sameCapabilityIds } from "../server/capabilityReload.mjs";
+import { bridgeEntrySource, bridgeSource } from "./lib/bridgeSource.ts";
 
 const ROOT = resolve(import.meta.dirname, "..");
 
@@ -161,7 +162,7 @@ test("the skill reload declines so the caller can fall back to a full reload", (
 });
 
 test("the server decides through the tested module and never hand-rolls the comparison again", () => {
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+  const source = bridgeSource();
 
   assert.match(source, /from "\.\/capabilityReload\.mjs"/);
   assert.match(source, /capabilityReloadPlan\(current, next\)/, "the mutation path must use the shared decision");
@@ -170,14 +171,15 @@ test("the server decides through the tested module and never hand-rolls the comp
     /plan !== "skills" \|\| !reloadRuntimeSkills\(targetRuntime\)/,
     "the fast path must fall back to the full reload when pi has no narrow entry point",
   );
+  // 「比较只有一份」= 入口里不许再有本地实现；它本身合法地住在 `server/capabilityReload.mjs`。
   assert.ok(
-    !/function sameCapabilityIds\(/.test(source),
-    "the comparison must live in one module, not be duplicated in the server",
+    !/function sameCapabilityIds\(/.test(bridgeEntrySource()),
+    "the comparison must live in one module, not be duplicated in the server entry",
   );
 });
 
 test("a pin no longer reloads any runtime", () => {
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+  const source = bridgeSource();
   const start = source.indexOf("async function setCapabilityPinned(");
   const end = source.indexOf("async function setSessionSkillCapability(", start);
   assert.ok(start !== -1 && end > start, "setCapabilityPinned must still exist");
@@ -191,7 +193,7 @@ test("a pin no longer reloads any runtime", () => {
 });
 
 test("skill mutations answer with the capability slice instead of a full snapshot", () => {
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+  const source = bridgeSource();
   const start = source.indexOf("async function setSessionSkillCapability(");
   const end = source.indexOf("async function updateRuntimeSessionCapabilities(", start);
   const skillMutation = source.slice(start, end);

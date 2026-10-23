@@ -11,16 +11,17 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { revealFolderLabelKey } from "../src/shared/revealFolderLabel.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 
 /** The chat header markup only — headers elsewhere in App.tsx must not count. */
 function conversationHeaderSource(): string {
-  const start = appSource.indexOf('<header className="conversation-header');
+  const start = appSourceText.indexOf('<header className="conversation-header');
   assert.notEqual(start, -1, "the conversation header is gone from App.tsx");
-  const end = appSource.indexOf("</header>", start);
+  const end = appSourceText.indexOf("</header>", start);
   assert.notEqual(end, -1, "the conversation header body could not be delimited");
-  return appSource.slice(start, end);
+  return appSourceText.slice(start, end);
 }
 
 test("the header shows the project name and the conversation title on one row", () => {

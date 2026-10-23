@@ -8,18 +8,19 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 const stylesSource = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");
 const autoHideSource = readFileSync(new URL("../src/components/AutoHideScroll.tsx", import.meta.url), "utf8");
 
 /** Source of a top-level `function name(...) { ... }`, delimited at the next flush-left brace. */
 function topLevelFunctionSource(name: string): string {
-  const start = appSource.indexOf(`function ${name}(`);
+  const start = appSourceText.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} is gone from App.tsx`);
-  const end = appSource.indexOf("\n}\n", start);
+  const end = appSourceText.indexOf("\n}\n", start);
   assert.notEqual(end, -1, `${name} body could not be delimited`);
-  return appSource.slice(start, end);
+  return appSourceText.slice(start, end);
 }
 
 test("the sidebar scroll region hides the native bar and dismisses cards while scrolling", () => {
@@ -161,7 +162,7 @@ test("the project card's folder path opens the folder", () => {
 test("project pin actions are hidden behind the feature flag", () => {
   // Temporarily hidden: `pinned` is persisted but never read (projects are not reordered by it),
   // so both entry points stay behind one flag until a pin actually changes the sidebar order.
-  assert.match(appSource, /const projectPinActionsVisible: boolean = false;/);
+  assert.match(appSourceText, /const projectPinActionsVisible: boolean = false;/);
 
   const sidebar = topLevelFunctionSource("ProjectSidebar");
   assert.equal(

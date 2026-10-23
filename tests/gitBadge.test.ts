@@ -33,11 +33,13 @@ import {
   type GitFileChange,
   type GitInfo,
 } from "../src/shared/gitStatusBadge.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 const badgeSource = readFileSync(new URL("../src/components/GitStatusBadge.tsx", import.meta.url), "utf8");
 const hookSource = readFileSync(new URL("../src/features/chat/useProjectGit.ts", import.meta.url), "utf8");
-const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const serverSource = bridgeSource();
 const zhSource = readFileSync(new URL("../src/i18n/zh.ts", import.meta.url), "utf8");
 const enSource = readFileSync(new URL("../src/i18n/en.ts", import.meta.url), "utf8");
 
@@ -338,8 +340,8 @@ test("弹层里能从当前分支新建分支：按钮→表单→服务端", ()
   );
   assert.match(hookSource, /postJson<GitInfo>\("\/api\/projects\/git\/create-branch", \{ projectId, sessionPath, name \}\)/, "要打新建分支的路由");
   assert.match(hookSource, /t\("git\.createBranchFailed", \{ reason \}\)/, "失败原因要进会话错误横幅");
-  assert.match(appSource, /onCreateBranch=\{projectGit\.createBranch\}/, "App.tsx 要接上 createBranch");
-  assert.match(appSource, /isCreatingBranch=\{projectGit\.isCreatingBranch\}/, "新建中要能禁用按钮");
+  assert.match(appSourceText, /onCreateBranch=\{projectGit\.createBranch\}/, "App.tsx 要接上 createBranch");
+  assert.match(appSourceText, /isCreatingBranch=\{projectGit\.isCreatingBranch\}/, "新建中要能禁用按钮");
   assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/create-branch"/, "缺少 POST /api/projects/git/create-branch");
   // worktree 会话必须在自己那个检出里建分支，否则新分支会落到主检出上。
   // cwd 仍然只由服务端从 projectId/sessionPath 解析，客户端不能直接传路径。
@@ -387,8 +389,8 @@ test("分支名后面有铅笔：点它把当前分支名变成输入框，回�
   assert.ok(headAt !== -1 && nameRow.indexOf("<Pencil") > headAt, "铅笔要在分支名之后");
   assert.match(hookSource, /postJson<GitInfo>\("\/api\/projects\/git\/rename-branch", \{ projectId, name \}\)/, "要打改名的路由");
   assert.match(hookSource, /t\("git\.renameBranchFailed", \{ reason \}\)/, "失败原因要进会话错误横幅");
-  assert.match(appSource, /onRenameBranch=\{projectGit\.renameBranch\}/, "App.tsx 要接上 renameBranch");
-  assert.match(appSource, /isRenamingBranch=\{projectGit\.isRenamingBranch\}/, "改名中要能禁用按钮");
+  assert.match(appSourceText, /onRenameBranch=\{projectGit\.renameBranch\}/, "App.tsx 要接上 renameBranch");
+  assert.match(appSourceText, /isRenamingBranch=\{projectGit\.isRenamingBranch\}/, "改名中要能禁用按钮");
   assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/rename-branch"/, "缺少 POST /api/projects/git/rename-branch");
   assert.match(
     serverSource,
@@ -516,12 +518,12 @@ test("弹层顶部：拉取 → 合并（下拉）→ 推送 → 刷新；推送
   assert.match(hookSource, /t\("git\.pushFailed", \{ reason \}\)/, "推送失败原因要进会话错误横幅");
   assert.match(hookSource, /t\("git\.pullFailed", \{ reason \}\)/, "拉取失败原因要进会话错误横幅");
   assert.match(hookSource, /t\("git\.mergeFailed", \{ reason \}\)/, "合并失败原因要进会话错误横幅");
-  assert.match(appSource, /onPush=\{projectGit\.pushBranch\}/, "App.tsx 要接上 pushBranch");
-  assert.match(appSource, /onPull=\{projectGit\.pullBranch\}/, "App.tsx 要接上 pullBranch");
-  assert.match(appSource, /onMergeBranch=\{projectGit\.mergeBranch\}/, "App.tsx 要接上 mergeBranch");
-  assert.match(appSource, /isPushing=\{projectGit\.isPushing\}/, "推送中要能禁用按钮");
-  assert.match(appSource, /isPulling=\{projectGit\.isPulling\}/, "拉取中要能禁用按钮");
-  assert.match(appSource, /isMergingBranch=\{projectGit\.isMergingBranch\}/, "合并中要能禁用按钮");
+  assert.match(appSourceText, /onPush=\{projectGit\.pushBranch\}/, "App.tsx 要接上 pushBranch");
+  assert.match(appSourceText, /onPull=\{projectGit\.pullBranch\}/, "App.tsx 要接上 pullBranch");
+  assert.match(appSourceText, /onMergeBranch=\{projectGit\.mergeBranch\}/, "App.tsx 要接上 mergeBranch");
+  assert.match(appSourceText, /isPushing=\{projectGit\.isPushing\}/, "推送中要能禁用按钮");
+  assert.match(appSourceText, /isPulling=\{projectGit\.isPulling\}/, "拉取中要能禁用按钮");
+  assert.match(appSourceText, /isMergingBranch=\{projectGit\.isMergingBranch\}/, "合并中要能禁用按钮");
   assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/push"/, "缺少 POST /api/projects/git/push");
   assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/pull"/, "缺少 POST /api/projects/git/pull");
   assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/merge"/, "缺少 POST /api/projects/git/merge");
@@ -540,7 +542,7 @@ test("合并成功后弹层里要有成功提示（快进合并可能什么都�
   assert.match(hookSource, /GIT_NOTICE_DISMISS_MS/, "提示会自动消失，不赖在弹层里");
   assert.match(badgeSource, /notice: string;/, "弹层 props 要收 notice");
   assert.match(badgeSource, /role="status"/, "成功提示要能被辅助技术读出来");
-  assert.match(appSource, /notice=\{projectGit\.notice\}/, "App.tsx 要把 notice 传给弹层");
+  assert.match(appSourceText, /notice=\{projectGit\.notice\}/, "App.tsx 要把 notice 传给弹层");
 });
 
 test("冲突入口：双击开文件（不是 diff），另有「打开冲突文件 / 自动解决冲突」", () => {
@@ -558,10 +560,10 @@ test("冲突入口：双击开文件（不是 diff），另有「打开冲突文
   assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/conflicts"/, "缺少 POST /api/projects/git/conflicts");
   assert.match(serverSource, /openGitFileInIde\(cwd, String\(body\?\.path \?\? ""\)\)/, "打开文件要在会话 workspace 里执行");
   assert.match(serverSource, /buildConflictPrompt\(\{ locale: body\?\.locale, context: \{ \.\.\.context, projectCwd: project\.cwd \} \}\)/, "prompt 由服务端按 locale 拼");
-  assert.match(appSource, /onOpenFile=\{projectGit\.openFile\}/, "App.tsx 要接上 openFile");
-  assert.match(appSource, /onAutoResolveConflicts=\{autoResolveConflicts\}/, "App.tsx 要接上自动解决冲突");
-  assert.match(appSource, /await createSession\(projectId\);\s*setDraft\(prompt\);/, "自动解决：新建会话后把 prompt 填进 composer");
-  assert.match(appSource, /setDraft,/, "App 要从 hook 拿到 setDraft");
+  assert.match(appSourceText, /onOpenFile=\{projectGit\.openFile\}/, "App.tsx 要接上 openFile");
+  assert.match(appSourceText, /onAutoResolveConflicts=\{autoResolveConflicts\}/, "App.tsx 要接上自动解决冲突");
+  assert.match(appSourceText, /await createSession\(projectId\);\s*setDraft\(prompt\);/, "自动解决：新建会话后把 prompt 填进 composer");
+  assert.match(appSourceText, /setDraft,/, "App 要从 hook 拿到 setDraft");
 });
 
 /* ------------------------------------------------------------------ 界面接线 */
@@ -572,10 +574,10 @@ test("合并成功提示文案中英都在，且用 {branch}/{current} 两个占
 });
 
 test("git 徽标挂在会话头部的右部（标题之后），不是别处", () => {
-  const start = appSource.indexOf('<header className="conversation-header');
+  const start = appSourceText.indexOf('<header className="conversation-header');
   assert.notEqual(start, -1, "会话头部不见了");
-  const end = appSource.indexOf("</header>", start);
-  const header = appSource.slice(start, end);
+  const end = appSourceText.indexOf("</header>", start);
+  const header = appSourceText.slice(start, end);
 
   const badgeAt = header.indexOf("<GitStatusBadge");
   assert.notEqual(badgeAt, -1, "会话头部里应有 GitStatusBadge");
@@ -586,16 +588,16 @@ test("git 徽标挂在会话头部的右部（标题之后），不是别处", (
 });
 
 test("App.tsx 用 useProjectGit 驱动徽标：跟着当前项目、一轮结束刷新、失败上报", () => {
-  assert.match(appSource, /useProjectGit\(\{/, "App.tsx 应调用 useProjectGit");
-  assert.match(appSource, /projectId:\s*bootstrap\.activeProjectId/, "要跟随当前项目，而不是固定项目");
-  assert.match(appSource, /isStreaming:\s*state\.isStreaming/, "一轮回答结束时需要刷新一次");
-  assert.match(appSource, /onError:\s*reportError/, "初始化/切分支失败要交给会话错误横幅");
-  assert.match(appSource, /onInit=\{\(\) => void projectGit\.initRepo\(\)\}/, "初始化按钮要接到 initRepo");
-  assert.match(appSource, /onRefresh=\{\(\) => void projectGit\.refresh\(\)\}/, "弹层里的刷新按钮要接到 refresh");
-  assert.match(appSource, /onSwitchBranch=\{projectGit\.switchBranch\}/, "分支行要接到 switchBranch");
-  assert.match(appSource, /onCommit=\{projectGit\.commitChanges\}/, "提交按钮要接到 commitChanges");
-  assert.match(appSource, /isCommitting=\{projectGit\.isCommitting\}/, "提交中要能禁用按钮");
-  assert.match(appSource, /isStreaming=\{state\.isStreaming\}/, "徽标要知道是否在流式（决定能不能切分支/提交）");
+  assert.match(appSourceText, /useProjectGit\(\{/, "App.tsx 应调用 useProjectGit");
+  assert.match(appSourceText, /projectId:\s*bootstrap\.activeProjectId/, "要跟随当前项目，而不是固定项目");
+  assert.match(appSourceText, /isStreaming:\s*state\.isStreaming/, "一轮回答结束时需要刷新一次");
+  assert.match(appSourceText, /onError:\s*reportError/, "初始化/切分支失败要交给会话错误横幅");
+  assert.match(appSourceText, /onInit=\{\(\) => void projectGit\.initRepo\(\)\}/, "初始化按钮要接到 initRepo");
+  assert.match(appSourceText, /onRefresh=\{\(\) => void projectGit\.refresh\(\)\}/, "弹层里的刷新按钮要接到 refresh");
+  assert.match(appSourceText, /onSwitchBranch=\{projectGit\.switchBranch\}/, "分支行要接到 switchBranch");
+  assert.match(appSourceText, /onCommit=\{projectGit\.commitChanges\}/, "提交按钮要接到 commitChanges");
+  assert.match(appSourceText, /isCommitting=\{projectGit\.isCommitting\}/, "提交中要能禁用按钮");
+  assert.match(appSourceText, /isStreaming=\{state\.isStreaming\}/, "徽标要知道是否在流式（决定能不能切分支/提交）");
 });
 
 test("提交面板：勾选框 + 信息框 + 受控按钮，冲突文件不可选", () => {
@@ -629,8 +631,8 @@ test("提交按钮用最小尺寸，旁边是「用当前模型生成」", () =>
   assert.match(badgeSource, /setCommitMessage\(generated\)/, "生成结果直接填进输入框（不自动提交）");
   assert.match(badgeSource, /disabled=\{plan\.fileCount === 0 \|\| isGeneratingMessage \|\| isCommitting \|\| isStreaming\}/, "生成按钮的禁用条件");
   assert.match(badgeSource, /t\("git\.generateMessage"\)/, "生成按钮要有 i18n 文案");
-  assert.match(appSource, /onGenerateMessage=\{projectGit\.generateCommitMessage\}/, "App.tsx 要接上 generateCommitMessage");
-  assert.match(appSource, /isGeneratingMessage=\{projectGit\.isGeneratingMessage\}/, "生成中要能禁用按钮");
+  assert.match(appSourceText, /onGenerateMessage=\{projectGit\.generateCommitMessage\}/, "App.tsx 要接上 generateCommitMessage");
+  assert.match(appSourceText, /isGeneratingMessage=\{projectGit\.isGeneratingMessage\}/, "生成中要能禁用按钮");
 });
 
 /* ------------------------------------------------------------------ 双击看 diff */
@@ -653,7 +655,7 @@ test("双击改动文件：用宿主机的 IDE 打开 diff（渲染层只发一�
 
   assert.match(hookSource, /postJson<\{ ide: string \}>\("\/api\/projects\/git\/open-diff", \{ projectId, path \}\)/, "要打打开 diff 的路由");
   assert.match(hookSource, /t\("git\.openDiffFailed", \{ reason \}\)/, "失败原因要进会话错误横幅");
-  assert.match(appSource, /onOpenDiff={projectGit\.openDiff}/, "App.tsx 要接上 openDiff");
+  assert.match(appSourceText, /onOpenDiff={projectGit\.openDiff}/, "App.tsx 要接上 openDiff");
 
   assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/open-diff"/, "缺少 POST /api/projects/git/open-diff");
   assert.match(serverSource, /openGitFileDiff\(project\.cwd, String\(body\?\.path \?\? ""\)\)/, "要从项目表取 cwd，路径交给服务端校验");
@@ -729,8 +731,8 @@ test("分支行末尾的删除图标：当前分支不显示，点击先弹确�
   assert.ok(!/\bconfirm\(/.test(badgeSource), "不许用浏览器内置 confirm");
   assert.match(badgeSource, /t\("git\.deleteBranchDesc", \{ branch: pendingDelete \}\)/, "确认框要说清楚删的是哪个分支");
   assert.match(badgeSource, /const deleted = await onDeleteBranch\(branch\)/, "确认后才真的删");
-  assert.match(appSource, /onDeleteBranch=\{projectGit\.deleteBranch\}/, "App 要把删除接到 hook");
-  assert.match(appSource, /deletingBranch=\{projectGit\.deletingBranch\}/, "删除中的分支名要传给徽标转圈");
+  assert.match(appSourceText, /onDeleteBranch=\{projectGit\.deleteBranch\}/, "App 要把删除接到 hook");
+  assert.match(appSourceText, /deletingBranch=\{projectGit\.deletingBranch\}/, "删除中的分支名要传给徽标转圈");
   assert.match(hookSource, /postJson<GitInfo>\("\/api\/projects\/git\/delete-branch"/, "删除走服务端路由");
 });
 

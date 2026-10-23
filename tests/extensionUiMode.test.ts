@@ -20,8 +20,10 @@ import test from "node:test";
 
 import { EXTENSION_UI_ACCENT_COLOR, parseTerminalLines } from "../src/shared/terminalText.ts";
 import { constObjectBody, functionBody } from "./lib/sourceText.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const server = readFileSync(join(import.meta.dirname, "../server/index.mjs"), "utf8");
+const server = bridgeSource();
 const read = (path: string): string => readFileSync(join(import.meta.dirname, "..", path), "utf8");
 
 test("两端共用的强调色约定:SGR 96 ⇄ ansi-bright-cyan", () => {
@@ -110,7 +112,7 @@ test("前端:点击回包不能把面板关掉，面板组件按 renderMode 分�
   assert.match(panel, /parseTerminalLines\(request\.lines \?\? \[\]\)/);
   assert.match(panel, /onRespond\(\{ id: request\.id, inputs: target\.keys \}\)/, "点击只能翻译成按键");
   // App 只负责挂载共享组件,不再自己实现一份终端面板。
-  const app = read("src/app/App.tsx");
+  const app = readAppSource();
   assert.match(app, /<ExtensionCustomUiPanel/);
   assert.doesNotMatch(app, /function ExtensionCustomUi\(/, "旧的内联面板必须删掉,避免两份实现漂移");
 });
@@ -118,7 +120,7 @@ test("前端:点击回包不能把面板关掉，面板组件按 renderMode 分�
 test("纯文本出口（widget/状态栏/窗口标题）会把颜色码剥掉，不显示转义字符", () => {
   // webui 模式下 `ctx.ui.theme` 会发 SGR，而扩展也常拿它涂 widget/status 文案；
   // 这几个出口不是终端，必须当纯文本处理。
-  const app = read("src/app/App.tsx");
+  const app = readAppSource();
   assert.match(functionBody(app, "ExtensionWidgetStack"), /stripTerminalSequences\(line\)/);
   assert.match(functionBody(app, "ExtensionStatusBar"), /stripTerminalSequences\(value\)/);
   assert.match(app, /document\.title = stripTerminalSequences\(state\.extensionTitle \?\? ""\)/);
@@ -147,7 +149,7 @@ test("滚轮只能变成上下键：不确认、不越权，Shift 留给原生�
 });
 
 test("设置页给出这两个选项，并且保存走已有的 personalization 通道", () => {
-  const app = read("src/app/App.tsx");
+  const app = readAppSource();
   assert.match(app, /const personalizationExtensionUiOptions = \[/);
   assert.match(app, /value: "tui", labelKey: "settings\.extensionUi\.tui\.label"/);
   assert.match(app, /value: "webui", labelKey: "settings\.extensionUi\.webui\.label"/);

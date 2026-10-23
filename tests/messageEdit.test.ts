@@ -10,12 +10,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource } from "./lib/appSource.ts";
 
-const server = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const server = bridgeSource();
 const chatThread = readFileSync(new URL("../src/features/chat/ChatThread.tsx", import.meta.url), "utf8");
 const editBox = readFileSync(new URL("../src/features/chat/MessageEditBox.tsx", import.meta.url), "utf8");
 const thread = readFileSync(new URL("../src/components/assistant-ui/elements/thread.aui.tsx", import.meta.url), "utf8");
-const app = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const app = appSource();
 const useApp = readFileSync(new URL("../src/features/chat/usePiDesktopApp.ts", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");
 const zh = readFileSync(new URL("../src/i18n/zh.ts", import.meta.url), "utf8");

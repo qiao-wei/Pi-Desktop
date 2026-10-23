@@ -14,8 +14,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
-const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const serverSource = bridgeSource();
 
 /** 取 `startMark` 到 `endMark` 之间的源码区间（两个锚点都必须从 start 之后有序出现）。 */
 function region(source: string, startMark: string, endMark: string): string {

@@ -17,15 +17,16 @@ import {
   SIDEBAR_SESSION_BUSY_SLOT_CLASS,
   sidebarSessionBusyIndicator,
 } from "../src/features/chat/sidebarStreaming.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 
 /** `SidebarSessionRow` 的源码段（到下一个顶层 `function ` 为止）。 */
 function sessionRowSource(): string {
-  const start = appSource.indexOf("function SidebarSessionRow(");
+  const start = appSourceText.indexOf("function SidebarSessionRow(");
   assert.notEqual(start, -1, "SidebarSessionRow is gone from App.tsx");
-  const end = appSource.indexOf("\nfunction ", start + 1);
-  return appSource.slice(start, end === -1 ? appSource.length : end);
+  const end = appSourceText.indexOf("\nfunction ", start + 1);
+  return appSourceText.slice(start, end === -1 ? appSourceText.length : end);
 }
 
 test("状态槽优先级：pending 压过 streaming，两者都不是就留空", () => {
@@ -55,6 +56,6 @@ test("会话行用会转的 Loader，不再是脉冲的时钟", () => {
 });
 
 test("Loader 图标来自 lucide，而不是自绘的替代品", () => {
-  assert.match(appSource, /^\s*Loader,$/m, "App.tsx 要从 lucide-react 引入 Loader");
-  assert.doesNotMatch(appSource, /^\s*Clock3,$/m, "Clock3 已无调用点，不该留着");
+  assert.match(appSourceText, /^\s*Loader,$/m, "App.tsx 要从 lucide-react 引入 Loader");
+  assert.doesNotMatch(appSourceText, /^\s*Clock3,$/m, "Clock3 已无调用点，不该留着");
 });

@@ -16,16 +16,17 @@ import test from "node:test";
 
 import { sidebarHoverActionClass } from "../src/shared/sidebarActionVisibility.ts";
 import { sidebarSwitchLockClass } from "../src/shared/projectSidebarLock.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 
 /** Source of a top-level `function name(...) { ... }`, delimited at the next flush-left brace. */
 function topLevelFunctionSource(name: string): string {
-  const start = appSource.indexOf(`function ${name}(`);
+  const start = appSourceText.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} is gone from App.tsx`);
-  const end = appSource.indexOf("\n}\n", start);
+  const end = appSourceText.indexOf("\n}\n", start);
   assert.notEqual(end, -1, `${name} body could not be delimited`);
-  return appSource.slice(start, end);
+  return appSourceText.slice(start, end);
 }
 
 test("action icons are hidden by default", () => {
@@ -76,7 +77,7 @@ test("merging with the sidebar button and the switch lock keeps every modifier",
 });
 
 test("project rows and session rows both use the shared rule with a group ancestor", () => {
-  assert.match(appSource, /sidebarHoverActionClass/);
+  assert.match(appSourceText, /sidebarHoverActionClass/);
 
   // Project row: the wrapper owns `group` + `relative`; the actions sit in ONE hover-only
   // wrapper pinned to the row's right edge, so the label only gives up space on hover.
@@ -147,7 +148,7 @@ test("the visibility rule never shares an element with a disabled-opacity overri
   // flashed those icons into view. The rule must live on a wrapper whose own opacity is never
   // touched by a disabled state.
   const violations: string[] = [];
-  for (const [, call] of appSource.matchAll(/cn\(([^)]*sidebarHoverActionClass[^)]*)\)/g)) {
+  for (const [, call] of appSourceText.matchAll(/cn\(([^)]*sidebarHoverActionClass[^)]*)\)/g)) {
     if (/disabled:opacity|lockClass/.test(call)) violations.push(call.trim());
   }
   assert.deepEqual(violations, [], "sidebarHoverActionClass must not merge with disabled-opacity classes");

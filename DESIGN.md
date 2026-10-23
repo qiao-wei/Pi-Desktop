@@ -348,6 +348,21 @@ components:
     border: "1px solid {colors.hairline-soft}"
 ---
 
+# 这份文件是什么（定位说明，2026-10-22 补）
+
+**它是一份参考资料，不是 Pi Desktop 自己的设计规范。** 内容是对 Meta 设计系统（Quest / Ray-Ban /
+品牌页与购买流程）的 token 与版面分析，用于给 `src/themes/` 里的主题 token（尤其浅色/深色配色的
+参考基线）提供外部对照。
+
+- **Pi Desktop 的界面规范在**：`src/app/tailwind.css` + `src/themes/<id>/theme.css` + `src/themes/README.md`
+  （主题注册表与新增主题的步骤），以及 `docs/architecture/`（分层与边界，不是视觉规范）。
+- **不要**把它当成本项目的 token 来源：文件里的 `colors:` / `components:` 描述的是 Meta 的界面，
+  抄进主题会得到一个「像 Meta 但不属于这里」的界面。
+- 计划中的整理：移入 `docs/reference/meta-design-analysis.md`（`docs/` 当前有写保护，需要
+  `/pw allow-docs-write on`），文件名与位置都表明它是外部参考。在那之前保持原名 + 这段说明，
+  以免移动时丢引用。
+
+
 ## Overview
 
 Meta's commerce surfaces (homepage, Quest configurator, Ray-Ban product detail, prescription page) read as a confident hardware merchandiser. The brand voice is photography-first: large, full-bleed product imagery dominates above-the-fold real estate, with white space and tight typographic hierarchy carrying the rest. The system has a recognizable dual-CTA pattern — a black pill-shaped primary on marketing surfaces shifting to a saturated cobalt blue ({colors.primary}) inside the buy-now flows, paired with an outlined ghost button for secondary navigation.

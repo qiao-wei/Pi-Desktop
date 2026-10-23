@@ -1,4 +1,5 @@
 import type { AppSnapshot } from "../types";
+import { getStoragePort } from "./storage.ts";
 
 const SNAPSHOT_KEY = "pi-desktop.snapshot.v1";
 
@@ -10,11 +11,7 @@ export interface PersistenceLayer {
 
 export const localPersistence: PersistenceLayer = {
   load() {
-    if (typeof window === "undefined") {
-      return null;
-    }
-
-    const raw = window.localStorage.getItem(SNAPSHOT_KEY);
+    const raw = getStoragePort().read(SNAPSHOT_KEY);
     if (!raw) {
       return null;
     }
@@ -26,17 +23,9 @@ export const localPersistence: PersistenceLayer = {
     }
   },
   save(snapshot) {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snapshot));
+    getStoragePort().write(SNAPSHOT_KEY, JSON.stringify(snapshot));
   },
   clear() {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.localStorage.removeItem(SNAPSHOT_KEY);
+    getStoragePort().remove(SNAPSHOT_KEY);
   },
 };

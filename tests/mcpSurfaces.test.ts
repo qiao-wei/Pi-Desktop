@@ -18,9 +18,11 @@ import { join } from "node:path";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { en } from "../src/i18n/en.ts";
 import { zh } from "../src/i18n/zh.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
-const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const appSourceText = readAppSource();
+const serverSource = bridgeSource();
 const hookSource = readFileSync(new URL("../src/features/chat/usePiDesktopApp.ts", import.meta.url), "utf8");
 
 /* ------------------------------- 服务端接入 ------------------------------- */
@@ -90,31 +92,31 @@ test("the tool inventory comes from the live session, not a second connection", 
 /* -------------------------------- 全局页 --------------------------------- */
 
 test("the global page gained an MCP tab wired to its own cards", () => {
-  assert.match(appSource, /mcp: \{ label: "MCP", Icon: Plug \}/);
-  assert.match(appSource, /capabilities\.mcpServers \?\? \[\]/);
-  assert.match(appSource, /function CapabilityMcpCard\(/);
-  assert.match(appSource, /<CapabilityMcpCard/);
+  assert.match(appSourceText, /mcp: \{ label: "MCP", Icon: Plug \}/);
+  assert.match(appSourceText, /capabilities\.mcpServers \?\? \[\]/);
+  assert.match(appSourceText, /function CapabilityMcpCard\(/);
+  assert.match(appSourceText, /<CapabilityMcpCard/);
   // MCP 卡片自成一系：连接状态 / transport / exposure 都是它自己的徽章。
-  assert.match(appSource, /capability\.mcp\.connected/);
-  assert.match(appSource, /capability\.mcp\.overridesGlobal/);
+  assert.match(appSourceText, /capability\.mcp\.connected/);
+  assert.match(appSourceText, /capability\.mcp\.overridesGlobal/);
 });
 
 test("MCP editing is a first-class dialog with transport-specific fields", () => {
-  assert.match(appSource, /function McpServerDialog\(/);
-  assert.match(appSource, /function McpServerEditor\(/);
-  assert.match(appSource, /function KeyValueEditor\(/);
+  assert.match(appSourceText, /function McpServerDialog\(/);
+  assert.match(appSourceText, /function McpServerEditor\(/);
+  assert.match(appSourceText, /function KeyValueEditor\(/);
   // stdio 与 http 各自只显示自己能用的字段。
-  assert.match(appSource, /transport === "stdio" \?/);
-  assert.match(appSource, /capability\.mcp\.headers/);
-  assert.match(appSource, /capability\.mcp\.env/);
+  assert.match(appSourceText, /transport === "stdio" \?/);
+  assert.match(appSourceText, /capability\.mcp\.headers/);
+  assert.match(appSourceText, /capability\.mcp\.env/);
   // 单工具 exposure 覆盖也在这里配。
-  assert.match(appSource, /capability\.mcp\.toolExposureAria/);
+  assert.match(appSourceText, /capability\.mcp\.toolExposureAria/);
 });
 
 /* ------------------------------ 右侧项目面板 ------------------------------ */
 
 test("the context panel lists project-scoped MCP servers too", () => {
-  const panel = appSource.slice(appSource.indexOf("function ProjectCapabilitiesPanel"));
+  const panel = appSourceText.slice(appSourceText.indexOf("function ProjectCapabilitiesPanel"));
   assert.match(panel, /capabilities\.mcpServers \?\? \[\]/);
   assert.match(panel, /server\.scope === "project"/);
   assert.match(panel, /renderSection\("mcp", t\("capability\.section\.mcp"\)/);
@@ -125,9 +127,9 @@ test("the context panel lists project-scoped MCP servers too", () => {
 
 test("both surfaces share one removal path and one confirm dialog", () => {
   // 项目面板的详情弹层也要能编辑 / 测试连接，所以三个回调两处都传。
-  assert.equal((appSource.match(/onSaveMcpServer=\{saveMcpServer\}/g) ?? []).length, 2);
-  assert.equal((appSource.match(/onReadMcpServer=\{readMcpServerDetail\}/g) ?? []).length, 2);
-  assert.match(appSource, /capability\.delete\.mcpTitle/);
+  assert.equal((appSourceText.match(/onSaveMcpServer=\{saveMcpServer\}/g) ?? []).length, 2);
+  assert.equal((appSourceText.match(/onReadMcpServer=\{readMcpServerDetail\}/g) ?? []).length, 2);
+  assert.match(appSourceText, /capability\.delete\.mcpTitle/);
 });
 
 /* ------------------------------ 前端 action ------------------------------- */
@@ -160,22 +162,22 @@ test("the server exposes a parse-only import endpoint", () => {
 
 test("import lives inside the add-server editor and fills the form", () => {
   // 不再是独立弹窗。
-  assert.doesNotMatch(appSource, /function McpImportDialog\(/);
-  assert.match(appSource, /function McpServerEditor\(/);
+  assert.doesNotMatch(appSourceText, /function McpImportDialog\(/);
+  assert.match(appSourceText, /function McpServerEditor\(/);
   // 导入区只在新增（无 server）时出现，且解析回调是从 McpServerDialog 透传的。
-  assert.match(appSource, /!editing && onParseImport/);
-  assert.match(appSource, /onParseImport\?: \(text: string, defaultName\?: string\)/);
-  assert.match(appSource, /<McpServerDialog[\s\S]*?onParseImport=/);
+  assert.match(appSourceText, /!editing && onParseImport/);
+  assert.match(appSourceText, /onParseImport\?: \(text: string, defaultName\?: string\)/);
+  assert.match(appSourceText, /<McpServerDialog[\s\S]*?onParseImport=/);
   // 文件 + 粘贴两种输入，自动识别后点条目回填。
-  assert.match(appSource, /capability\.mcp\.importChooseFile/);
-  assert.match(appSource, /capability\.mcp\.importPasteLabel/);
-  assert.match(appSource, /accept="\.json,application\/json"/);
-  assert.match(appSource, /function applyImported\(imported: CapabilityMcpImportServer\)/);
-  assert.match(appSource, /capability\.mcp\.importPick/);
-  assert.match(appSource, /mcpImportFormatKey/);
+  assert.match(appSourceText, /capability\.mcp\.importChooseFile/);
+  assert.match(appSourceText, /capability\.mcp\.importPasteLabel/);
+  assert.match(appSourceText, /accept="\.json,application\/json"/);
+  assert.match(appSourceText, /function applyImported\(imported: CapabilityMcpImportServer\)/);
+  assert.match(appSourceText, /capability\.mcp\.importPick/);
+  assert.match(appSourceText, /mcpImportFormatKey/);
   // 导入的 oauth 等字段随表单保存（extras），不能丢。
-  assert.match(appSource, /extras,/);
-  assert.match(appSource, /onParseMcpImport/);
+  assert.match(appSourceText, /extras,/);
+  assert.match(appSourceText, /onParseMcpImport/);
 });
 
 test("every detected import format has copy in both packs", () => {

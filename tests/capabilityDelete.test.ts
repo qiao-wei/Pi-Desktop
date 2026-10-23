@@ -15,6 +15,7 @@ import { canDeleteCapability } from "../src/shared/capabilityScope.ts";
 import { en } from "../src/i18n/en.ts";
 import { zh } from "../src/i18n/zh.ts";
 import { setLocale, t } from "../src/i18n/index.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
 /* ------------------------------ eligibility ------------------------------ */
 
@@ -48,12 +49,12 @@ test("kinds without a removal path are never deletable", () => {
 
 /* -------------------------------- wiring --------------------------------- */
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 
 test("the card list, the detail sheet and the context panel share one eligibility rule", () => {
-  const card = functionBody(appSource, "function CapabilityMarketCard");
-  const actions = functionBody(appSource, "function CapabilityActions");
-  const panel = functionBody(appSource, "function ProjectCapabilitiesPanel");
+  const card = functionBody(appSourceText, "function CapabilityMarketCard");
+  const actions = functionBody(appSourceText, "function CapabilityActions");
+  const panel = functionBody(appSourceText, "function ProjectCapabilitiesPanel");
 
   assert.match(card, /\{canDeleteCapability\(item\) \? \(/);
   assert.match(card, /onClick=\{\(\) => onDelete\(item\)\}/);
@@ -65,7 +66,7 @@ test("the card list, the detail sheet and the context panel share one eligibilit
 });
 
 test("the page only requests a delete; the call runs on confirm", () => {
-  const page = functionBody(appSource, "function CapabilitiesPage");
+  const page = functionBody(appSourceText, "function CapabilitiesPage");
 
   // Both surfaces are wired to the request handler, never straight to the bridge.
   assert.match(page, /onDelete=\{requestDelete\}/);
@@ -81,7 +82,7 @@ test("the page only requests a delete; the call runs on confirm", () => {
 });
 
 test("the context panel follows the same request/confirm split", () => {
-  const panel = functionBody(appSource, "function ProjectCapabilitiesPanel");
+  const panel = functionBody(appSourceText, "function ProjectCapabilitiesPanel");
 
   const request = functionBody(panel, "function ProjectCapabilitiesPanel");
   assert.match(request, /onClick=\{\(\) => setPendingDelete\(item\)\}/);
@@ -95,18 +96,18 @@ test("the context panel follows the same request/confirm split", () => {
 
 test("App hands the panel and the page one shared removal handler", () => {
   // Two call sites (page + panel) must use the single dispatcher, not each other's callbacks.
-  assert.equal((appSource.match(/onDelete=\{deleteCapabilityItem\}/g) ?? []).length, 2);
+  assert.equal((appSourceText.match(/onDelete=\{deleteCapabilityItem\}/g) ?? []).length, 2);
 
-  const handlerStart = appSource.indexOf("const deleteCapabilityItem = useCallback(");
+  const handlerStart = appSourceText.indexOf("const deleteCapabilityItem = useCallback(");
   assert.notEqual(handlerStart, -1, "App must define one shared removal dispatcher");
-  const handler = appSource.slice(handlerStart, appSource.indexOf("[deleteSkill, removePackage]", handlerStart));
+  const handler = appSourceText.slice(handlerStart, appSourceText.indexOf("[deleteSkill, removePackage]", handlerStart));
   assert.match(handler, /deleteSkill\(item\.id\)/);
   assert.match(handler, /removePackage\(item\.source, item\.scope\)/);
   assert.match(handler, /removeMcpServer\(item\.id\)/);
 });
 
 test("one shared prompt confirms every destructive removal", () => {
-  const prompt = functionBody(appSource, "function CapabilityDeleteDialog");
+  const prompt = functionBody(appSourceText, "function CapabilityDeleteDialog");
 
   assert.match(prompt, /<AlertDialog[\s\S]*?open=\{Boolean\(item\)\}/);
   assert.match(prompt, /<AlertDialogCancel disabled=\{busy\}>\{t\("common\.cancel"\)\}<\/AlertDialogCancel>/);
@@ -117,11 +118,11 @@ test("one shared prompt confirms every destructive removal", () => {
   assert.match(prompt, /capability\.delete\.description[\s\S]*?name: item\?\.name \?\? ""/);
 
   // Both surfaces render that one prompt.
-  assert.equal((appSource.match(/<CapabilityDeleteDialog/g) ?? []).length, 2);
+  assert.equal((appSourceText.match(/<CapabilityDeleteDialog/g) ?? []).length, 2);
 });
 
 test("the prompt shows a deleting state and cannot be dismissed while the call runs", () => {
-  const prompt = functionBody(appSource, "function CapabilityDeleteDialog");
+  const prompt = functionBody(appSourceText, "function CapabilityDeleteDialog");
 
   // npm uninstall can take tens of seconds, and the remove endpoint streams no progress:
   // the prompt itself is the only place that can say "still working".
@@ -133,18 +134,18 @@ test("the prompt shows a deleting state and cannot be dismissed while the call r
   assert.match(prompt, /disabled=\{busy\} onClick=\{onConfirm\}/);
 
   // Both surfaces hand the in-flight flag to that one prompt.
-  assert.equal((appSource.match(/busy=\{busy === "delete"\}/g) ?? []).length, 2);
+  assert.equal((appSourceText.match(/busy=\{busy === "delete"\}/g) ?? []).length, 2);
 
   // The delete is awaited *before* the item is cleared. Clearing first would unmount the
   // prompt immediately, which is exactly the silent gap this guards against.
-  const page = functionBody(appSource, "function CapabilitiesPage");
+  const page = functionBody(appSourceText, "function CapabilitiesPage");
   const pageConfirm = functionBody(page, "function confirmDelete");
   assert.ok(
     pageConfirm.indexOf("await onDelete(item)") < pageConfirm.indexOf("setPendingDelete(null)"),
     "page: the prompt must outlive the delete call",
   );
 
-  const panel = functionBody(appSource, "function ProjectCapabilitiesPanel");
+  const panel = functionBody(appSourceText, "function ProjectCapabilitiesPanel");
   const panelConfirm = functionBody(panel, "async function confirmDelete");
   assert.ok(
     panelConfirm.indexOf("await onDelete(item)") < panelConfirm.indexOf("setPendingDelete(null)"),
@@ -158,8 +159,8 @@ test("the prompt shows a deleting state and cannot be dismissed while the call r
 // four separate islands. 28px buttons in a 4px row keep them one cluster.
 
 test("capability action clusters stay compact", () => {
-  const card = functionBody(appSource, "function CapabilityMarketCard");
-  const panel = functionBody(appSource, "function ProjectCapabilitiesPanel");
+  const card = functionBody(appSourceText, "function CapabilityMarketCard");
+  const panel = functionBody(appSourceText, "function ProjectCapabilitiesPanel");
 
   assert.match(card, /className="flex items-center gap-1" onClick=\{\(event\) => event\.stopPropagation\(\)\}/);
   // 2026-09-20: the row's action cluster is now top-aligned (the chips made the left column
