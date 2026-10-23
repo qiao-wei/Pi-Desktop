@@ -16,6 +16,7 @@ import {
 const submitBudget = sessionTitleMaxChars;
 const submitChaseCap = sessionTitleMaxChaseChars;
 import { ATTACHMENT_CONTEXT_END, ATTACHMENT_CONTEXT_START } from "../src/shared/chatBubbles.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
 const exactCases: Array<[string, string]> = [
   // File names / versions / URLs must not be mistaken for sentence ends.
@@ -149,7 +150,7 @@ test("deriveSessionTitle is idempotent", () => {
 
 test("client and server share one submit-time implementation", () => {
   const client = readFileSync("src/features/chat/usePiDesktopApp.ts", "utf8");
-  const server = readFileSync("server/index.mjs", "utf8");
+  const server = bridgeSource();
 
   assert.ok(client.includes('from "../../shared/sessionTitle"'));
   assert.ok(server.includes('from "../src/shared/sessionTitle.ts"'));
@@ -158,11 +159,12 @@ test("client and server share one submit-time implementation", () => {
   // The post-hoc summary title is derived from the question like the provisional
   // one, so the model-unavailable fallback shares the same rule.
   assert.ok(/function fallbackSessionTitle[\s\S]*?deriveSessionTitle\(/.test(server));
-  assert.ok(server.includes("const fallbackTitle = fallbackSessionTitle(messageToText(userMessage))"));
+  // 退化到兜底标题时用的是同一条规则（这里多一个 userMessage 存在性判断，避免对 undefined 调 messageToText）。
+  assert.ok(server.includes("fallbackSessionTitle(userMessage ? messageToText(userMessage) : \"\")"));
 });
 
 test("the summary title is kept as written, never cut to fit", () => {
-  const server = readFileSync("server/index.mjs", "utf8");
+  const server = bridgeSource();
 
   // The budget lives in the prompt; the code must not hard-cut the model output.
   assert.ok(/const generatedTitleMaxChars = 16;/.test(server));

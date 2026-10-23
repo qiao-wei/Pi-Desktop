@@ -15,10 +15,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { isSessionBusy, pendingQueuedCount, sessionControlsDisabled } from "../src/shared/sessionBusy.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource } from "./lib/appSource.ts";
 
-const appTsx = readFileSync(join(import.meta.dirname, "../src/app/App.tsx"), "utf8");
+const appTsx = appSource();
 const hook = readFileSync(join(import.meta.dirname, "../src/features/chat/usePiDesktopApp.ts"), "utf8");
-const server = readFileSync(join(import.meta.dirname, "../server/index.mjs"), "utf8");
+const server = bridgeSource();
 
 test("pendingQueuedCount：steering + follow-up 一起数，缺字段当 0", () => {
   assert.equal(pendingQueuedCount(undefined), 0);

@@ -94,7 +94,9 @@ export function readPngFile(path) {
 export function cornerReport(path, inset, radius) {
   const img = readPngFile(path);
   const { width, height } = img;
-  const at = (x, y) => (x < width && y < height ? img.pixel(x, y).a : undefined);
+  // 图外一律按「完全透明」算：这样圆角报告全是数字，调用方不用为 undefined 写分支
+  // （像素下标越界读出来是 undefined，语义上就是 alpha=0）。
+  const at = (x, y) => (x >= 0 && y >= 0 && x < width && y < height ? (img.pixel(x, y).a ?? 0) : 0);
   const step = Math.max(2, Math.round(radius * 0.2));
   return {
     width,

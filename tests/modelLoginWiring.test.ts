@@ -12,7 +12,9 @@ import { join } from "node:path";
 import test from "node:test";
 
 const root = join(import.meta.dirname, "..");
-const serverSource = readFileSync(join(root, "server", "index.mjs"), "utf8");
+import { bridgeSource } from "./lib/bridgeSource.ts";
+
+const serverSource = bridgeSource();
 const brokerSource = readFileSync(join(root, "server", "modelLogin.mjs"), "utf8");
 const dialogSource = readFileSync(join(root, "src", "features", "models", "AddModelsDialog.tsx"), "utf8");
 const loginDialogSource = readFileSync(join(root, "src", "features", "models", "ModelLoginDialog.tsx"), "utf8");

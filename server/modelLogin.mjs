@@ -56,9 +56,18 @@ export function serializableAuthPrompt(prompt) {
 }
 
 /** 登录方式名：pi 只给了 `apiKey` / `oauth` 两种。 */
+/**
+ * 把请求里的登录方式兑成 `AuthType`：不认识的（含空）一律按 `api_key`。
+ *
+ * 返回类型写死成联合而不是 `string` —— 这样调用方不用为了过类型而往参数上贴 `any`
+ * （贴了就会把「白名单之外的值」这件事掩盖掉）。
+ *
+ * @param {unknown} [value]
+ * @returns {"oauth" | "api_key"}
+ */
 export function normalizeLoginAuthType(value) {
   const authType = String(value ?? "").trim();
-  return AUTH_TYPES.includes(authType) ? authType : "api_key";
+  return AUTH_TYPES.includes(authType) && (authType === "oauth" || authType === "api_key") ? authType : "api_key";
 }
 
 /**
@@ -148,8 +157,18 @@ export function createModelLoginBroker() {
   /**
    * 起一次登录。返回 `{ sessionId, done }`：`done` 在「done / error」事件写完之后
    * 才 resolve，调用方 `await done` 再关流。
+   *
+    * @param {{
+   *   providerId?: string,
+   *   authType?: string,
+   *   login?: (context: any) => Promise<any>,
+   *   onEvent?: (event: any) => void,
+   * }} [request]
    */
-  function start({ providerId, authType, login, onEvent } = {}) {
+  function start({ providerId, authType, login: loginImpl, onEvent } = {}) {
+    if (typeof loginImpl !== "function") {
+      throw new Error("no login implementation for this provider");
+    }
     const session = {
       id: `login-${++sessionSeq}`,
       providerId: String(providerId ?? ""),
@@ -173,7 +192,7 @@ export function createModelLoginBroker() {
     };
 
     const done = Promise.resolve()
-      .then(() => login(interaction))
+      .then(() => loginImpl(interaction))
       .then(
         () => {
           emit(session, { type: "done" });

@@ -15,10 +15,12 @@ import { join } from "node:path";
 
 import { normalizeCommandArgumentItems } from "../server/commandArguments.mjs";
 import { functionBody } from "./lib/sourceText.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource } from "./lib/appSource.ts";
 
-const server = readFileSync(join(import.meta.dirname, "../server/index.mjs"), "utf8");
+const server = bridgeSource();
 const hook = readFileSync(join(import.meta.dirname, "../src/features/chat/usePiDesktopApp.ts"), "utf8");
-const app = readFileSync(join(import.meta.dirname, "../src/app/App.tsx"), "utf8");
+const app = appSource();
 
 /* ------------------------------------------------ normalizeCommandArgumentItems */
 

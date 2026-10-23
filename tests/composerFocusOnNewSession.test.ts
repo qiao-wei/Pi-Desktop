@@ -12,8 +12,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { appSource } from "./lib/appSource.ts";
 
-const appTsx = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appTsx = appSource();
 
 /** 取 `start 标记` 到 `end 标记` 之间的源码区间，两边锚点都必须唯一。 */
 function region(source: string, startMark: string, endMark: string): string {

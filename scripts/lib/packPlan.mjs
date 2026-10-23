@@ -145,8 +145,15 @@ export function parsePackArgs(argv) {
   return { ...flags, ...values, passthrough };
 }
 
-/** 准备步骤（两条外壳共用）：前端 → 运行时（仅 bundled）→ bridge → 能力包门禁。 */
+/** 准备步骤（两条外壳共用）：前端 → 运行时（仅 bundled）→ bridge → 能力包门禁。
+ *
+ * 两种步骤靠字段区分，`scripts/pack.mjs` 按 `step.pkg ? join(rootDir,"node_modules",...) : join(rootDir, step.bin)` 选执行方式；
+ * 数组里两种形状混排，所以把联合类型写在数组上（否则 TS 只拿第一个元素的形状当整数组的形状）。
+ *
+ * @param {{ runtimeMode: string, gate: boolean }} options
+ */
 function prepareSteps({ runtimeMode, gate }) {
+  /** @type {{ label: string, pkg?: string[], bin?: string, args: string[] }[]} */
   const steps = [
     { label: "前端类型检查（tsc -b）", pkg: ["typescript", "bin/tsc"], args: ["-b"] },
     { label: "前端构建（vite build）", pkg: ["vite", "bin/vite.js"], args: ["build"] },

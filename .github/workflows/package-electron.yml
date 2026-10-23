@@ -67,10 +67,6 @@ on:
         description: "版本号（如 1.2.3，留空 = 用仓库里的版本且不发布）：填了就写进包（app 版本 / 文件名）并在打完后发到 GitHub Release（tag v1.2.3）"
         type: string
         default: ""
-      run_tests:
-        description: "打包前在 ubuntu 上跑 npm test"
-        type: boolean
-        default: true
 
 # 同一个 ref 上重复点按钮时排队而不是互相踩（打包是长任务，取消半途会留下半成品）。
 concurrency:
@@ -209,7 +205,8 @@ jobs:
   # ── 测试 ────────────────────────────────────────────────────────────────────
   verify:
     name: 测试（npm test）
-    if: ${{ inputs.run_tests }}
+    # 硬门：没有开关可以跳过测试再出包。曾经这里是 `if: ${{ inputs.run_tests }}`（默认 true 但可取消），
+    # 结果是「可以出一份没跑过测试的安装包」—— 而打包恰恰是最不该跳过测试的一步。
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -225,8 +222,8 @@ jobs:
   package:
     name: ${{ matrix.target }}/${{ matrix.arch }} · ${{ matrix.mode }} · 签名 ${{ matrix.target == 'mac' && needs.plan.outputs.sign || 'n/a' }}
     needs: [plan, verify]
-    # verify 可能被 run_tests=false 跳过：skipped 不算失败。plan 失败时矩阵是空的，先看它的 result。
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.count != '0' && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}
+    # 测试必须先成功（verify 不再可跳过）。plan 失败时矩阵是空的，所以先看它的 result。
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.count != '0' && needs.verify.result == 'success' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:

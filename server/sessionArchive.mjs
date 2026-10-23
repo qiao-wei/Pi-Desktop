@@ -7,9 +7,8 @@
  *
  * 注意：`listProjectSessionRows` 与 `listArchivedSessionRows` 的 SELECT 列 / 映射必须保持一致，
  * 前端的 ArchivedSessionSummary 直接复用 ProjectSessionSummary 的字段。
- */
-
-/** @returns {boolean} 是否真的补了列（false = 本来就存在，迁移幂等）。 */
+ *
+ *@returns {boolean} 是否真的补了列（false = 本来就存在，迁移幂等）。 */
 export function ensureSessionArchiveColumn(db) {
   // CREATE TABLE IF NOT EXISTS 不会给已存在的表补列，只能显式 ALTER。
   // 归档只改索引不改会话文件，所以不重扫磁盘（重扫会把删掉的会话又加回来）。

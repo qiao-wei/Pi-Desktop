@@ -319,13 +319,21 @@ export async function readWorktreeBase(cwd, options = {}) {
  * 起点默认 `HEAD`（当前分支的当前提交），detached 检出 —— 同一个分支因此可以被多个
  * worktree 各自引用而不会互相抢。目录已存在且非空时直接拒绝，不覆盖任何东西。
  * 建完之后按 `.worktreeinclude` 把被忽略的本地文件复制进去。
+ *
+  * @param {string} cwd
+ * @param {{ root?: string, id?: string, baseRef?: string }} [worktree]
+ * @param {object} [options]
  */
 export async function createManagedWorktree(cwd, { root, id, baseRef = "HEAD" } = {}, options = {}) {
   const project = String(cwd ?? "").trim();
   if (!project) {
     throw new Error("没有项目目录，无法创建 worktree。");
   }
-  if (!isManagedWorktreePath(root, join(String(root ?? ""), id))) {
+  const worktreeId = String(id ?? "").trim();
+  if (!worktreeId) {
+    throw new Error("没有 worktree 名字。");
+  }
+  if (!isManagedWorktreePath(root, join(String(root ?? ""), worktreeId))) {
     throw new Error("worktree 路径不在托管目录里。");
   }
 
@@ -338,7 +346,7 @@ export async function createManagedWorktree(cwd, { root, id, baseRef = "HEAD" } 
     throw new Error(`Invalid base ref: ${baseRef || "(empty)"}`);
   }
 
-  const target = join(String(root), id);
+  const target = join(String(root), worktreeId);
   if (existsSync(target)) {
     throw new Error(`worktree 目录已存在：${target}`);
   }
@@ -426,7 +434,12 @@ export async function copyWorktreeIncludeFiles(sourceCwd, targetPath, options = 
   return { copied, skipped };
 }
 
-/** 托管 worktree 清单（只报落在托管根目录里的那些）。 */
+/** 托管 worktree 清单（只报落在托管根目录里的那些）。
+ *
+  * @param {string} cwd
+ * @param {{ root?: string }} [layout]
+ * @param {object} [options]
+ */
 export async function listManagedWorktrees(cwd, { root } = {}, options = {}) {
   const project = String(cwd ?? "").trim();
   if (!project) {
@@ -587,6 +600,11 @@ export function worktreeRemovalBlocked(changes) {
  *
  * 三道门：非托管路径不删（`isManagedWorktreePath`）、有未提交内容且没给 `force` 不删、
  * 删完 `prune` 一次把 git 的 worktree 元数据收干净。
+ *
+  * @param {string} cwd
+ * @param {string} targetPath
+ * @param {{ root?: string, force?: boolean }} [layout]
+ * @param {object} [options]
  */
 export async function removeManagedWorktree(cwd, targetPath, { root, force = false } = {}, options = {}) {
   const project = String(cwd ?? "").trim();

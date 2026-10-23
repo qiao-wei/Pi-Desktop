@@ -11,11 +11,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { appSource } from "./lib/appSource.ts";
+
 const image = readFileSync(
   new URL("../src/components/assistant-ui/elements/image.tsx", import.meta.url),
   "utf8",
 );
-const app = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+// 标题栏已经从 App.tsx 拆到 src/app/TitleBarChrome.tsx，所以按整个目录读文本。
+const app = appSource();
 
 function classesOf(marker: string, source: string): string {
   const match = new RegExp(`className="([^"]*${marker}[^"]*)"`).exec(source);

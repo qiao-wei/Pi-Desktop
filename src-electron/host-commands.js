@@ -13,6 +13,7 @@ function registerHostCommands(getWindow) {
 
   const folderPicker = (title) => async (_event, args) => {
     const parent = getWindow();
+    /** @type {import("electron").OpenDialogOptions} */
     const options = {
       title,
       buttonLabel: "Choose",

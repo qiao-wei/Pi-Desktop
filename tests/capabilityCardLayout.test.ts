@@ -15,8 +15,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 
 /** 取顶层 `function name(...) { ... }` 的源码（到下一个顶格 `}` 结束）。 */
 function topLevelFunctionSource(source: string, name: string): string {
@@ -27,7 +28,7 @@ function topLevelFunctionSource(source: string, name: string): string {
   return source.slice(start, end);
 }
 
-const card = topLevelFunctionSource(appSource, "CapabilityMarketCard");
+const card = topLevelFunctionSource(appSourceText, "CapabilityMarketCard");
 
 test("市场卡片：资源 tag 行跨满整卡，而不是挤在中间列里", () => {
   assert.match(

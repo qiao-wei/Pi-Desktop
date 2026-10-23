@@ -38,11 +38,21 @@ const flag = (name) => {
   const index = argv.indexOf(name);
   return index >= 0 ? argv[index + 1] : undefined;
 };
+/** 取一个必须带值的开关；`flag()` 的返回是 `string | undefined`，直接用会一串 TS2345。 */
+const flagRequired = (name) => {
+  const value = flag(name);
+  if (!value) {
+    console.error(`verify-mac-notification: ${name} 需要一个值`);
+    process.exit(1);
+  }
+  return value;
+};
 
 const control = argv.includes("--control");
 const debugPort = Number(flag("--port") ?? 9224);
 const builtApps = ["dist-electron/mac-arm64/Pi Desktop.app", "dist-electron/mac/Pi Desktop.app"];
 
+/** @returns {never} 打印后直接退出（类型上也要是 never，否则调用点后面的收窄全断） */
 function fail(message, hints = []) {
   console.error(`verify-mac-notification: ${message}`);
   for (const hint of hints) {
@@ -138,6 +148,9 @@ function launch(command, args) {
      */
     async stop() {
       for (const signal of ["TERM", "KILL"]) {
+        if (child.pid === undefined) {
+          break; // spawn 都没成功，没有进程组可杀
+        }
         try {
           process.kill(-child.pid, `SIG${signal}`);
         } catch {
@@ -180,7 +193,9 @@ async function invokeThroughCdp(port, { title, body }) {
   while (Date.now() < deadline) {
     try {
       const targets = await (await fetch(`${base}/json/list`)).json();
-      page = targets.find((target) => target.type === "page" && target.webSocketDebuggerUrl);
+      page = /** @type {{ type?: string, webSocketDebuggerUrl?: string }[]} */ (targets).find(
+        (target) => target.type === "page" && target.webSocketDebuggerUrl,
+      );
       if (page) {
         break;
       }
@@ -193,7 +208,11 @@ async function invokeThroughCdp(port, { title, body }) {
     throw new Error("60s 内没有拿到可调试的 renderer（窗口没起来？）");
   }
 
-  const socket = new WebSocket(page.webSocketDebuggerUrl);
+  const socketUrl = page.webSocketDebuggerUrl;
+  if (!socketUrl) {
+    throw new Error("renderer 没给 webSocketDebuggerUrl（调试端口连上了但目标不可用）");
+  }
+  const socket = new WebSocket(socketUrl);
   await new Promise((resolveOpen, rejectOpen) => {
     socket.onopen = resolveOpen;
     socket.onerror = () => rejectOpen(new Error("CDP 连接失败"));
@@ -249,7 +268,9 @@ if (control) {
   process.exit(0);
 }
 
-const appPath = flag("--app") ? resolve(flag("--app")) : builtApps.map((relative) => resolve(rootDir, relative)).find(existsSync);
+const appPath = flag("--app")
+  ? resolve(flagRequired("--app"))
+  : builtApps.map((relative) => resolve(rootDir, relative)).find(existsSync);
 if (!appPath || !existsSync(appPath)) {
   fail("没找到构建好的 .app", [
     `先出包：npm run pack:electron:mac:arm64（默认找 ${builtApps.join(" / ")}）`,

@@ -22,7 +22,8 @@ import { createModelLoginBroker, normalizeLoginAuthType, providerLoginMethods } 
 import { openSqliteDatabase } from "./sqlite.mjs";
 import { ensureSessionArchiveColumn, listArchivedSessionRows, listProjectSessionRows } from "./sessionArchive.mjs";
 import { revealFolder } from "./revealFolder.mjs";
-import { commitGitChanges, createGitBranch, deleteGitBranch, initGitRepo, mergeGitBranchInto, pullGitBranch, pushGitBranch, readCommitDiff, readConflictContext, readGitInfo, renameGitBranch, switchGitBranch } from "./gitInfo.mjs";
+import { commitGitChanges } from "./gitCommit.mjs";
+import { createGitBranch, deleteGitBranch, initGitRepo, mergeGitBranchInto, pullGitBranch, pushGitBranch, readCommitDiff, readConflictContext, readGitInfo, renameGitBranch, switchGitBranch } from "./gitInfo.mjs";
 import {
   createManagedWorktree,
   isManagedWorktreePath,
@@ -35,6 +36,8 @@ import {
   worktreeRootFor,
 } from "./gitWorktree.mjs";
 import { resolveSessionWorkspaceCwd } from "./sessionWorkspace.mjs";
+import { PROTOCOL_VERSION } from "./protocolVersion.mjs";
+import { assertBridgePayload } from "../src/shared/protocol/bridgeMessages.ts";
 import { openGitFileDiff, openGitFileInIde } from "./openDiff.mjs";
 import { createProjectProbe, detectProjectCommands } from "./projectCommandDetect.mjs";
 import { detectTerminalApps, revealRunLog, runProjectCommand } from "./runProjectCommand.mjs";
@@ -77,8 +80,7 @@ import {
   silenceGlobalModelWrites,
   THINKING_LEVELS,
 } from "./sessionModelPolicy.mjs";
-import { StringEnum, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
-import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
+import { StringEnum, supportedThinkingLevelsFor, builtinProviders } from "./piKernel.mjs";
 import { Type } from "typebox";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
@@ -91,15 +93,15 @@ import {
   createToolSearchExtension,
   DefaultResourceLoader,
   DefaultPackageManager,
-  main as runPiCli,
+  runPiCli,
   ProjectTrustStore,
   ModelRuntime,
   SettingsManager,
   SessionManager,
   withFileMutationQueue,
   initTheme,
-} from "@earendil-works/pi-coding-agent";
-import { matchesKey } from "@earendil-works/pi-tui";
+  matchesKey,
+} from "./piKernel.mjs";
 import {
   ATTACHMENT_CONTEXT_END,
   ATTACHMENT_CONTEXT_START,
@@ -153,9 +155,21 @@ import {
   preferredPort,
   shouldRetryWithEphemeralPort,
 } from "./bridgeListen.mjs";
-import { resolveProjectTrusted } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/project-trust.js";
-import { hasTrustRequiringProjectResources } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/trust-manager.js";
-
+// 桥对内核的每一次引用都走这一个门（见 server/piKernel.mjs 与 docs/architecture/protocols.md）。
+// 其中两个入口不在内核的公共 exports 里，只能按相对路径进 dist；把它们锁在这个文件里，
+// 版本升级时失败会发生在启动那一刻，而不是某个请求处理器深处。
+import { resolveProjectTrusted, hasTrustRequiringProjectResources } from "./piKernel.mjs";
+import { sessionDetails, sanitizeDiagnosticDetails } from "./diagnosticsHelpers.mjs";
+import { normalizeSkillRelativePath, normalizeSkillFolderName, assertSkillDirectory, resolveToolPath, directoriesHaveSameContent, readVersionMetadata } from "./skillHelpers.mjs";
+import { normalizeMcpCapabilityMetadataMap, normalizeCapabilityMetadataMap, parseMcpImportRequest, parseMcpCapabilityId, splitArgs, normalizeStringMap, collectExtensionEntries, commandMatchesPackage, setPackageAutoload, resolvePackageResources, packageDisplayName, packageDescription } from "./capabilityMetadata.mjs";
+import { sendBootstrapJson, sendNdjson, readJson, readJsonFile, withTimeout } from "./httpHelpers.mjs";
+import { requestOpenAiJson, describeModel, usageFields, loginOauthMetadata } from "./modelHelpers.mjs";
+import { appendAttachmentContext, normalizeMessageCapabilityPart, inferAttachmentMimeType, sanitizeAttachmentName } from "./attachmentHelpers.mjs";
+import { inferConversationTitle, shouldGenerateInitialTitle, normalizeGeneratedTitle, assistantContentText, rewindSessionToTurn, persistSessionShell, createProjectId, resolveCommandCwd } from "./sessionHelpers.mjs";
+import { resolveProjectTrustForRuntime } from "./runtimeTrust.mjs";
+import { normalizeMessageParts } from "./conversationParts.mjs";
+import { packageAutoloadEnabled, enabledResourcePaths, statMaybeDirectory, packageCapabilityId } from "./packageHelpers.mjs";
+import { parseTime, errorDetails, readKeyResponse, sessionRuntimeKey, normalizePersonalizationText, attachmentOnlyPrompt, searchResultLimit, sendJson, writeJsonFile, createEmptyCapabilitiesDefaults, skillSummaries, projectCommandsPayload, assertMcpWriteScope, defaultSkillEnabled, writeVersionMetadata, displayAgentPath, normalizeThinkingLevel, formatAgentError, partialToolCall, toolStreamId, runtimeMode, isSessionBusy, mcpMetaKey, mcpToolsByNamespace } from "./smallHelpers.mjs";
 const host = process.env.PI_DESKTOP_HOST ?? process.env.ENGBUDDY_HOST ?? "127.0.0.1";
 // The bridge owns its port: prefer 6474, take any free one when that is taken. Hosts discover the
 // result on stdout instead of each inventing their own port policy.
@@ -247,7 +261,6 @@ const http429StatusPatterns = [
 // app still cannot call the tool, which looks exactly like "not installed". This
 // is the one place both shells (Electron, Tauri) and `npm run dev` share, so the
 // rule lives here rather than being duplicated per shell.
-//
 // Which interpreter `node` / `python3` / `pip` mean is decided once, here: the user's own
 // runtime wins, and the bundled payload only fills the gap (server/agentEnv.mjs has the
 // reasoning, including why macOS `/usr/bin/python3` does not count as "the user's Python").
@@ -412,61 +425,12 @@ function diagnosticLog(event, fields = {}) {
     console.warn(`[pi-desktop-diagnostic] ${line}`);
   }
 }
+/* moved to server/smallHelpers.mjs */
 
-function errorDetails(error) {
-  return {
-    errorName: error instanceof Error ? error.name : undefined,
-    errorMessage: error instanceof Error ? error.message : String(error),
-    errorStack: error instanceof Error ? error.stack : undefined,
-  };
-}
+/* moved to server/diagnosticsHelpers.mjs */
 
-function sessionDetails(targetRuntime) {
-  const session = targetRuntime?.session;
-  if (!session) {
-    return {};
-  }
+/* moved to server/diagnosticsHelpers.mjs */
 
-  return {
-    sessionPath: session.sessionFile,
-    sessionId: session.sessionId,
-    isStreaming: session.isStreaming,
-    isCompacting: session.isCompacting,
-    isIdle: session.isIdle,
-    isRetrying: session.isRetrying,
-    autoRetryEnabled: session.autoRetryEnabled,
-    pendingMessageCount: session.pendingMessageCount,
-    retryAttempt: session.retryAttempt,
-    messageCount: Array.isArray(session.state?.messages) ? session.state.messages.length : undefined,
-  };
-}
-
-function sanitizeDiagnosticDetails(value, depth = 0) {
-  if (depth > 3 || value === null || value === undefined) {
-    return value === undefined ? undefined : value;
-  }
-  if (typeof value === "string") {
-    return value.length > 500 ? `${value.slice(0, 500)}...` : value;
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.slice(0, 20).map((item) => sanitizeDiagnosticDetails(item, depth + 1));
-  }
-  if (typeof value === "object") {
-    const result = {};
-    for (const [key, item] of Object.entries(value).slice(0, 40)) {
-      if (/api.?key|authorization|token|secret|password|attachment.?data|prompt/i.test(key)) {
-        result[key] = "[REDACTED]";
-      } else {
-        result[key] = sanitizeDiagnosticDetails(item, depth + 1);
-      }
-    }
-    return result;
-  }
-  return String(value);
-}
 
 process.on("uncaughtException", (error) => {
   diagnosticLog("process.uncaught_exception", errorDetails(error));
@@ -494,7 +458,6 @@ const RUNTIME_SHIM_SPECS = runtimeShimSpecs();
 // Writing the launchers must never take the bridge down: without them skills lose
 // node/python, but a window that cannot reach the API is a worse failure, and an
 // uncaught throw here used to be silent.
-//
 try {
   ensurePiShim();
   // Per runtime, not per install: a machine with node but no python gets the python launchers
@@ -547,11 +510,8 @@ function syncRuntimeShims(family, takenOver) {
     }
   }
 }
+/* moved to server/smallHelpers.mjs */
 
-/** True when this install relies on the host's node/python instead of shipped runtimes. */
-function runtimeMode() {
-  return process.env.PI_DESKTOP_RUNTIME_MODE?.trim().toLowerCase() === "system";
-}
 
 function ensurePiShim() {
   const shimPath = join(agentBinDir, process.platform === "win32" ? "pi.cmd" : "pi");
@@ -674,21 +634,8 @@ function normalizeExtensionUiMode(value) {
 function activeUiTheme() {
   return extensionUiRenderMode() === "webui" ? ansiUiTheme : headlessUiTheme;
 }
+/* moved to server/smallHelpers.mjs */
 
-/**
- * Turns an extension-UI response into the key sequences to replay.
- *
- * A single keystroke arrives as `input` (the original protocol). A click on a rendered panel -
- * which the panel contract cannot express as anything but keystrokes - arrives as `inputs`, a
- * batch like `[down, down, enter]`.
- */
-function readKeyResponse(response) {
-  if (Array.isArray(response?.inputs)) {
-    const keys = response.inputs.filter((key) => typeof key === "string" && key.length > 0);
-    return keys.length > 0 ? keys : undefined;
-  }
-  return typeof response?.input === "string" ? [response.input] : undefined;
-}
 
 function createExtensionUiBridge() {
   const listeners = new Set();
@@ -968,6 +915,7 @@ function createExtensionUiBridge() {
 
         return new Promise((resolve, reject) => {
           let finished = false;
+          /** @type {{ request: unknown, resolve: (value: any) => void, reject: (error: any) => void, custom: { component: { dispose?: () => void } | null, finish: (value?: any, error?: any) => void } }} */
           const pending = {
             request: requestPayload,
             resolve,
@@ -1103,31 +1051,8 @@ function createPiDesktopCommandContextActions(runtimeRef) {
     },
   };
 }
+/* moved to server/runtimeTrust.mjs */
 
-async function resolveProjectTrustForRuntime({ cwd, settingsManager, trustStore, projectTrustContext, extensionsResult }) {
-  return resolveProjectTrusted({
-    cwd,
-    trustStore,
-    defaultProjectTrust: settingsManager.getDefaultProjectTrust(),
-    extensionsResult,
-    // Runtime creation can happen before the bootstrap response is available.
-    // Keep trust resolution non-interactive here; the HTTP endpoint below handles
-    // an explicit trust decision and reloads the open runtimes afterwards.
-    projectTrustContext: {
-      ...projectTrustContext,
-      hasUI: false,
-      ui: {
-        select: async () => undefined,
-        confirm: async () => false,
-        input: async () => undefined,
-        notify: () => {},
-      },
-    },
-    onExtensionError: (message) => {
-      console.error(message);
-    },
-  });
-}
 
 async function bindPiDesktopSessionExtensions(session, runtimeRef, uiBridge) {
   await session.bindExtensions({
@@ -1191,6 +1116,7 @@ const openRuntimes = new Map([[sessionRuntimeKey(runtime.session.sessionFile), r
 updateSessionStoreFromRuntime(runtime);
 const activePackageCommands = new Map();
 const sessionAbortPromises = new WeakMap();
+/** @type {Promise<unknown>} 串行化队列；自身值不重要，重要的是 then 的排队语义 */
 let skillReloadQueue = Promise.resolve();
 const server = http.createServer(async (req, res) => {
   setCors(res);
@@ -1215,12 +1141,19 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
+    if (req.method === "GET" && url.pathname === "/api/protocol") {
+      // 握手：哪个协议版本的 bridge 在应答。刻意不构建快照（那要几百 KB 和一次 md5），
+      // 所以渲染进程可以在接管任何状态之前、用最便宜的一条请求先问清楚。
+      sendJson(res, 200, { protocolVersion: PROTOCOL_VERSION, pid: process.pid });
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/bootstrap") {
       // `?view=ambient` is the watchdog shape: everything that moves independently of
       // the transcript, and none of the transcript. See `buildAmbientSnapshot`.
 undefined
       if (url.searchParams.get("view") === "ambient") {
-        sendJson(res, 200, buildAmbientSnapshot(runtime));
+        sendJson(res, 200, assertBridgePayload(buildAmbientSnapshot(runtime), "ambient"));
         return;
       }
       diagnosticLog("bootstrap.start", { requestId, sessionPath: runtime.session.sessionFile, ...sessionDetails(runtime) });
@@ -1889,19 +1822,27 @@ undefined
       });
       const line = commandLine(command.command, command.args);
       // 后台运行能跟踪：登记进程，界面据此持续显示「运行中」并提供停止入口。
-      if (result.launcher === "background" && result.pid) {
+      if (result.logPath !== undefined) {
+        const background = result;
         projectCommandRuns.register({
-          pid: result.pid,
+          pid: await background.pid ?? null,
           startedAt: Date.now(),
           command: line,
           projectId: project.id,
           commandId: command.id,
           cwd,
-          logPath: result.logPath,
+          logPath: background.logPath,
           sessionPath: typeof body?.sessionPath === "string" ? body.sessionPath : "",
         });
       }
-      sendJson(res, 200, { ok: true, launcher: result.launcher, logPath: result.logPath, pid: result.pid, command: line, cwd });
+      sendJson(res, 200, {
+        ok: true,
+        launcher: result.launcher,
+        logPath: result.logPath ?? null,
+        pid: (await result.pid) ?? null,
+        command: line,
+        cwd,
+      });
       return;
     }
 
@@ -2241,6 +2182,7 @@ async function createRuntime(project, sessionPath, trace = {}) {
     durationMs: Date.now() - startedAt,
   });
   const uiBridge = createExtensionUiBridge();
+  /** @type {{ current: any }} */
   const runtimeRef = { current: null };
   const trustStore = new ProjectTrustStore(agentDir);
   // Resolve project trust *before* the capability inventory. pi only discovers project
@@ -2373,6 +2315,8 @@ async function createRuntime(project, sessionPath, trace = {}) {
       services,
       diagnostics: services.diagnostics,
       modelFallbackMessage: created.modelFallbackMessage,
+      // 内核的 `CreateAgentSessionRuntimeResult` 要求这个字段（扩展加载结果，进 trust 判定用）。
+      extensionsResult: created.extensionsResult,
     };
   }, {
     cwd: workspaceCwd,
@@ -2487,7 +2431,7 @@ async function resolveRuntimeCapabilityPaths({ project, settingsManager, session
     if (!selectedPackageIds.has(packageId) || defaultPackageIds.has(packageId)) {
       continue;
     }
-    const resolved = await resolvePackageResources({ project, settingsManager, pkg });
+    const resolved = await resolvePackageResources({ project, settingsManager, agentDir, pkg });
     extensionPaths.push(...enabledResourcePaths(resolved, "extensions"));
     skillPaths.push(...enabledResourcePaths(resolved, "skills"));
   }
@@ -2607,14 +2551,8 @@ async function replaceRuntime(project, sessionPath, trace = {}) {
   });
   return snapshot;
 }
+/* moved to server/smallHelpers.mjs */
 
-function sessionRuntimeKey(sessionPath) {
-  if (!sessionPath) {
-    throw new Error("Session file is required.");
-  }
-
-  return resolve(sessionPath);
-}
 
 function getRuntimeForRequest(body) {
   const requestedSessionPath = String(body?.sessionPath ?? "").trim();
@@ -2629,10 +2567,8 @@ function getRuntimeForRequest(body) {
 
   return targetRuntime;
 }
+/* moved to server/smallHelpers.mjs */
 
-function isSessionBusy(session) {
-  return session.isStreaming || session.isCompacting || session.pendingMessageCount > 0;
-}
 
 function disposeRuntime(sessionPath) {
   const targetRuntime = openRuntimes.get(sessionRuntimeKey(sessionPath));
@@ -2739,23 +2675,8 @@ function listAvailableModels() {
     .filter((model) => !model.provider.startsWith("qwen-token-plan"))
     .map((model) => describeModel(model, available.has(`${model.provider}/${model.id}`)));
 }
+/* moved to server/modelHelpers.mjs */
 
-function describeModel(model, available = true) {
-  return {
-    provider: model.provider,
-    model: model.id,
-    name: model.name,
-    contextWindow: model.contextWindow,
-    reasoning: model.reasoning,
-    // 复用 pi 的按模型档位能力：composer 菜单显示几档，完全由模型的 thinkingLevelMap 决定
-    // （null / 未声明 xhigh·max = 不存在；off..high 未声明 = pi 默认放行）。
-    // 不再写“没映射表就按 off 处理”—— pi 对开了推理但没写映射表的模型给的是 off..high，
-    // 前端按 off 渲染会让菜单与真实能力脱节。
-    supportedThinkingLevels: getSupportedThinkingLevels(model),
-    supportsImages: model.input?.includes("image") ?? false,
-    available,
-  };
-}
 
 function basePiDesktopResourceLoaderOptions(project, settingsManager) {
   return {
@@ -2791,23 +2712,10 @@ function createPiDesktopRuntimeExtension(project, workspaceCwd = project.cwd) {
  * MCP 探测超时（毫秒）：只用于能力页显式的「测试连接」，不参与会话自身的连接流程。
  */
 const mcpToolProbeTimeoutMs = Number(process.env.PI_DESKTOP_MCP_PROBE_TIMEOUT_MS ?? 15000);
+/* moved to server/smallHelpers.mjs */
 
-/** app 自己的 MCP 元数据（pinned / 描述）在 capabilities.json 里的键：`<scope>:<name>`。 */
-function mcpMetaKey(scope, name) {
-  return `${scope === "project" ? "project" : "user"}:${name}`;
-}
+/* moved to server/capabilityMetadata.mjs */
 
-/** 能力 id（`user:name` / `project:name`）反解成 scope + 服务器名。 */
-function parseMcpCapabilityId(value) {
-  const raw = String(value ?? "").trim();
-  const separator = raw.indexOf(":");
-  if (separator === -1) {
-    return null;
-  }
-  const scope = raw.slice(0, separator) === "project" ? "project" : "user";
-  const name = normalizeMcpServerName(raw.slice(separator + 1));
-  return name ? { scope, name } : null;
-}
 
 /**
  * 全局 + 项目两份 `mcp.json` 的运行视图。同名时项目覆盖全局（pi 的语义），
@@ -2841,15 +2749,8 @@ function readMcpRuntimeState(targetRuntime) {
     errors: [...globalConfig.errors, ...projectConfig.errors],
   };
 }
+/* moved to server/smallHelpers.mjs */
 
-/**
- * 当前会话里 pi 真正注册的 MCP 工具，按命名空间（`mcp__<server>`）分组。
- * 不额外连一遍服务器——直接读会话状态，和 TUI 看到的是同一份内核事实。
- * 纯分组与命名空间换算在 `mcpConfig.mjs`，那里可以单测；这里只负责拿到会话的工具列表。
- */
-function mcpToolsByNamespace(targetRuntime) {
-  return groupMcpToolsByNamespace(targetRuntime.session?.getAllTools?.() ?? []);
-}
 
 /** 能力清单的 MCP 条目：文件事实（mcp.json）× 会话事实（已注册工具）× app 元数据。 */
 function mcpCapabilityEntries(targetRuntime) {
@@ -2883,13 +2784,8 @@ function mcpCapabilityEntries(targetRuntime) {
   });
   return { ...state, entries };
 }
+/* moved to server/smallHelpers.mjs */
 
-/** 写项目 `.pi/mcp.json` 前先确认项目已信任——未信任时 pi 根本不会加载它。 */
-function assertMcpWriteScope(targetRuntime, scope) {
-  if (scope === "project" && targetRuntime.settingsManager?.isProjectTrusted?.() === false) {
-    throw new Error("Trust this project before editing its .pi/mcp.json.");
-  }
-}
 
 /* ------------------------------- 工具开关 ------------------------------- */
 
@@ -2961,6 +2857,8 @@ function projectTrustForWrite(cwd) {
  * 为什么要专门做这一步：pi 只在**建会话**的时候按 `defaultTools` 算激活工具，改设置对运行中的
  * 会话没有任何影响（TUI 也一样，改完得重开）。这里补上，省得用户以为开关是坏的。
  * 只碰 codemode 一个名字；有需要它的 MCP 服务器时不往下摘。
+ *
+  * @param {{ projectId?: string, scope?: string }} [target]
  */
 function applyToolToggleToRuntimes({ projectId, scope } = {}) {
   for (const targetRuntime of openRuntimes.values()) {
@@ -3272,25 +3170,8 @@ async function inspectMcpServerCapability(body) {
   const targetRuntime = getRuntimeForRequest(body);
   return { inspection: await inspectMcpServer(targetRuntime, String(body?.id ?? "")) };
 }
+/* moved to server/capabilityMetadata.mjs */
 
-/**
- * 导入 MCP 配置的解析接口：只把文本翻成表单字段 / `extras` 回给前端，不写任何文件。
- * 前端用返回值自动填进 McpServerEditor 表单，用户确认后走原有的 `/mcp/save` 落盘。
- */
-function parseMcpImportRequest(body) {
-  const parsed = parseMcpImportText(body?.text, { defaultName: body?.defaultName });
-  if (!parsed.ok) {
-    throw new Error(parsed.errors[0] ?? "Failed to parse the MCP config.");
-  }
-  return {
-    import: {
-      format: parsed.format,
-      servers: parsed.servers.map((item) => ({ ...item.server, extras: item.extras, warnings: item.warnings })),
-      errors: parsed.errors,
-      warnings: parsed.warnings,
-    },
-  };
-}
 
 function createEmptyCapabilitiesConfig() {
   // `mcp` 是 Pi Desktop 自有的 MCP 元数据（pinned / 描述），键是 `<scope>:<server>`；
@@ -3343,13 +3224,8 @@ function readCapabilitiesDefaults() {
     return createEmptyCapabilitiesDefaults();
   }
 }
+/* moved to server/smallHelpers.mjs */
 
-function createEmptyCapabilitiesDefaults() {
-  return {
-    version: 1,
-    defaultEnabledSkills: [],
-  };
-}
 
 function normalizeCapabilitiesDefaults(value) {
   const source = value && typeof value === "object" ? value : {};
@@ -3409,51 +3285,10 @@ function normalizeCapabilitiesConfig(config) {
     mcp: normalizeMcpCapabilityMetadataMap(source.mcp),
   };
 }
+/* moved to server/capabilityMetadata.mjs */
 
-/**
- * MCP 的 app 元数据比其它能力多一个 `description`：pi 的 `mcp.json` 不存描述，
- * 而设置页要显示它，所以单独存一份（键是 `<scope>:<server>`）。
- */
-function normalizeMcpCapabilityMetadataMap(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
+/* moved to server/capabilityMetadata.mjs */
 
-  const result = {};
-  for (const [id, entry] of Object.entries(value)) {
-    const normalizedId = String(id).trim();
-    if (!normalizedId) {
-      continue;
-    }
-    const source = entry && typeof entry === "object" ? entry : {};
-    result[normalizedId] = {
-      defaultEnabled: source.defaultEnabled !== false,
-      pinned: Boolean(source.pinned),
-      description: typeof source.description === "string" ? source.description : "",
-    };
-  }
-  return result;
-}
-
-function normalizeCapabilityMetadataMap(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-
-  const result = {};
-  for (const [id, entry] of Object.entries(value)) {
-    const normalizedId = String(id).trim();
-    if (!normalizedId) {
-      continue;
-    }
-    const source = entry && typeof entry === "object" ? entry : {};
-    result[normalizedId] = {
-      defaultEnabled: source.defaultEnabled !== false,
-      pinned: Boolean(source.pinned),
-    };
-  }
-  return result;
-}
 
 function normalizeCapabilityId(value) {
   return String(value ?? "").trim();
@@ -3462,29 +3297,10 @@ function normalizeCapabilityId(value) {
 function skillCapabilityId(skill) {
   return skill.name;
 }
+/* moved to server/capabilityMetadata.mjs */
 
-function splitArgs(value) {
-  if (Array.isArray(value)) {
-    return value.map((arg) => String(arg));
-  }
-  const raw = String(value ?? "").trim();
-  if (!raw) {
-    return [];
-  }
-  return raw.split(/\s+/g).filter(Boolean);
-}
+/* moved to server/capabilityMetadata.mjs */
 
-function normalizeStringMap(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-
-  return Object.fromEntries(
-    Object.entries(value)
-      .map(([key, nextValue]) => [String(key).trim(), String(nextValue ?? "")])
-      .filter(([key]) => Boolean(key)),
-  );
-}
 
 function readSessionCapabilitySelection(sessionManager) {
   const entries = typeof sessionManager.getBranch === "function"
@@ -3521,11 +3337,8 @@ function normalizeSessionCapabilitySelection(value) {
 function normalizeStringArray(value) {
   return Array.isArray(value) ? [...new Set(value.map((item) => String(item).trim()).filter(Boolean))] : [];
 }
+/* moved to server/smallHelpers.mjs */
 
-function defaultSkillEnabled(config, skillId) {
-  const entry = config.skills[skillId];
-  return entry?.defaultEnabled === true;
-}
 
 function defaultSessionCapabilitySelection(config, skills, targetRuntime = runtime) {
   const packages = configuredPackagesForRuntime(targetRuntime)
@@ -3635,10 +3448,8 @@ function managedSkills(skills, project = activeProject()) {
 function isManagedSkillPath(filePath, project = activeProject()) {
   return isSkillPathUnderRoots(filePath, [appSkillsDir, agentSkillsDir, agentsSkillsDir, join(project.cwd, ".pi", "skills")]);
 }
+/* moved to server/packageHelpers.mjs */
 
-function packageCapabilityId(pkg) {
-  return `${pkg.scope}:${pkg.source}`;
-}
 
 function packageDefaultEnabled(config, pkg) {
   return pkg.autoload !== false;
@@ -3658,57 +3469,21 @@ function configuredPackagesForRuntime(targetRuntime = runtime) {
     autoload: packageAutoloadEnabled(settingsManager, pkg),
   }));
 }
+/* moved to server/capabilityMetadata.mjs */
 
-/**
- * pi's own view of what a package contains. One resolve per package feeds the session's resource
- * paths, the command attribution and the card's resource chips, so they can never disagree.
- * `temporary` keeps this exploratory resolve from installing anything.
- */
-async function resolvePackageResources({ project, settingsManager, pkg }) {
-  if (!pkg.installedPath) {
-    return emptyPackageResources();
-  }
-  const packageManager = new DefaultPackageManager({ cwd: project.cwd, agentDir, settingsManager });
-  return packageManager.resolveExtensionSources([pkg.installedPath], {
-    local: pkg.scope === "project",
-    temporary: true,
-  });
-}
 
 async function packageResourcesForRuntime(targetRuntime, pkg) {
   return resolvePackageResources({
     project: findProject(targetRuntime.projectId),
     settingsManager: targetRuntime.settingsManager,
+    agentDir,
     pkg,
   });
 }
+/* moved to server/packageHelpers.mjs */
 
-function enabledResourcePaths(resolved, type) {
-  return (resolved?.[type] ?? [])
-    .filter((resource) => resource.enabled)
-    .map((resource) => canonicalPath(resource.path));
-}
+/* moved to server/packageHelpers.mjs */
 
-function commandMatchesPackage(command, pkg, extensionPaths) {
-  const sourceInfo = command.sourceInfo;
-  if (!sourceInfo) {
-    return false;
-  }
-
-  if (sourceInfo.origin === "package" && sourceInfo.source === pkg.source) {
-    return true;
-  }
-
-  return extensionPaths.has(canonicalPath(sourceInfo.path));
-}
-
-function packageAutoloadEnabled(settingsManager, pkg) {
-  const settings = pkg.scope === "project" ? settingsManager.getProjectSettings() : settingsManager.getGlobalSettings();
-  const entry = (settings.packages ?? []).find((candidate) =>
-    (typeof candidate === "string" ? candidate : candidate.source) === pkg.source,
-  );
-  return !(typeof entry === "object" && entry.autoload === false);
-}
 
 /**
  * pi writes a local install into user-scope settings as a path relative to the scope's base
@@ -3724,40 +3499,8 @@ function straightenInstalledPackage(targetRuntime, installSource) {
     agentDir,
   });
 }
+/* moved to server/capabilityMetadata.mjs */
 
-function setPackageAutoload(settingsManager, pkg, enabled) {
-  const scope = pkg.scope === "project" ? "project" : "user";
-  const settings = scope === "project" ? settingsManager.getProjectSettings() : settingsManager.getGlobalSettings();
-  const packages = [...(settings.packages ?? [])];
-  const index = packages.findIndex((candidate) =>
-    (typeof candidate === "string" ? candidate : candidate.source) === pkg.source,
-  );
-  if (index < 0) {
-    throw new Error("Package source is not configured.");
-  }
-
-  const current = packages[index];
-  if (enabled) {
-    packages[index] = typeof current === "string"
-      ? current
-      : (() => {
-          const next = { ...current };
-          delete next.autoload;
-          return next;
-        })();
-  } else {
-    packages[index] = {
-      ...(typeof current === "string" ? { source: current } : current),
-      autoload: false,
-    };
-  }
-
-  if (scope === "project") {
-    settingsManager.setProjectPackages(packages);
-  } else {
-    settingsManager.setPackages(packages);
-  }
-}
 
 function extensionPathsForSettings(project, settingsManager) {
   const result = [];
@@ -3775,14 +3518,8 @@ function extensionPathsForSettings(project, settingsManager) {
   }
   return result;
 }
+/* moved to server/packageHelpers.mjs */
 
-function statMaybeDirectory(path) {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
 
 function discoverStandaloneExtensionPaths(project = activeProject(), settingsManager = runtime?.settingsManager) {
   const roots = [join(agentDir, "extensions")];
@@ -3793,22 +3530,8 @@ function discoverStandaloneExtensionPaths(project = activeProject(), settingsMan
   if (settingsManager) paths.push(...extensionPathsForSettings(project, settingsManager));
   return [...new Set(paths.map((path) => resolve(path)).filter((path) => existsSync(path)))];
 }
+/* moved to server/capabilityMetadata.mjs */
 
-function collectExtensionEntries(root) {
-  if (!existsSync(root)) return [];
-  const entries = [];
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
-    const path = join(root, entry.name);
-    if (entry.isFile() && /\.(ts|js)$/.test(entry.name)) {
-      entries.push(path);
-    } else if (entry.isDirectory()) {
-      const index = ["index.ts", "index.js"].find((name) => existsSync(join(path, name)));
-      if (index) entries.push(join(path, index));
-      else entries.push(...collectExtensionEntries(path));
-    }
-  }
-  return entries;
-}
 
 function allDiscoveredSkillsForLoader(resourceLoader) {
   return resourceLoader.getSkills().skills;
@@ -4050,9 +3773,8 @@ async function resolveCapabilityPackageCommand(body) {
  * 包命令的参数补全。走 pi 命令自己注册的 `getArgumentCompletions(prefix)` —— TUI 的
  * CombinedAutocompleteProvider 就是直接调它。没注册的命令返回空列表，composer 静默
  * 收起参数菜单，不当成错误。
- */
-/**
- * 内置命令的唯一实现点（目前只有 `/reload`）。语义对齐 pi 的 `/reload`：重读 settings /
+ *
+ ** 内置命令的唯一实现点（目前只有 `/reload`）。语义对齐 pi 的 `/reload`：重读 settings /
  * prompts / extensions / themes / context files —— `reloadRuntimeTargets` 就是 Pi Desktop
  * 安装/更新包之后走的那条全量重载路径。回合中途不能重载（pi 的 loader 会在半途换掉工具/
  * 提示词），先让用户停掉再试。
@@ -4060,7 +3782,7 @@ async function resolveCapabilityPackageCommand(body) {
 async function runBuiltinCommand(body) {
   const targetRuntime = getRuntimeForRequest(body);
   const plan = planBuiltinCommand(body?.command, body?.args);
-  if (plan.kind === "unknown") {
+  if (plan.kind === "unknown" || !plan.command) {
     throw new Error("Unknown built-in command.");
   }
   if (plan.kind === "invalid") {
@@ -4154,26 +3876,10 @@ async function streamCapabilityPackageCommand(req, res) {
     res.end();
   }
 }
+/* moved to server/capabilityMetadata.mjs */
 
-function packageDisplayName(pkg) {
-  if (!pkg.installedPath) return pkg.source;
-  try {
-    const manifest = JSON.parse(readFileSync(join(pkg.installedPath, "package.json"), "utf8"));
-    return String(manifest.name ?? pkg.source);
-  } catch {
-    return pkg.source;
-  }
-}
+/* moved to server/capabilityMetadata.mjs */
 
-function packageDescription(pkg) {
-  if (!pkg.installedPath) return pkg.source;
-  try {
-    const manifest = JSON.parse(readFileSync(join(pkg.installedPath, "package.json"), "utf8"));
-    return String(manifest.description ?? pkg.source);
-  } catch {
-    return pkg.source;
-  }
-}
 
 function compareCapabilityCards(left, right) {
   return Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || left.name.localeCompare(right.name);
@@ -4264,8 +3970,11 @@ async function setCapabilityPinned(body) {
     };
   } else {
     const parsed = parseMcpCapabilityId(id);
-    const state = parsed ? readMcpRuntimeState(targetRuntime) : null;
-    if (!parsed || !state.servers.some((server) => server.name === parsed.name && server.scope === parsed.scope)) {
+    if (!parsed) {
+      throw new Error("MCP server not found.");
+    }
+    const state = readMcpRuntimeState(targetRuntime);
+    if (!state.servers.some((server) => server.name === parsed.name && server.scope === parsed.scope)) {
       throw new Error("MCP server not found.");
     }
     const key = mcpMetaKey(parsed.scope, parsed.name);
@@ -4703,6 +4412,21 @@ function discoverSkillFromKnownRoots(project, filePath) {
   };
 }
 
+/** @typedef {{ type: "text", text: string }} HostToolTextContent */
+/** @typedef {{ content: HostToolTextContent[], details: Record<string, unknown> }} HostToolResult */
+
+/**
+ * pi 的 `customTools` 形状：字面量 `type: "text"` 必须靠这里的上下文类型收窄成 "text"，
+ * 否则每个 `return { content: [{ type: "text", … }] }` 都会被放宽成 `string` 而与内核类型对不上。
+ *
+ * @param {any} project
+ * @param {{ reload?: () => Promise<unknown> } | null} resourceLoader
+ * @returns {{
+ *   name: string, label: string, description: string, promptSnippet: string, promptGuidelines: string[],
+ *   parameters: any,
+ *   execute: (...args: any[]) => Promise<HostToolResult>,
+ * }[]}
+ */
 function createPiDesktopSkillTools(project, resourceLoader) {
   return [
     {
@@ -4968,6 +4692,7 @@ async function writePiDesktopSkillFile(project, resourceLoader, params) {
   const relativePath = normalizeSkillRelativePath(params?.relativePath ?? "SKILL.md");
   const absolutePath = resolve(skillRoot, relativePath);
   assertWritableSkillFile(skillRoot, absolutePath);
+  /** @type {{ versionId: string | null, snapshotPath: string | null }} */
   let version = { versionId: null, snapshotPath: null };
 
   await withFileMutationQueue(skillRoot, async () => {
@@ -5076,6 +4801,14 @@ async function restorePiDesktopSkillVersion(project, resourceLoader, params) {
   };
 }
 
+/**
+ * @param {{
+ *   scope?: "all" | "user" | "project",
+ *   projectId?: string,
+ *   sourceLoader?: any,
+ * }} [options]
+ * @returns {Promise<{ skillCount: number, skills: any[], reloadedSessionPaths: string[] }>}
+ */
 async function reloadPiDesktopSkills({ scope = "all", projectId, sourceLoader } = {}) {
   const reload = async () => {
     const targets = [...openRuntimes.values()].filter((candidate) =>
@@ -5091,6 +4824,8 @@ async function reloadPiDesktopSkills({ scope = "all", projectId, sourceLoader } 
     };
   };
 
+  // 队列本身只用来串行化（错误已被 catch 掉），返回值给调用方用，所以类型是「随时可 undefined 的 Promise」。
+  /** @type {Promise<{ skillCount: number, skills: any[], reloadedSessionPaths: string[] }>} */
   const queuedReload = skillReloadQueue.then(reload, reload);
   skillReloadQueue = queuedReload.catch(() => undefined);
   return queuedReload;
@@ -5139,45 +4874,12 @@ async function reloadRuntimeTargets(targets, { skillsOnly = false } = {}) {
     await candidate.session.reload();
   }));
 }
+/* moved to server/smallHelpers.mjs */
 
-function skillSummaries(resourceLoader) {
-  return resourceLoader.getSkills().skills.map((skill) => ({
-    name: skill.name,
-    path: skill.filePath,
-  }));
-}
+/* moved to server/skillHelpers.mjs */
 
-function resolveToolPath(input, cwd) {
-  const path = String(input ?? "").trim().replace(/^@+/, "");
-  if (!path) {
-    throw new Error("sourcePath is required.");
-  }
+/* moved to server/skillHelpers.mjs */
 
-  if (path === "~") {
-    return homedir();
-  }
-
-  if (path.startsWith("~/")) {
-    return resolve(homedir(), path.slice(2));
-  }
-
-  return resolve(cwd, path);
-}
-
-function assertSkillDirectory(path) {
-  if (!existsSync(path)) {
-    throw new Error(`Skill source does not exist: ${path}`);
-  }
-
-  const stats = statSync(path);
-  if (!stats.isDirectory()) {
-    throw new Error(`Skill source must be a directory: ${path}`);
-  }
-
-  if (!existsSync(join(path, "SKILL.md"))) {
-    throw new Error(`Skill source must contain SKILL.md: ${path}`);
-  }
-}
 
 function assertWritableSkillRoot(skillRoot) {
   assertWritableSkillTarget(skillRoot);
@@ -5252,45 +4954,8 @@ function isBuiltinSkillPath(path) {
     return false;
   }
 }
+/* moved to server/skillHelpers.mjs */
 
-function directoriesHaveSameContent(left, right) {
-  if (!existsSync(left) || !existsSync(right)) {
-    return false;
-  }
-
-  const leftStats = statSync(left);
-  const rightStats = statSync(right);
-  if (leftStats.isDirectory() !== rightStats.isDirectory()) {
-    return false;
-  }
-
-  if (!leftStats.isDirectory()) {
-    return leftStats.size === rightStats.size && readFileSync(left).equals(readFileSync(right));
-  }
-
-  const leftEntries = readdirSync(left, { withFileTypes: true })
-    .map((entry) => entry.name)
-    .sort();
-  const rightEntries = readdirSync(right, { withFileTypes: true })
-    .map((entry) => entry.name)
-    .sort();
-
-  if (leftEntries.length !== rightEntries.length) {
-    return false;
-  }
-
-  for (let index = 0; index < leftEntries.length; index += 1) {
-    if (leftEntries[index] !== rightEntries[index]) {
-      return false;
-    }
-
-    if (!directoriesHaveSameContent(join(left, leftEntries[index]), join(right, rightEntries[index]))) {
-      return false;
-    }
-  }
-
-  return true;
-}
 
 function getInstalledSkillRoot(project, scope) {
   return scope === "user"
@@ -5340,68 +5005,14 @@ async function snapshotInstalledSkillVersion(project, scope, skillName, skillRoo
 
   return { versionId, snapshotPath };
 }
+/* moved to server/smallHelpers.mjs */
 
-function writeVersionMetadata(versionDir, meta) {
-  mkdirSync(versionDir, { recursive: true });
-  writeFileSync(join(versionDir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
-}
+/* moved to server/skillHelpers.mjs */
 
-function readVersionMetadata(versionDir) {
-  const metaPath = join(versionDir, "meta.json");
-  if (!existsSync(metaPath)) {
-    return null;
-  }
+/* moved to server/skillHelpers.mjs */
 
-  try {
-    const raw = readFileSync(metaPath, "utf8");
-    const meta = JSON.parse(raw);
-    if (!meta || typeof meta !== "object") {
-      return null;
-    }
+/* moved to server/skillHelpers.mjs */
 
-    return {
-      versionId: String(meta.versionId ?? basename(versionDir)),
-      skillName: String(meta.skillName ?? ""),
-      scope: String(meta.scope ?? ""),
-      reason: typeof meta.reason === "string" ? meta.reason : "",
-      createdAt: String(meta.createdAt ?? ""),
-      createdAtMs: Number(meta.createdAtMs ?? 0),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function normalizeSkillRelativePath(value) {
-  const path = String(value ?? "").trim().replace(/^@+/, "");
-  if (!path) {
-    throw new Error("relativePath is required.");
-  }
-
-  const normalized = path.replace(/^\/+/, "");
-  if (!normalized || normalized === "." || normalized === "..") {
-    throw new Error("relativePath is invalid.");
-  }
-
-  if (normalized.split(/[\\/]+/).includes("..")) {
-    throw new Error("relativePath cannot traverse outside the skill directory.");
-  }
-
-  return normalized;
-}
-
-function normalizeSkillFolderName(value, fallback) {
-  const name = String(value ?? fallback ?? "").trim();
-  if (!name) {
-    throw new Error("Skill destination name is required.");
-  }
-
-  if (!/^[A-Za-z0-9._-]+$/.test(name) || name === "." || name === "..") {
-    throw new Error("Skill destination name may only contain letters, numbers, dots, underscores, and hyphens.");
-  }
-
-  return name;
-}
 
 async function setModelConfiguration(body) {
   const targetRuntime = getRuntimeForRequest(body);
@@ -5466,11 +5077,8 @@ function writeCustomModelsConfig(config) {
   chmodSync(tempFile, 0o600);
   renameSync(tempFile, modelsJsonFile);
 }
+/* moved to server/smallHelpers.mjs */
 
-function displayAgentPath(path) {
-  const home = homedir();
-  return path.startsWith(home) ? `~${path.slice(home.length)}` : path;
-}
 
 function customModelsPayload() {
   const config = readCustomModelsConfig();
@@ -5567,20 +5175,8 @@ function providerRows({ withModelsFor = "" } = {}) {
     };
   });
 }
+/* moved to server/modelHelpers.mjs */
 
-/** 一家供应商 OAuth 的显示信息；没有 OAuth 就是 null。字段名对齐 `normalizeProviderCatalog`。 */
-function loginOauthMetadata(provider) {
-  const oauth = provider?.auth?.oauth;
-  if (!oauth || typeof oauth !== "object") {
-    return null;
-  }
-  const name = String(oauth.name ?? "").trim();
-  const label = String(oauth.loginLabel ?? "").trim();
-  if (!name && !label) {
-    return null;
-  }
-  return { name, label, subscription: oauth.isSubscription === true };
-}
 
 /**
  * 填了 key 就把它存下来，然后把这个供应商的模型列表端出来。
@@ -5788,16 +5384,8 @@ async function updateProvider(body) {
     availableModels: listAvailableModels(),
   };
 }
+/* moved to server/httpHelpers.mjs */
 
-function withTimeout(promise, ms, message) {
-  let timer;
-  return Promise.race([
-    Promise.resolve(promise).finally(() => clearTimeout(timer)),
-    new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(message)), ms);
-    }),
-  ]).finally(() => clearTimeout(timer));
-}
 
 function currentDefaultModel() {
   const provider = runtime.settingsManager.getDefaultProvider() ?? "";
@@ -5936,7 +5524,7 @@ async function testCustomModelConnection(body) {
 
   // 不同 api 类型的列表端点/鉴权头都不一样（Anthropic 不认 Bearer，Google 走 x-goog-api-key）。
   const plan = listingPlan(body?.api, baseUrl, apiKey);
-  if (plan.unsupported) {
+  if (plan.unsupported !== undefined) {
     return { ok: false, error: plan.unsupported, endpoint: "" };
   }
 
@@ -5954,7 +5542,7 @@ async function testCustomModelConnection(body) {
       models: modelId && !models.includes(modelId) ? [modelId, ...models] : models,
       listing: modelId && !models.includes(modelId) ? [{ id: modelId, name: prettifyModelId(modelId) }, ...listing] : listing,
     };
-  } catch (error) {
+  } catch (/** @type {any} */ error) {
     const status = error?.status;
     // 不少 OpenAI 兼容网关不实现 /models，404 时用一次最小对话请求探测真实性。
     if (status === 404 && modelId && openAiFamily) {
@@ -5989,35 +5577,8 @@ async function saveProviderApiKey(body) {
   persistModelApiKey(providerId, apiKey);
   return customModelsPayload();
 }
+/* moved to server/modelHelpers.mjs */
 
-async function requestOpenAiJson(endpoint, { apiKey, payload, signal, headers }) {
-  const key = String(apiKey ?? "").trim();
-  const response = await fetch(endpoint, {
-    method: payload ? "POST" : "GET",
-    headers: {
-      // 没 key 就不发空头（同 listingPlan 的规矩）：`Bearer ` 会被严一点的服务端直接 400。
-      ...(headers ?? (key ? { authorization: `Bearer ${key}` } : {})),
-      ...(payload ? { "content-type": "application/json" } : {}),
-    },
-    ...(payload ? { body: JSON.stringify(payload) } : {}),
-    signal,
-  });
-  const text = await response.text().catch(() => "");
-  if (!response.ok) {
-    const error = new Error(`HTTP ${response.status}`);
-    error.status = response.status;
-    error.body = text.slice(0, 300);
-    throw error;
-  }
-  try {
-    return { payload: JSON.parse(text) };
-  } catch {
-    const error = new Error("端点返回的不是 JSON。");
-    error.status = response.status;
-    error.body = text.slice(0, 200);
-    throw error;
-  }
-}
 
 function readAuthCredentials() {
   if (!existsSync(authFile)) {
@@ -6069,14 +5630,8 @@ function normalizePersonalizationStyle(value) {
   const style = String(value ?? "").trim();
   return Object.hasOwn(personalizationStyles, style) ? style : "default";
 }
+/* moved to server/smallHelpers.mjs */
 
-function normalizePersonalizationText(value, maxLength, name) {
-  const text = String(value ?? "").trim();
-  if (text.length > maxLength) {
-    throw new Error(`${name} must be ${maxLength} characters or fewer.`);
-  }
-  return text;
-}
 
 function persistModelApiKey(provider, apiKey) {
   const credentials = readAuthCredentials();
@@ -6112,11 +5667,8 @@ async function setSessionThinkingLevel(body) {
   await targetRuntime.settingsManager.flush();
   return buildSnapshot(targetRuntime);
 }
+/* moved to server/smallHelpers.mjs */
 
-function normalizeThinkingLevel(value) {
-  const thinkingLevel = String(value ?? "").trim();
-  return THINKING_LEVELS.includes(thinkingLevel) ? thinkingLevel : "off";
-}
 
 function resolveModel(provider, modelId) {
   const exact = modelRuntime.getModel(provider, modelId);
@@ -6508,37 +6060,8 @@ function removeSessionRecord(project, resolvedPath) {
     lastSessionPath: project.lastSessionPath === resolvedPath ? undefined : project.lastSessionPath,
   });
 }
+/* moved to server/sessionHelpers.mjs */
 
-/**
- * Rewind the session branch to just before the Nth user message (1-based, the
- * same ordinal `chatBubbleId` uses).
- *
- * pi sessions are append-only: `navigateTree` only moves the leaf pointer, it
- * never deletes entries, so the abandoned turn's token/cost usage keeps
- * accumulating in `getSessionStats()` while the UI (which reads `getBranch()`)
- * stops showing it. `summarize:false` keeps the abandoned branch out of the new
- * context without an extra model call.
- */
-async function rewindSessionToTurn(session, turn) {
-  if (session.isStreaming) {
-    throw new Error("Wait for the current response to finish before editing.");
-  }
-
-  const manager = session.sessionManager;
-  const entries = typeof manager?.getBranch === "function"
-    ? manager.getBranch() ?? []
-    : manager?.getEntries?.() ?? [];
-
-  const targetEntryId = userMessageEntryIdForTurn(entries, turn);
-  if (!targetEntryId) {
-    throw new Error(`Message t${turn}#user is not in the current branch.`);
-  }
-
-  const result = await session.navigateTree(targetEntryId, { summarize: false });
-  if (result?.cancelled) {
-    throw new Error("Editing was cancelled.");
-  }
-}
 
 async function streamPrompt(req, res, requestId, options = {}) {
   const promptStartedAt = Date.now();
@@ -6623,7 +6146,6 @@ async function streamPrompt(req, res, requestId, options = {}) {
     writeEvent({ type: "snapshot", snapshot: await buildSnapshot(activeRuntime, { assumeStreaming: true }) });
   }
   // The thinking block whose end the provider has not reported yet.
-  //
   // pi streams a message's content blocks one after another, so the start of any
   // later block proves the one before it is over. That matters because the
   // OpenAI-compatible providers (`openai-completions` and friends) only finalize
@@ -7019,11 +6541,8 @@ function latestAssistantError(messages) {
 
   return "";
 }
+/* moved to server/smallHelpers.mjs */
 
-function formatAgentError(errorMessage) {
-  const message = String(errorMessage ?? "").trim();
-  return message ? `模型调用停止：${message}` : "模型调用停止：未知错误";
-}
 
 async function stopSession(targetRuntime, options = {}) {
   const activeSession = targetRuntime.session;
@@ -7077,7 +6596,12 @@ async function stopSession(targetRuntime, options = {}) {
   };
 }
 
-async function abortSession(session, { requestId, reason }) {
+/**
+ * @param {any} session 真实类型是内核的 `AgentSession`（无类型保护），只用到 `abort()`。
+ * @param {{ requestId?: string, reason?: string }} [options]
+ * @returns {Promise<void>}
+ */
+async function abortSession(session, { requestId, reason } = {}) {
   const existing = sessionAbortPromises.get(session);
   if (existing) {
     diagnosticLog("session.abort.join", {
@@ -7095,7 +6619,9 @@ async function abortSession(session, { requestId, reason }) {
     ...sessionDetails({ session }),
   });
 
-  const promise = (async () => {
+  /** @type {Promise<void> | undefined} */
+  let promise;
+  promise = (async () => {
     const watchdog = setTimeout(() => {
       diagnosticLog("session.abort.pending", {
         requestId,
@@ -7159,6 +6685,7 @@ function buildAmbientSnapshot(targetRuntime = runtime) {
 
   return {
     ambient: true,
+    protocolVersion: PROTOCOL_VERSION,
     activeSessionPath: session.sessionFile,
     sessionFile: session.sessionFile,
     canPrompt: Boolean(model && modelRuntime.hasConfiguredAuth(model.provider)) && !session.isStreaming,
@@ -7194,38 +6721,8 @@ async function respondToExtensionUiRequest(body) {
 
   throw new Error("Extension UI request not found.");
 }
+/* moved to server/modelHelpers.mjs */
 
-/**
- * The usage part of a snapshot, and of the per-message `context_usage` event.
- *
- * Same two reads pi's own footer uses: the context size comes from
- * `getContextUsage()` (it is only knowable from a settled assistant message,
- * which is why pi refreshes it at `message_end`) and the cumulative totals come
- * from the session stats over the persisted entries.
- *
- * `prepared` lets a caller that already read them - the snapshot builder does -
- * avoid a second full scan.
- */
-function usageFields(targetSession, prepared = {}) {
-  const stats = prepared.stats ?? targetSession.getSessionStats();
-  const entries = prepared.entries ?? targetSession.sessionManager.getEntries();
-  const contextUsage = prepared.contextUsage ?? targetSession.getContextUsage();
-  return {
-    contextTokens: contextUsage?.tokens ?? null,
-    contextWindow: contextUsage?.contextWindow,
-    contextPercent: contextUsage?.percent ?? null,
-    tokenUsage: stats.tokens
-      ? {
-          ...stats.tokens,
-          estimatedCostUsd: stats.cost,
-          reasoning: entries.reduce((total, entry) => {
-            const usage = entry.usage ?? (entry.type === "message" ? entry.message?.usage : undefined);
-            return total + Number(usage?.reasoning ?? 0);
-          }, 0),
-        }
-      : undefined,
-  };
-}
 
 /**
  * Sessions that count as streaming in a snapshot.
@@ -7341,6 +6838,9 @@ async function buildSnapshot(targetRuntime = runtime, options = {}) {
       url: apiBase,
       ready: true,
     },
+    // 边界 `bridge` 的版本声明：渲染进程启动时先比对它，不一致就直接报错，
+    // 而不是让少了/改名的字段以 undefined 的形式静默穿过 UI（见 src/shared/protocol/version.ts）。
+    protocolVersion: PROTOCOL_VERSION,
     projectTrusted: targetRuntime.settingsManager.isProjectTrusted(),
     // 工具开关（codemode）：全局层 + 当前项目层 + 实际生效，和 pi 自己的 defaultTools 同一个算法。
     toolSettings: toolSettingsSnapshotFor(targetRuntime),
@@ -7391,25 +6891,10 @@ function pendingQueues(session, seq = queueSeqBySession.get(session)?.seq ?? 0) 
     seq,
   };
 }
+/* moved to server/sessionHelpers.mjs */
 
-function inferConversationTitle(messages) {
-  const first = messages[0];
-  if (!first) {
-    return "New session";
-  }
+/* moved to server/sessionHelpers.mjs */
 
-  const snippet = deriveSessionTitle({ text: messageToText(first) });
-  return snippet || "New session";
-}
-
-function shouldGenerateInitialTitle(targetRuntime) {
-  if (targetRuntime.session.sessionManager.getSessionName()) {
-    return false;
-  }
-
-  const userMessageCount = displayTranscript(targetRuntime.session).filter((message) => message.role === "user").length;
-  return userMessageCount === 0;
-}
 
 async function generateInitialSessionTitle(targetRuntime) {
   if (targetRuntime.session.sessionManager.getSessionName()) {
@@ -7419,7 +6904,7 @@ async function generateInitialSessionTitle(targetRuntime) {
   const visibleMessages = buildChatBubbles(displayTranscript(targetRuntime.session), { isStreaming: false, toAttachment: toConversationAttachment });
   const userMessage = visibleMessages.find((message) => message.role === "user");
   const assistantMessage = visibleMessages.find((message) => message.role === "assistant");
-  const fallbackTitle = fallbackSessionTitle(messageToText(userMessage)) || "New session";
+  const fallbackTitle = fallbackSessionTitle(userMessage ? messageToText(userMessage) : "") || "New session";
   if (!userMessage || !assistantMessage || !isUsableModel(targetRuntime.session.model)) {
     setSessionTitleIfEmpty(targetRuntime, fallbackTitle);
     return;
@@ -7483,18 +6968,8 @@ function setSessionTitleIfEmpty(targetRuntime, title) {
   persistSessionShell(targetRuntime.session.sessionManager);
   updateSessionStoreFromRuntime(targetRuntime);
 }
+/* moved to server/sessionHelpers.mjs */
 
-function assistantContentText(message) {
-  if (!Array.isArray(message?.content)) {
-    return "";
-  }
-
-  return message.content
-    .filter((part) => part?.type === "text")
-    .map((part) => String(part.text ?? ""))
-    .join("\n")
-    .trim();
-}
 
 /**
  * The submit-time provisional title used when no summary title is available (no
@@ -7504,19 +6979,8 @@ function assistantContentText(message) {
 function fallbackSessionTitle(input) {
   return deriveSessionTitle({ text: String(input ?? "") });
 }
+/* moved to server/sessionHelpers.mjs */
 
-function normalizeGeneratedTitle(input) {
-  // The prompt already bounds the length; whatever the model returns is kept as
-  // written apart from whitespace and label/quote noise. Truncating here would
-  // saw words in half (that is how "worktree多任" happened), so there is
-  // deliberately no length cut on this path.
-  const title = String(input ?? "")
-    .replace(/^["'“”‘’「」『』《》【】\s]+|["'“”‘’「」『』《》【】\s.。!！?？:：,，;；]+$/gu, "")
-    .replace(/^(?:标题|短标题)\s*[:：]\s*/u, "")
-    .replace(/\s+/gu, " ")
-    .trim();
-  return title;
-}
 
 function persistPromptAttachments(activeRuntime, values) {
   const attachmentValues = Array.isArray(values) ? values : [];
@@ -7600,41 +7064,8 @@ function persistPromptAttachments(activeRuntime, values) {
     };
   });
 }
+/* moved to server/attachmentHelpers.mjs */
 
-function appendAttachmentContext(input, displayInput, attachments, messageParts = []) {
-  const hasCapabilityParts = messageParts.some((part) => part?.kind === "capability");
-  if (!attachments.length && !hasCapabilityParts) {
-    return input;
-  }
-
-  const metadata = {
-    displayInput,
-    attachments: attachments.map(({ id, name, mimeType, size, kind, path }) => ({
-      id,
-      name,
-      mimeType,
-      size,
-      kind,
-      path,
-    })),
-    messageParts,
-  };
-
-  return [
-    input,
-    "",
-    ...(attachments.length
-      ? [
-          "Attached files and folders are available at these local paths. Inspect them with the appropriate tools when needed:",
-          ...attachments.map((attachment) => `- ${attachment.name}: ${attachment.path}`),
-          "",
-        ]
-      : []),
-    ATTACHMENT_CONTEXT_START,
-    JSON.stringify(metadata),
-    ATTACHMENT_CONTEXT_END,
-  ].join("\n");
-}
 
 async function normalizePromptMessageParts(activeRuntime, parts, displayInput, attachments) {
   const normalized = normalizeMessageParts(parts, displayInput, attachments);
@@ -7688,54 +7119,15 @@ async function normalizePromptMessageParts(activeRuntime, parts, displayInput, a
     };
   });
 }
+/* moved to server/conversationParts.mjs */
 
-function normalizeMessageParts(parts, displayInput, attachments) {
-  const attachmentIds = new Set(attachments.map((attachment) => attachment.id));
-  const normalized = Array.isArray(parts)
-    ? parts.flatMap((part) => {
-        if (part?.kind === "text") {
-          const text = String(part.text ?? "");
-          return text ? [{ kind: "text", text }] : [];
-        }
-        if (part?.kind === "attachment") {
-          const attachmentId = String(part.attachmentId ?? "");
-          return attachmentIds.has(attachmentId) ? [{ kind: "attachment", attachmentId }] : [];
-        }
-        if (part?.kind === "capability") {
-          const capability = normalizeMessageCapabilityPart(part.capability);
-          return capability ? [{ kind: "capability", capability }] : [];
-        }
-        return [];
-      })
-    : [];
+/* moved to server/attachmentHelpers.mjs */
 
-  if (normalized.length) {
-    return normalized;
-  }
 
-  return [
-    ...(displayInput ? [{ kind: "text", text: displayInput }] : []),
-    ...attachments.map((attachment) => ({ kind: "attachment", attachmentId: attachment.id })),
-  ];
-}
-
-function normalizeMessageCapabilityPart(value) {
-  const source = value && typeof value === "object" ? value : {};
-  const id = String(source.id ?? "").trim();
-  const kind = source.kind === "mcp" ? "mcp" : source.kind === "skill" ? "skill" : "";
-  if (!id || !kind) {
-    return null;
-  }
-
-  return {
-    id,
-    kind,
-    name: String(source.name ?? id).trim() || id,
-    description: String(source.description ?? "").trim(),
-    active: source.active === undefined ? undefined : Boolean(source.active),
-  };
-}
-
+/**
+ * @param {any} attachment
+ * @returns {{ id: string, name: string, mimeType: string, size: number, kind: "directory" | "image" | "file", sourcePath?: string, previewUrl?: string }}
+ */
 function toConversationAttachment(attachment) {
   const mimeType = String(attachment?.mimeType ?? "application/octet-stream");
   // 目录和图片一样是自成一类：旧消息里只有 image/file 两种 kind，所以两边都看。
@@ -7831,50 +7223,18 @@ function sendLocalMedia(res, rawPath, rangeHeader) {
     .on("error", () => res.destroy())
     .pipe(res);
 }
+/* moved to server/attachmentHelpers.mjs */
 
-function sanitizeAttachmentName(name) {
-  return name
-    .normalize("NFKC")
-    .replace(/[\/\\:*?"<>|\u0000-\u001f]/g, "-")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 120) || "attachment";
-}
 
 function sanitizePathPart(value) {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
 }
+/* moved to server/smallHelpers.mjs */
 
-function attachmentOnlyPrompt(attachments) {
-  if (attachments.length === 1) {
-    const only = attachments[0];
-    return `Please review the attached ${only?.kind === "directory" ? "folder" : "file"}: ${only?.name}`;
-  }
-  return `Please review these ${attachments.length} attached files.`;
-}
+/* moved to server/smallHelpers.mjs */
 
-function inferAttachmentMimeType(path) {
-  const mimeTypes = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".bmp": "image/bmp",
-    ".svg": "image/svg+xml",
-  };
-  return mimeTypes[extname(path).toLowerCase()] ?? "application/octet-stream";
-}
+/* moved to server/smallHelpers.mjs */
 
-function partialToolCall(assistantEvent) {
-  const block = assistantEvent.partial?.content?.[assistantEvent.contentIndex];
-  return block?.type === "toolCall" ? block : null;
-}
-
-function toolStreamId(assistantIndex, contentIndex) {
-  const messageIndex = assistantIndex >= 0 ? assistantIndex : "unknown";
-  return `assistant-${messageIndex}-tool-content-${contentIndex}`;
-}
 
 function loadProjects() {
   const stored = readJsonFile(projectsFile);
@@ -7964,32 +7324,10 @@ function touchProject(projectId, patch = {}) {
   projects = projects.map((project) => (project.id === projectId ? { ...project, ...patch, updatedAt: now } : project));
   saveProjects();
 }
+/* moved to server/smallHelpers.mjs */
 
-/** 命令列表接口的响应形状（前端 hook 只认这两个字段）。 */
-function projectCommandsPayload(project) {
-  return {
-    commands: project.commands ?? [],
-    selectedCommandId: project.selectedCommandId ?? "",
-  };
-}
+/* moved to server/sessionHelpers.mjs */
 
-/**
- * 命令的工作目录 = 会话工作区 + 命令自带的相对子目录（monorepo 的 workspace 命令）。
- *
- * `normalizeCommandCwd` 已经挡过 `..` 和绝对路径，这里再确认解析结果真的落在工作区里 ——
- * `projects.json` 是可以被手改的文件，一层保险。
- */
-function resolveCommandCwd(baseCwd, relativeCwd) {
-  const relative = String(relativeCwd ?? "").trim();
-  if (!relative) {
-    return baseCwd;
-  }
-  const resolved = resolve(baseCwd, relative);
-  if (!isPathInside(baseCwd, resolved)) {
-    throw new Error(`命令目录超出项目范围：${relative}`);
-  }
-  return resolved;
-}
 
 /**
  * 把「新任务从哪个模型/思考等级开始」记到项目上（而不是 pi 的全局 settings）。
@@ -8239,15 +7577,8 @@ function listArchivedSessions() {
  */
 const searchDocumentCache = new Map();
 const searchDocumentCacheLimit = 512;
+/* moved to server/smallHelpers.mjs */
 
-/** 结果条数上限：太小一行放不下就翻不到，太大又会把 JSON 撑肥。 */
-function searchResultLimit(raw) {
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value <= 0) {
-    return 30;
-  }
-  return Math.min(100, Math.floor(value));
-}
 
 function readSessionSearchDocument(project, session) {
   const filePath = session.path;
@@ -8533,18 +7864,8 @@ function scheduleWorktreeCleanup(project, resolvedPath) {
       reason: error instanceof Error ? error.message : String(error),
     }));
 }
+/* moved to server/sessionHelpers.mjs */
 
-function persistSessionShell(sessionManager) {
-  const sessionFile = sessionManager.getSessionFile();
-  if (!sessionFile || existsSync(sessionFile)) {
-    return;
-  }
-
-  const entries = [sessionManager.getHeader(), ...sessionManager.getEntries()].filter(Boolean);
-  mkdirSync(dirname(sessionFile), { recursive: true });
-  writeFileSync(sessionFile, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
-  sessionManager.flushed = true;
-}
 
 function assertProjectSessionPath(project, sessionPath) {
   if (!sessionPath) {
@@ -8559,15 +7880,8 @@ function assertProjectSessionPath(project, sessionPath) {
 
   return resolvedPath;
 }
+/* moved to server/sessionHelpers.mjs */
 
-function createProjectId(seed) {
-  const prefix = String(seed ?? "project")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 24) || "project";
-  return `${prefix}-${randomUUID().slice(0, 8)}`;
-}
 
 function projectContextInstruction(project, workspaceCwd = project.cwd) {
   const inWorktree = workspaceCwd !== project.cwd;
@@ -8603,96 +7917,13 @@ function personalizationInstruction() {
 
   return sections.join("\n");
 }
+/* moved to server/smallHelpers.mjs */
 
-function parseTime(value) {
-  if (!value) {
-    return undefined;
-  }
+/* moved to server/smallHelpers.mjs */
 
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : undefined;
-}
+/* moved to server/smallHelpers.mjs */
 
-function readJsonFile(path) {
-  if (!existsSync(path)) {
-    return undefined;
-  }
+/* moved to server/httpHelpers.mjs */
 
-  try {
-    return JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return undefined;
-  }
-}
+/* moved to server/httpHelpers.mjs */
 
-function writeJsonFile(path, value) {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
-}
-
-/**
- * `GET /api/bootstrap` carries the whole conversation (~0.3-0.9 MB) and the client
- * polls it, so an unchanged answer used to cost a full parse + normalise + merge on
- * the main thread every tick. Tag the payload with a content hash and let the client
- * revalidate; nothing else in this server is conditionally requested, which is why
- * this lives beside `sendJson` instead of inside it.
- */
-function sendBootstrapJson(res, req, snapshot) {
-  const body = JSON.stringify(snapshot);
-  // Change detection only - no adversary can choose the input - so md5 is the cheap
-  // and sufficient choice, and it stays cheap on a ~1 MB body.
-  const etag = `"${createHash("md5").update(body).digest("hex")}"`;
-  const headers = {
-    ETag: etag,
-    // `no-cache` (not `no-store`): the client may keep the last body and must be able
-    // to ask whether it is still current.
-    "Cache-Control": "no-cache",
-    // The app runs on another origin, so `fetch` can only read ETag when it is exposed.
-    "Access-Control-Expose-Headers": "ETag",
-    ...corsHeaders(),
-  };
-
-  if (String(req.headers["if-none-match"] ?? "").trim() === etag) {
-    res.writeHead(304, headers);
-    res.end();
-    return;
-  }
-
-  res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", ...headers });
-  res.end(body);
-}
-
-function sendJson(res, status, body) {
-  res.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    ...corsHeaders(),
-  });
-  res.end(JSON.stringify(body));
-}
-
-function sendNdjson(res, events) {
-  res.writeHead(200, {
-    "Content-Type": "application/x-ndjson; charset=utf-8",
-    "Cache-Control": "no-cache, no-transform",
-    Connection: "keep-alive",
-    ...corsHeaders(),
-  });
-  for (const event of events) {
-    res.write(`${JSON.stringify(event)}\n`);
-  }
-  res.end();
-}
-
-async function readJson(req) {
-  const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(chunk);
-  }
-
-  if (chunks.length === 0) {
-    return {};
-  }
-
-  const text = Buffer.concat(chunks).toString("utf8");
-  return text ? JSON.parse(text) : {};
-}

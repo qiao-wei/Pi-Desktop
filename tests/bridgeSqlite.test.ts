@@ -11,6 +11,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 import { openSqliteDatabase, withSqliteConveniences } from "../server/sqlite.mjs";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
 const ROOT = resolve(import.meta.dirname, "..");
 
@@ -130,7 +131,7 @@ test("every module the bridge imports comes from the Node runtime", () => {
 
   assert.deepEqual([...schemes].sort(), ["node"], "server/ 只能导入 node: 内建模块");
 
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+  const source = bridgeSource();
   assert.match(source, /import \{ openSqliteDatabase \} from "\.\/sqlite\.mjs"/);
   assert.match(source, /await openSqliteDatabase\(sessionsDatabaseFile\)/);
 });

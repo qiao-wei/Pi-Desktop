@@ -23,8 +23,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { appSource } from "./lib/appSource.ts";
 
-const appTsx = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appTsx = appSource();
 const editBoxTsx = readFileSync(new URL("../src/features/chat/MessageEditBox.tsx", import.meta.url), "utf8");
 const stepTs = readFileSync(new URL("../src/features/chat/caretMarkerStep.ts", import.meta.url), "utf8");
 const stylesCss = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");

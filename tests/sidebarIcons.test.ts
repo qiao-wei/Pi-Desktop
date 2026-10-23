@@ -13,8 +13,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 const iconSource = readFileSync(new URL("../src/components/sidebarIcons.tsx", import.meta.url), "utf8");
 
 /** Source of a top-level `function name(...) { ... }`, delimited at the next flush-left brace. */
@@ -45,10 +46,10 @@ test("codex-ui's pin / compose / archive paths are copied verbatim", () => {
 });
 
 test("the sidebar imports the codex-ui icon set instead of lucide lookalikes", () => {
-  const sidebar = topLevelFunctionSource(appSource, "ProjectSidebar");
-  const sessionRow = topLevelFunctionSource(appSource, "SidebarSessionRow");
+  const sidebar = topLevelFunctionSource(appSourceText, "ProjectSidebar");
+  const sessionRow = topLevelFunctionSource(appSourceText, "SidebarSessionRow");
 
-  assert.match(appSource, /from "\.\.\/components\/sidebarIcons"/);
+  assert.match(appSourceText, /from "\.\.\/components\/sidebarIcons"/);
 
   // Project row: folder pair, pin indicator, new-session action.
   assert.match(sidebar, /<SidebarFolderIcon/);
@@ -67,7 +68,7 @@ test("the sidebar imports the codex-ui icon set instead of lucide lookalikes", (
 });
 
 test("an expanded project switches to the open folder icon", () => {
-  const sidebar = topLevelFunctionSource(appSource, "ProjectSidebar");
+  const sidebar = topLevelFunctionSource(appSourceText, "ProjectSidebar");
   const rowStart = sidebar.indexOf('"group relative"');
   assert.notEqual(rowStart, -1, "project row markup changed");
   const row = sidebar.slice(rowStart, sidebar.indexOf("</section>", rowStart));
@@ -78,7 +79,7 @@ test("an expanded project switches to the open folder icon", () => {
 });
 
 test("project rows have no selected state", () => {
-  const sidebar = topLevelFunctionSource(appSource, "ProjectSidebar");
+  const sidebar = topLevelFunctionSource(appSourceText, "ProjectSidebar");
   assert.doesNotMatch(sidebar, /isActiveProject/, "the project row must not read the active project");
 
   const rowStart = sidebar.indexOf('"group relative"');

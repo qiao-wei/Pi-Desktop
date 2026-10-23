@@ -47,6 +47,17 @@ export function isBundledShimLink(target) {
  *
  * The filesystem is injected so this can be tested against a real temp directory without patching
  * globals, and so a failure to read one file can never take the bridge down.
+ *
+ * @param {{
+ *   dir: string,
+ *   family?: string | null,
+ *   platform?: NodeJS.Platform,
+ *   readFileSync: typeof import("node:fs").readFileSync,
+ *   readlinkSync?: (path: string) => string,
+ *   rmSync: (path: string, options?: { force?: boolean }) => void,
+ *   warn?: (message: string) => void,
+ *   join: (...parts: string[]) => string,
+ * }} options
  */
 export function removeBundledShims({
   dir,

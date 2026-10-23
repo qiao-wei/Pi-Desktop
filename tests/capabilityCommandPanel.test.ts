@@ -14,8 +14,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { filterPackageCommands } from "../src/shared/capabilityCommands.ts";
 import type { CapabilityCommand } from "../src/types/domain.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 
 const commands: CapabilityCommand[] = [
   { name: "run", description: "Run one subagent through workflowScript" },
@@ -82,9 +83,9 @@ test("没有 description 的命令只按名字匹配，不会因此被漏掉", (
 /* ------------------------- 面板：可滚动 + 看得见 --------------------------- */
 
 test("命令面板按可用高度滚动，滚动条常驻画出来", () => {
-  const start = appSource.indexOf("function CapabilityCommandMenu(");
+  const start = appSourceText.indexOf("function CapabilityCommandMenu(");
   assert.notEqual(start, -1, "CapabilityCommandMenu is gone from App.tsx");
-  const menu = appSource.slice(start, appSource.indexOf("\n}\n", start));
+  const menu = appSourceText.slice(start, appSourceText.indexOf("\n}\n", start));
 
   assert.match(
     menu,
@@ -118,12 +119,12 @@ test("AutoHideScroll 的常驻模式：溢出就画条，且不跟滚动淡出",
 });
 
 test("面板顶部要避开应用标题条，否则搜索框会被 z-[100] 的标题条盖住", () => {
-  const menu = appSource.slice(
-    appSource.indexOf("function CapabilityCommandMenu("),
-    appSource.indexOf("\n}\n", appSource.indexOf("function CapabilityCommandMenu(")),
+  const menu = appSourceText.slice(
+    appSourceText.indexOf("function CapabilityCommandMenu("),
+    appSourceText.indexOf("\n}\n", appSourceText.indexOf("function CapabilityCommandMenu(")),
   );
   const inset = Number(
-    appSource.match(/const CAPABILITY_COMMAND_MENU_TOP_INSET = (\d+);/)?.[1] ?? "0",
+    appSourceText.match(/const CAPABILITY_COMMAND_MENU_TOP_INSET = (\d+);/)?.[1] ?? "0",
   );
 
   // 标题条高度住在 styles.css，实际值拿来比，改了高度忘了改内缩就会红。
@@ -142,8 +143,8 @@ test("面板顶部要避开应用标题条，否则搜索框会被 z-[100] 的�
 });
 
 test("搜索框只在命令多的时候出现，并且用共享的纯函数过滤", () => {
-  const start = appSource.indexOf("function CapabilityCommandMenu(");
-  const menu = appSource.slice(start, appSource.indexOf("\n}\n", start));
+  const start = appSourceText.indexOf("function CapabilityCommandMenu(");
+  const menu = appSourceText.slice(start, appSourceText.indexOf("\n}\n", start));
 
   assert.match(menu, /const searchable = commands\.length > CAPABILITY_COMMAND_SEARCH_THRESHOLD/);
   assert.match(menu, /const matches = filterPackageCommands\(commands, query\)/);

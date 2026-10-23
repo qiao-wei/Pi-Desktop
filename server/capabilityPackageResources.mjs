@@ -117,6 +117,9 @@ export const MAX_RESOURCE_PREVIEW_BYTES = 512 * 1024;
 /**
  * Preview text for the file pane. Binary files are refused instead of dumped into a <pre>, and an
  * oversized file is truncated (the caller only reads up to the cap in the first place).
+ *
+ * @param {Uint8Array | Buffer | null} [buffer]
+ * @param {{ totalBytes?: number }} [options] 真实文件大小（调用方可能只读了前 N 字节）
  */
 export function resourcePreview(buffer, { totalBytes } = {}) {
   const data = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer ?? "");

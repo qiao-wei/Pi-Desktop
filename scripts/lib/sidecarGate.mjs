@@ -94,7 +94,8 @@ export async function waitForCapabilities({
       const response = await fetchImpl(url);
       if (response.ok) {
         const payload = await response.json();
-        if (payload && Array.isArray(payload.packages)) {
+        // `/api/capabilities` 的形状在桥那边定义；这里只要确认它带了包清单就走。
+        if (payload && Array.isArray(/** @type {{ packages?: unknown }} */ (payload).packages)) {
           return { payload, attempts: attempt + 1, elapsedMs: now() - startedAt };
         }
         lastError = new Error(`${url} returned no package list`);

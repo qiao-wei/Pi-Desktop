@@ -14,9 +14,11 @@ import { readFileSync } from "node:fs";
 
 import { en } from "../src/i18n/en.ts";
 import { zh } from "../src/i18n/zh.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
-const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const appSourceText = readAppSource();
+const serverSource = bridgeSource();
 const hookSource = readFileSync(new URL("../src/features/chat/usePiDesktopApp.ts", import.meta.url), "utf8");
 const apiSource = readFileSync(new URL("../src/lib/api.ts", import.meta.url), "utf8");
 const typesSource = readFileSync(new URL("../src/types/domain.ts", import.meta.url), "utf8");
@@ -67,35 +69,35 @@ test("hook 暴露 saveToolSettings，并复用整份 bootstrap 对账路径", ()
 });
 
 test("设置页：一个开关绑全局那一层，拨了立即写，不跟保存按钮绑定", () => {
-  assert.match(appSource, /id="settings-codemode"/);
-  assert.match(appSource, /checked=\{Boolean\(toolSettings\?\.global\)\}/);
-  assert.match(appSource, /onCheckedChange=\{\(checked\) => void toggleCodemode\(checked\)\}/);
-  assert.match(appSource, /state: enabled \? "on" : "off"/);
+  assert.match(appSourceText, /id="settings-codemode"/);
+  assert.match(appSourceText, /checked=\{Boolean\(toolSettings\?\.global\)\}/);
+  assert.match(appSourceText, /onCheckedChange=\{\(checked\) => void toggleCodemode\(checked\)\}/);
+  assert.match(appSourceText, /state: enabled \? "on" : "off"/);
   // 项目覆盖住了要说出来，别让用户以为开关坏了。
-  assert.match(appSource, /toolSettings\?\.project === "off" && toolSettings\.global/);
+  assert.match(appSourceText, /toolSettings\?\.project === "off" && toolSettings\.global/);
   // 「本会话」那行直接看会话里的真值，不拿 effective 糊。
-  assert.match(appSource, /toolSettings\?\.activeTools \?\? \[\]\)\.includes\("codemode"\)/);
+  assert.match(appSourceText, /toolSettings\?\.activeTools \?\? \[\]\)\.includes\("codemode"\)/);
 });
 
 test("编辑项目：三态下拉在弹窗里，提交时才写，且只在真改过时写", () => {
-  assert.match(appSource, /id="sidebar-project-codemode"/);
-  assert.match(appSource, /value=\{dialog\.codemode\}/);
-  assert.match(appSource, /const toolToggleOptions: ReadonlyArray<\{ value: ToolToggleState; labelKey: string \}> = \[/);
+  assert.match(appSourceText, /id="sidebar-project-codemode"/);
+  assert.match(appSourceText, /value=\{dialog\.codemode\}/);
+  assert.match(appSourceText, /const toolToggleOptions: ReadonlyArray<\{ value: ToolToggleState; labelKey: string \}> = \[/);
   for (const value of ["inherit", "on", "off"]) {
-    assert.match(appSource, new RegExp(`value: "${value}", labelKey: "dialog\\.codemode\\.`));
+    assert.match(appSourceText, new RegExp(`value: "${value}", labelKey: "dialog\\.codemode\\.`));
   }
   // 弹窗打开时把当前值带进去（算出来的字段，不在 projects.json 里）。
-  assert.match(appSource, /codemode: project\.codemode \?\? "inherit"/);
+  assert.match(appSourceText, /codemode: project\.codemode \?\? "inherit"/);
   assert.match(
-    appSource,
+    appSourceText,
     /if \(dialog\.codemode !== \(dialog\.project\.codemode \?\? "inherit"\)\) \{\s*try \{\s*await onSaveToolSettings\(\{\s*scope: "project",\s*projectId: dialog\.project\.id,\s*state: dialog\.codemode,\s*\}\)/,
   );
 });
 
 test("两处入口都拿到了 onSaveToolSettings", () => {
-  const wired = appSource.match(/onSaveToolSettings=\{\(input\) => saveToolSettings\(input\)\}/g) ?? [];
+  const wired = appSourceText.match(/onSaveToolSettings=\{\(input\) => saveToolSettings\(input\)\}/g) ?? [];
   assert.equal(wired.length, 2, "设置页和项目侧栏各要一处");
-  assert.match(appSource, /^\s+saveToolSettings,$/m);
+  assert.match(appSourceText, /^\s+saveToolSettings,$/m);
 });
 
 test("新文案中英文都补齐了", () => {

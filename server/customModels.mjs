@@ -8,9 +8,16 @@
  * 本模块只做纯数据变换，不碰磁盘也不碰 runtime，方便单测。
  */
 
+import {
+  DEFAULT_CONTEXT_WINDOW,
+  DEFAULT_MAX_TOKENS,
+  MODEL_ID_PATTERN,
+  normalizeBaseUrl,
+  prettifyModelId,
+  toPositiveInt,
+} from "./modelListing.mjs";
+
 export const CUSTOM_MODEL_API = "openai-completions";
-export const DEFAULT_CONTEXT_WINDOW = 128_000;
-export const DEFAULT_MAX_TOKENS = 8_192;
 export const MAX_PROVIDERS = 40;
 export const MAX_MODELS_PER_PROVIDER = 40;
 
@@ -21,7 +28,6 @@ const MODEL_LABEL_MAX = 60;
 const THINKING_VALUE_MAX = 40;
 const MIN_CONTEXT_WINDOW = 1_024;
 const MAX_CONTEXT_WINDOW = 10_000_000;
-const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/+-]*$/;
 
 /**
  * 价格字段的上限与精度：单位就是「每 100 万 token 多少钱」，不做币种换算，页面上也只打个钱符号。
@@ -364,6 +370,8 @@ export function normalizeCustomModelInputs(body, options = {}) {
 /**
  * 批量写入：整批在内存里折叠完再交给调用方落盘，中途报错就什么都不写。
  * `target`（编辑某一行）只对单条有意义，批量新增时不要传。
+ *
+ * @param {any} config @param {any[]} entries @param {{ target?: any, seeds?: any }} [options]
  */
 export function upsertCustomModels(config, entries, { target, seeds } = {}) {
   let next = config;
@@ -648,31 +656,8 @@ export function isProbablyKeyValue(value) {
   return !/\s/.test(value);
 }
 
-export function normalizeBaseUrl(value) {
-  const raw = String(value ?? "").trim();
-  if (!raw) {
-    throw new Error("Base URL is required.");
-  }
-  let url;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error("Base URL is not a valid address, e.g. https://api.example.com/v1.");
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Base URL must be http or https.");
-  }
-  return raw.replace(/\/+$/, "");
-}
 
 /** 模型 id → 展示名：`qwen3.7-plus` → `Qwen3.7 Plus`。 */
-export function prettifyModelId(id) {
-  return String(id ?? "")
-    .split(/[-_ ]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
 
 const RESERVED_PROVIDER_IDS = new Set(["unknown", "radius"]);
 
@@ -714,9 +699,8 @@ function stableHash(value) {
  *
  * `entry` 是 `normalizeCustomModelInput` 的结果；`target` = `{ providerId, model }` 表示编辑已有行。
  * 只动目标 provider，其余 provider 原样保留；provider 上不认识的字段（headers/compat/oauth…）也原样保留。
- */
-/**
- * 这条草稿最终落到哪个 provider 上。`upsertCustomModel` 和路由共用它，否则
+ *
+ ** 这条草稿最终落到哪个 provider 上。`upsertCustomModel` 和路由共用它，否则
  * “要不要填 API Key”按一个 id 判、写入却落在另一个 id 上。
  *
  * 只有「编辑已有行」或「同名同地址」才允许落到同一个 provider 上；地址不同就是另一个
@@ -726,11 +710,12 @@ export function resolveProviderTarget(config, entry, target) {
   const providers = config?.providers ?? {};
   const requestedId = String(target?.providerId || entry.providerId || "").trim();
   const found = requestedId ? findProvider({ providers }, requestedId) : undefined;
-  const sameEndpoint = Boolean(found)
-    && String(found.provider?.baseUrl ?? "").replace(/\/+$/, "") === entry.baseUrl;
+  const sameEndpoint = found
+    ? String(found.provider?.baseUrl ?? "").replace(/\/+$/, "") === entry.baseUrl
+    : false;
   // 内置供应商在 models.json 里故意不写 baseUrl（写了会盖到该家所有模型上），
   // 所以第二条只能按 id 认，否则批量添加会给自己造出一个 anthropic-2。
-  const matches = Boolean(found) && (target?.providerId || entry.providerMode === "builtin" || sameEndpoint);
+  const matches = Boolean(found) && Boolean(target?.providerId || entry.providerMode === "builtin" || sameEndpoint);
   const existing = matches ? found : undefined;
   // 内置供应商的 id 是 pi 目录里的真 id，不能按名字重算：name 与 id 不一致的那些
   // （Kimi For Coding → kimi-coding、OpenAI Codex (legacy) → openai-codex、Z.AI → zai…）
@@ -743,6 +728,7 @@ export function resolveProviderTarget(config, entry, target) {
   };
 }
 
+/** @param {any} config @param {any} entry @param {{ target?: any, seed?: any }} [options] */
 export function upsertCustomModel(config, entry, { target, seed } = {}) {
   const providers = { ...(config?.providers ?? {}) };
   const next = { ...config, providers };
@@ -954,6 +940,9 @@ export function removeCustomModel(config, { providerId, model }) {
  *
  * 模型行里显式写了 baseUrl/api 的（从目录批加过来那种）必须跟着改，否则 provider 换了地址、
  * 那些行仍打老地址 —— pi 是 `definition.baseUrl ?? providerConfig.baseUrl`，行级优先。
+ *
+  * @param {any} config
+ * @param {{ providerId?: string, name?: string, baseUrl?: string, api?: string }} [settings]
  */
 export function updateProviderSettings(config, { providerId, name, baseUrl, api } = {}) {
   const providers = { ...(config?.providers ?? {}) };
@@ -991,339 +980,6 @@ export function updateProviderSettings(config, { providerId, name, baseUrl, api 
   };
   return { config: next, providerId: id, name: nextName, baseUrl: nextBaseUrl, api: nextApi };
 }
-
-/**
- * 拉列表/验 key 用哪个 key：这一轮填的优先，留空就退到已存的那一份。
- *
- * “留空 = 用存的那份”这件事散在几个入口里写过好几遍，抽出来才测得到（也才有机会一致）。
- */
-export function resolveListingApiKey({ apiKey, storedKey } = {}) {
-  const typed = String(apiKey ?? "").trim();
-  return typed || String(storedKey ?? "").trim();
-}
-
-/** `GET {baseUrl}/models` —— OpenAI 兼容端点的模型列表地址。 */
-export function modelsListUrl(baseUrl) {
-  return `${normalizeBaseUrl(baseUrl)}/models`;
-}
-
-/** pi 认的 api 类型（见 pi.dev/docs/latest/custom-provider 的 API Types 表）。 */
-export const LISTING_API_TYPES = [
-  "openai-completions",
-  "openai-responses",
-  "openai-codex-responses",
-  "mistral-conversations",
-  "anthropic-messages",
-  "google-generative-ai",
-  "azure-openai-responses",
-  "google-vertex",
-  "bedrock-converse-stream",
-];
-
-/** 能靠一个 HTTP GET 拿到列表的类型 → 列表端点的那一段路径（base 里已经有了就不重复拼）。 */
-const LISTING_ENDPOINTS = {
-  "openai-completions": { segment: "models", auth: "bearer" },
-  "openai-responses": { segment: "models", auth: "bearer" },
-  "openai-codex-responses": { segment: "models", auth: "bearer" },
-  "mistral-conversations": { segment: "models", auth: "bearer" },
-  // Anthropic 不认 Bearer：要 x-api-key + anthropic-version，列表在 /v1/models。
-  "anthropic-messages": { segment: "v1/models", auth: "anthropic" },
-  // Google 的列表在 /v1beta/models，key 走 x-goog-api-key。
-  "google-generative-ai": { segment: "v1beta/models", auth: "google" },
-};
-
-const ANTHROPIC_VERSION = "2023-06-01";
-
-/** 拿不了列表的类型和给用户的说法（Bedrock 是 SigV4、Azure 要 api-version、Vertex 要 ADC）。 */
-const LISTING_UNSUPPORTED = {
-  "azure-openai-responses":
-    "Azure OpenAI lists models through its deployments API, which needs an api-version. Type the model name instead.",
-  "google-vertex":
-    "Vertex AI lists models with Google credentials (ADC), not an API key. Type the model name instead.",
-  "bedrock-converse-stream":
-    "Bedrock lists models through AWS SigV4, not an API key. Type the model name instead.",
-};
-
-/** 拼列表地址：base 里常常已经带了 `/v1`、`/v1beta`，那就只补最后一段，别拼出 `/v1/v1/models`。 */
-function joinSegment(base, segment) {
-  if (base.endsWith(`/${segment}`) || base === segment) {
-    return base;
-  }
-  const parts = segment.split("/");
-  const last = parts[parts.length - 1];
-  const prefix = parts.slice(0, -1).join("/");
-  if (prefix && base.endsWith(`/${prefix}`)) {
-    return `${base}/${last}`;
-  }
-  return `${base}/${segment}`;
-}
-
-/**
- * 按 api 类型算出「怎么取模型列表」：URL、鉴权头、解析器。
- * 返回 `{ url, headers, extract }`，或者 `{ unsupported: "人话" }`。
- */
-export function listingPlan(api, baseUrl, apiKey = "") {
-  const kind = String(api ?? "").trim() || "openai-completions";
-  const base = normalizeBaseUrl(baseUrl);
-  const endpoint = LISTING_ENDPOINTS[kind];
-  if (!endpoint) {
-    return { api: kind, unsupported: LISTING_UNSUPPORTED[kind] ?? `Model listing is not supported for api "${kind}".` };
-  }
-  const hasKey = Boolean(String(apiKey ?? "").trim());
-  // 没 key 就不发鉴权头：本地网关（Ollama / vLLM / LM Studio）的 `/models` 不要 key，
-  // 而 `Bearer ` 这种空头会被相实的服务端一句 400 打回来，看起来像“拉不到列表”。
-  const headers = !hasKey
-    ? {}
-    : endpoint.auth === "anthropic"
-      ? { "x-api-key": apiKey, "anthropic-version": ANTHROPIC_VERSION }
-      : endpoint.auth === "google"
-        ? { "x-goog-api-key": apiKey }
-        : { authorization: `Bearer ${apiKey}` };
-  return { api: kind, url: joinSegment(base, endpoint.segment), headers, extract: (payload) => parseModelListing(payload, kind) };
-}
-
-function toInt(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
-}
-
-function listingEntries(payload) {
-  if (Array.isArray(payload)) return payload;
-  for (const key of ["data", "models", "result", "deployments", "foundationModels"]) {
-    if (Array.isArray(payload?.[key])) return payload[key];
-  }
-  return [];
-}
-
-/** 各家 `/models` 的形状都不一样，统一摊成 `{id,name,contextWindow,maxTokens,reasoning,input}`。 */
-export function parseModelListing(payload, api = "openai-completions") {
-  const seen = new Set();
-  const models = [];
-  for (const raw of listingEntries(payload)) {
-    const entry = typeof raw === "string" ? { id: raw } : (raw ?? {});
-    const nameField = typeof entry.name === "string" ? entry.name : "";
-    // Google 用 `models/gemini-x` 当资源名，写进 models.json 的得是去掉前缀的 id。
-    const rawId = String(entry.id ?? entry.model ?? (nameField.includes("/") ? nameField.split("/").pop() : nameField) ?? "").trim();
-    if (!rawId || !MODEL_ID_PATTERN.test(rawId) || seen.has(rawId)) continue;
-    // Vertex/Bedrock 的列表里会混进没有推理版本的东西，Google 用 supportedGenerationMethods 标。
-    const methods = Array.isArray(entry.supportedGenerationMethods) ? entry.supportedGenerationMethods : null;
-    if (methods && !methods.some((method) => method === "generateContent" || method === "streamGenerateContent")) {
-      continue;
-    }
-    seen.add(rawId);
-    const inputTypes = Array.isArray(entry.inputTypes) ? entry.inputTypes : (Array.isArray(entry.input_types) ? entry.input_types : null);
-    const display = String(entry.displayName ?? entry.display_name ?? entry.name ?? "").trim();
-    models.push({
-      id: rawId,
-      name: display && display !== rawId ? display : prettifyModelId(rawId),
-      contextWindow: toInt(entry.contextWindow ?? entry.context_window ?? entry.inputTokenLimit ?? entry.input_token_limit),
-      maxTokens: toInt(entry.maxTokens ?? entry.max_tokens ?? entry.outputTokenLimit ?? entry.output_token_limit),
-      reasoning: entry.reasoning === true || entry.supports_reasoning === true,
-      input: inputTypes ? inputTypes.map((type) => String(type).toLowerCase()) : (Array.isArray(entry.input) ? entry.input : ["text"]),
-      api: String(entry.api ?? (api || "")),
-    });
-  }
-  return models;
-}
-
-/** `POST {baseUrl}/chat/completions` —— 探测用的最小请求地址。 */
-export function chatCompletionsUrl(baseUrl) {
-  return `${normalizeBaseUrl(baseUrl)}/chat/completions`;
-}
-
-/** 从 `/models` 的响应里只取 id 列表（老调用方还在用，形状判断都并到 parseModelListing 里了）。 */
-export function parseModelIds(payload) {
-  return parseModelListing(payload).map((model) => model.id);
-}
-
-/** 测试连接时，端点报的错直接给用户看，别翻译成第二种语言。 */
-export function describeTestFailure(status, body) {
-  const detail = readableFailureBody(body);
-  if (status === 401 || status === 403) {
-    return "Authentication failed. Check the API key.";
-  }
-  if (status === 404) {
-    // 404 最常见的错法是 Base URL 少了 /v1；把两边的话都说上，比只贴一堆 JSON 强。
-    return detail
-      ? `The endpoint returned no model list (404): ${detail}. Check whether the Base URL should end with /v1.`
-      : "The endpoint returned no model list (404). Check whether the Base URL should end with /v1.";
-  }
-  return detail || `Request failed (HTTP ${status}).`;
-}
-
-/** 服务端报错体里能看的那一句话：`{"error":{"message":"..."}}` 比整挡 JSON 有用。 */
-function readableFailureBody(body) {
-  const raw = String(body ?? "").trim().slice(0, 200);
-  if (!raw || (!raw.startsWith("{") && !raw.startsWith("["))) {
-    return raw;
-  }
-  try {
-    const parsed = JSON.parse(raw);
-    const error = parsed?.error ?? parsed;
-    const message = typeof error === "string" ? error : (error?.message ?? error?.msg ?? parsed?.message ?? "");
-    return String(message ?? "").trim() || raw;
-  } catch {
-    return raw;
-  }
-}
-
-/**
- * 探测失败的统一文案。
- *
- * 没拿到状态码就是没连上：undici 只会报一个 `fetch failed`，真正的原因在 `error.cause` 里
- * （ENOTFOUND / ECONNREFUSED / 证书…），不拼上去用户根本无从下手。
- */
-export function describeConnectionFailure(baseUrl, error) {
-  if (error?.status) {
-    return describeTestFailure(error.status, error.body);
-  }
-  const host = safeHost(baseUrl);
-  if (error?.name === "TimeoutError") {
-    return `Connection to ${host} timed out.`;
-  }
-  const reason = error?.cause?.message || error?.message || "network unreachable";
-  return `Cannot reach ${host}: ${reason}`;
-}
-
-function safeHost(baseUrl) {
-  try {
-    return new URL(String(baseUrl)).host;
-  } catch {
-    return String(baseUrl ?? "该地址");
-  }
-}
-
-/**
- * 自己打一次端点的列表接口。
- *
- * pi 的 runtime 只会替**内置**供应商拉远端列表（它们的 provider 带了 `refreshModels`），
- * `models.json` 里用户自己加的 provider 没这个能力 —— 那种情况下想看到端点真实有哪些模型，
- * 只能按 api 类型 GET 一次。`fetchImpl` 留着给测试注入假响应。
- */
-export async function requestModelListing({
-  api,
-  baseUrl,
-  apiKey,
-  fetchImpl = globalThis.fetch,
-  timeoutMs = 10_000,
-} = {}) {
-  // 地址缺失/写坏时 `listingPlan` 会抛。这里把它兑成一句 `{ok:false, error}`：
-  // 报 500 的话前端红框里就是一整串 `"error":"..."` 的 JSON，跟“拉不到列表”看不出关系。
-  let plan;
-  try {
-    plan = listingPlan(api, baseUrl, apiKey);
-  } catch (planError) {
-    return {
-      ok: false,
-      api: String(api ?? "").trim() || "openai-completions",
-      endpoint: "",
-      models: [],
-      error: planError instanceof Error ? planError.message : String(planError),
-    };
-  }
-  if (plan.unsupported) {
-    return { ok: false, api: plan.api, endpoint: "", models: [], error: plan.unsupported };
-  }
-  if (!String(apiKey ?? "").trim()) {
-    return {
-      ok: false,
-      api: plan.api,
-      endpoint: plan.url,
-      models: [],
-      error: "No API key saved for this provider yet.",
-    };
-  }
-  try {
-    const response = await fetchImpl(plan.url, { headers: plan.headers, signal: AbortSignal.timeout(timeoutMs) });
-    const text = await response.text().catch(() => "");
-    if (!response.ok) {
-      return {
-        ok: false,
-        api: plan.api,
-        endpoint: plan.url,
-        models: [],
-        status: response.status,
-        error: describeTestFailure(response.status, text),
-      };
-    }
-    let payload;
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      return {
-        ok: false,
-        api: plan.api,
-        endpoint: plan.url,
-        models: [],
-        error: "The model listing endpoint did not return JSON.",
-      };
-    }
-    const models = plan.extract(payload);
-    if (!models.length) {
-      // 空列表不算成功：多半是网关不实现这个接口，直接显示空会让用户以为端点什么都没给。
-      return {
-        ok: false,
-        api: plan.api,
-        endpoint: plan.url,
-        models: [],
-        error: "The model listing endpoint returned no models.",
-      };
-    }
-    return { ok: true, api: plan.api, endpoint: plan.url, models };
-  } catch (error) {
-    return { ok: false, api: plan.api, endpoint: plan.url, models: [], error: describeConnectionFailure(baseUrl, error) };
-  }
-}
-
-/**
- * 把端点报的列表和文件里已经存着的行并成弹窗要的形状。
- *
- * 两端都没给的字段用默认值补，否则表单里会出现 0；端点没报出来的老模型也必须留着 ——
- * 看不见就勾不掉，等于凭空消失。
- */
-export function mergeListingRows({ listing, localModels, api = "", baseUrl = "" } = {}) {
-  const localById = new Map(
-    (Array.isArray(localModels) ? localModels : [])
-      .map((model) => [String(model?.id ?? "").trim(), model])
-      .filter(([id]) => id),
-  );
-  const seen = new Set();
-  const rows = [];
-  const build = (source, local) => {
-    const id = String(source?.id ?? local?.id ?? "").trim();
-    if (!id || !MODEL_ID_PATTERN.test(id) || seen.has(id)) {
-      return;
-    }
-    seen.add(id);
-    const contextWindow = toPositiveInt(source?.contextWindow) ?? toPositiveInt(local?.contextWindow) ?? DEFAULT_CONTEXT_WINDOW;
-    const maxTokens = Math.min(
-      toPositiveInt(source?.maxTokens) ?? toPositiveInt(local?.maxTokens) ?? DEFAULT_MAX_TOKENS,
-      contextWindow,
-    );
-    const input = Array.isArray(source?.input) ? source.input : (Array.isArray(local?.input) ? local.input : null);
-    const name = String(source?.name ?? "").trim() || String(local?.name ?? "").trim() || prettifyModelId(id);
-    rows.push({
-      id,
-      name,
-      api: String(source?.api ?? "").trim() || String(local?.api ?? "").trim() || api,
-      baseUrl: String(source?.baseUrl ?? "").trim() || String(local?.baseUrl ?? "").trim() || baseUrl,
-      contextWindow,
-      maxTokens,
-      reasoning: source?.reasoning === true || local?.reasoning === true,
-      supportsImages: input ? input.some((type) => String(type).toLowerCase().includes("image")) : Boolean(local?.supportsImages),
-    });
-  };
-  for (const model of Array.isArray(listing) ? listing : []) {
-    build(model, localById.get(String(model?.id ?? "").trim()));
-  }
-  for (const model of Array.isArray(localModels) ? localModels : []) {
-    build(null, model);
-  }
-  // 和 normalizeProviderCatalog 一样按 id 排：两家供应商切来切去时列表顺序不该变。
-  return rows.sort((left, right) => left.id.localeCompare(right.id));
-}
-
-/* ------------------------------------------------------- 内置供应商目录 */
 
 /**
  * 把 runtime 里的 provider 摊成接口能返回的形状。
@@ -1399,7 +1055,26 @@ function nonNegativeInt(value, fallback) {
   return Number.isFinite(number) && number >= 0 ? Math.trunc(number) : fallback;
 }
 
-function toPositiveInt(value) {
-  const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? Math.trunc(number) : undefined;
-}
+// 搬去 `modelListing.mjs` 的入口在这里再导出一次：既有调用方（server/index.mjs 与几个测试）仍从本
+// 模块拿，不必因为一次拆分改 import 路径。依赖方向单向：本模块 import modelListing，反向不 import。
+export {
+  ANTHROPIC_VERSION,
+  DEFAULT_CONTEXT_WINDOW,
+  DEFAULT_MAX_TOKENS,
+  normalizeBaseUrl,
+  prettifyModelId,
+  toPositiveInt,
+  LISTING_ENDPOINTS,
+  LISTING_UNSUPPORTED,
+  chatCompletionsUrl,
+  describeConnectionFailure,
+  describeTestFailure,
+  joinSegment,
+  listingPlan,
+  mergeListingRows,
+  modelsListUrl,
+  parseModelIds,
+  parseModelListing,
+  requestModelListing,
+  resolveListingApiKey,
+} from "./modelListing.mjs";

@@ -21,8 +21,9 @@ import {
   stepMatchIndex,
   type SessionSearchDocument,
 } from "../src/shared/sessionSearch.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
-const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const serverSource = bridgeSource();
 
 test("normalizeSearchQuery 只去首尾空白，空查询视为不搜", () => {
   assert.equal(normalizeSearchQuery("  hello  "), "hello");

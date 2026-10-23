@@ -20,9 +20,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { appSource } from "./lib/appSource.ts";
 
 const stylesCss = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");
-const appTsx = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appTsx = appSource();
 const modelSelectTsx = readFileSync(
   new URL("../src/features/models/ComposerModelSelect.tsx", import.meta.url),
   "utf8",

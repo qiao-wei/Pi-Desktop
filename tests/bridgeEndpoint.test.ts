@@ -14,6 +14,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
 const rules = await import(pathToFileURL(resolve(import.meta.dirname, "../server/bridgeListen.mjs")).href);
 const repoRoot = resolve(import.meta.dirname, "..");
@@ -93,7 +94,7 @@ test("a bridge that dies or stays quiet fails the watcher instead of hanging the
 });
 
 test("the bridge recomputes every url from the port it actually bound", () => {
-  const source = read("server/index.mjs");
+  const source = bridgeSource();
   const listen = source.slice(source.indexOf("function startListening"), source.indexOf("startListening(requestedPort)"));
 
   assert.match(listen, /server\.listen\(listenPort, host, \(\) => \{/);
@@ -166,10 +167,19 @@ test("渲染层在模块加载时定一次基地址，优先级里必须有 dev 
   }
 
   // 请求路径上不能再出现“每请求解析 / 轮询等注入”：那是把错地址放大成卡死的地方。
+  // 地址常量与出厂传输现在都在适配层装配（见 src/lib/bridge/transport.ts），所以两边一起看。
   const source = read("src/lib/api.ts");
+  const transport = read("src/lib/bridge/transport.ts");
   assert.ok(!/currentApiBase|resolveApiBase/.test(source), "per-request resolution turns a wrong port into a hang");
   assert.ok(!/setTimeout\(resolve, 100\)/.test(source), "the renderer must not poll for an injected address");
-  assert.ok(source.includes("const base = API_BASE;"), "请求要走常量地址");
+  assert.ok(
+    source.includes("setBridgeTransport(createHttpBridgeTransport(API_BASE))"),
+    "请求要走加载时定好的常量地址（装配一次，之后只认 transport）",
+  );
+  assert.ok(
+    transport.includes("fetch(`${apiBase}${path}`"),
+    "传输层只读构造时拿到的 apiBase，不自己重新解析地址",
+  );
 });
 
 test("tauri 先把地址定下来，再开窗", () => {

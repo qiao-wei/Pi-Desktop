@@ -29,13 +29,16 @@ import {
 } from "./lib/cssTokens.ts";
 import { codexThemeCss, defaultThemeCss, orderedThemeIds, themeSourcesCss } from "./lib/themeSources.ts";
 import { normalizeAppearance } from "../src/lib/ui-preferences.ts";
+import { appSource } from "./lib/appSource.ts";
 
 /** Tailwind 骨架：layer 声明、`@theme` 映射、@custom-variant。主题 token 已搬到
  *  `src/themes/<id>/theme.css`（见 `src/themes/README.md`）。 */
 const tailwindCss = readFileSync(new URL("../src/app/tailwind.css", import.meta.url), "utf8");
 const stylesCss = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");
 const prefsSource = readFileSync(new URL("../src/lib/ui-preferences.ts", import.meta.url), "utf8");
-const appTsx = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+// `isMacPlatform` 现在住在拆出来的 src/app/TitleBarChrome.tsx —— 按整个 src/app 读文本，
+// 免得每次合法拆分都把这条断言弄红。
+const appTsx = appSource();
 const indexHtml = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 
 /* ------------------------------------------------------------------ 结构守卫 */

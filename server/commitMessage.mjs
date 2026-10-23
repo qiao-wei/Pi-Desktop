@@ -4,9 +4,8 @@
  *
  * 单独放一个文件是为了可测：`node --test` 直接盖 prompt 的组装和输出的规范化，不碰模型。
  * 真正的模型调用在 `server/index.mjs` 的路由里（`modelRuntime.complete`，用当前会话的模型）。
- */
-
-/** 提交信息长度上限（与 `server/gitInfo.mjs` 的校验一致，模型输出也按这个截）。 */
+ *
+ *提交信息长度上限（与 `server/gitInfo.mjs` 的校验一致，模型输出也按这个截）。 */
 export const MAX_GENERATED_COMMIT_MESSAGE_CHARS = 2000;
 
 const SYSTEM_PROMPTS = {
@@ -30,7 +29,23 @@ const SYSTEM_PROMPTS = {
   ].join("\n"),
 };
 
-/** 把 diff 上下文拼成一次性的 user 消息。 */
+/**
+ * 把 diff 上下文拼成一次性的 user 消息。
+ *
+ * 形状照实际用法写：`files` 是 `git status` 的条目（含重命名前的路径与增删行数），
+ * `newFiles` 是未跟踪文件的内容，`patch` 是「工作区 vs HEAD」的补丁文本。
+ *
+ * @param {{
+ *   locale?: "zh" | "en",
+ *   context?: {
+ *     files?: { path: string, status: string, origPath?: string, added?: number, removed?: number }[],
+ *     newFiles?: { path: string, text?: string, truncated?: boolean }[],
+ *     skippedUntrackedDirs?: string[],
+ *     branch?: string,
+ *     patch?: string,
+ *   },
+ * }} [options]
+ */
 export function buildCommitMessagePrompt({ locale = "en", context } = {}) {
   const language = locale === "zh" ? "zh" : "en";
   const lines = [];

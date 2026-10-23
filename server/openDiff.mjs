@@ -48,7 +48,10 @@ const JETBRAINS_IDES = [
  * IDE 的 diff 参数。都是"两个文件路径"的形态，唯一分歧是要不要 `--diff`：
  * VS Code 家族 / Zed / Sublime 是 flag，JetBrains 系是 `diff` 子命令。
  *
- * @param {"vscode"|"zed"|"sublime"|"jetbrains"} kind
+ * @param {string} kind 启动器表里的形状标记（`vscode` / `zed` / `sublime` / 其它按 JetBrains 处理）
+ * @param {string} left
+ * @param {string} right
+ * @returns {string[]}
  */
 export function diffArgs(kind, left, right) {
   return kind === "jetbrains" ? ["diff", left, right] : ["--diff", left, right];
@@ -232,6 +235,11 @@ export function sweepDiffTemps({ baseDir = tmpdir(), now = Date.now(), maxAgeMs 
 /**
  * detached 启动，等到 `spawn` 事件就返回：只证明进程起来了，不等它退出。
  * GUI 编辑器常常"把请求转交给已运行的实例后立刻退出"，等退出等于把 HTTP 请求卡住。
+ *
+ * @param {string} command
+ * @param {string[]} args
+ * @param {{ spawnImpl?: typeof import("node:child_process").spawn }} [options]
+ * @returns {Promise<void>}  resolve 不带值：这里只回答「起来了没有」
  */
 export function launchDetached(command, args, { spawnImpl = spawn } = {}) {
   return new Promise((resolve, reject) => {
@@ -276,6 +284,20 @@ function activateApp(appName, spawnImpl) {
  * - 左侧 = `HEAD:<path>`（重命名取旧路径）。HEAD 里没有这个路径（未跟踪 / 新暂存 / 空仓库）
  *   就是一个空文件，IDE 里于是显示为"整篇都是新增"。
  * - 右侧 = 工作区里的真实文件；已删除时是一个空文件，于是显示为"整篇都是删除"。
+ *
+  * @param {string} cwd
+ * @param {string} filePath
+ * @param {{
+ *   execImpl?: typeof import("node:child_process").execFile,
+ *   timeoutMs?: number,
+ *   platform?: NodeJS.Platform,
+ *   homeDir?: string,
+ *   env?: NodeJS.ProcessEnv,
+ *   exists?: (path: string) => boolean,
+ *   baseDir?: string,
+ *   now?: number,
+ *   spawnImpl?: typeof import("node:child_process").spawn,
+ * }} [options]
  */
 export async function openGitFileDiff(
   cwd,
@@ -357,6 +379,19 @@ export async function openGitFileDiff(
  * 冲突文件需要继续编辑冲突标记，diff 帮不上忙；入口是弹层文件列表里对冲突行的双击。
  * 校验与 `openGitFileDiff` 共用同一条事实（路径必须是 git 刚报出来的改动之一），启动器也用
  * 同一张表（`code <file>` / `zed <file>` / `idea <file>` 都是打开文件本身）。
+ *
+  * @param {string} cwd
+ * @param {string} filePath
+ * @param {{
+ *   execImpl?: typeof import("node:child_process").execFile,
+ *   timeoutMs?: number,
+ *   platform?: NodeJS.Platform,
+ *   homeDir?: string,
+ *   env?: NodeJS.ProcessEnv,
+ *   exists?: (path: string) => boolean,
+ *   now?: number,
+ *   spawnImpl?: typeof import("node:child_process").spawn,
+ * }} [options]
  */
 export async function openGitFileInIde(
   cwd,

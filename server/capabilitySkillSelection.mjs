@@ -16,9 +16,8 @@
  * instant) and we decide per skill from the current config + selection. Nothing is
  * precomputed, so nothing can go stale; and a managed skill the pre-scan never saw fails
  * open (kept + reported) instead of disappearing.
- */
-
-/** The id Pi Desktop keys skill selection by (same as pi's skill name). */
+ *
+ *The id Pi Desktop keys skill selection by (same as pi's skill name). */
 export function skillSelectionId(skill) {
   return String(skill?.name ?? "").trim();
 }
@@ -43,6 +42,13 @@ export function skillEnabledBySelection(policy, skillId) {
  * `inventorySkills` is the pre-resolved (trust-aligned) inventory; its managed ids are the
  * ids the selection may judge. Anything pi discovers beyond that is a divergence and is
  * handled by `applySkillSelection`'s fail-open branch.
+ *
+ * @param {{
+ *   selection?: { enabledSkills?: string[], disabledSkills?: string[] },
+ *   config?: { skills?: Record<string, { defaultEnabled?: boolean }> },
+ *   inventorySkills?: { name?: string, filePath?: string }[],
+ *   isManaged?: (filePath: string) => boolean,
+ * }} [options]
  */
 export function createSkillSelectionPolicy({ selection, config, inventorySkills = [], isManaged = () => true } = {}) {
   const inventoryIds = new Set();
@@ -84,6 +90,14 @@ export function replaceSkillSelectionPolicy(policy, next) {
  *   Unmanaged skills (package skills, etc.) pass through to the other guards.
  * - A managed skill absent from `policy.inventoryIds` fails open: the pre-resolve and
  *   pi's loader disagree, and keeping + reporting beats silently losing capability.
+ *
+  * @param {any[]} baseSkills pi 刚发现的那批技能（与选择无关，只是同一时刻的库存）
+ * @param {{ inventoryIds?: Set<string>, enabledIds?: Set<string>, disabledIds?: Set<string>, config?: any }} policy
+ * @param {{
+ *   isManaged?: (filePath: string) => boolean,
+ *   isDisabledPath?: (filePath: string) => boolean,
+ *   onMismatch?: (skill: any) => void,
+ * }} [handlers]
  */
 export function applySkillSelection(baseSkills, policy, { isManaged = () => true, isDisabledPath = () => false, onMismatch } = {}) {
   const skills = [];

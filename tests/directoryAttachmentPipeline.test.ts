@@ -17,8 +17,9 @@ import { attachmentBadgeAttributes, readBadgeDescriptor, userMessageClipboardHtm
 import { DIRECTORY_MIME_TYPE } from "../src/shared/attachmentKind.ts";
 import { functionBody } from "./lib/sourceText.ts";
 import type { ChatAttachment } from "../src/types/index.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
-const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const serverSource = bridgeSource();
 const sharedSource = readFileSync(new URL("../src/shared/attachmentKind.ts", import.meta.url), "utf8");
 
 const directoryAttachment: ChatAttachment = {

@@ -24,6 +24,7 @@ import {
   replaceSkillSelectionPolicy,
   skillEnabledBySelection,
 } from "../server/capabilitySkillSelection.mjs";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 
@@ -277,7 +278,7 @@ test("the inventory scan does not need extensions to find project skills", async
 /* --------------------------------- wiring guards -------------------------------- */
 
 test("the server judges skills through the live policy, not a precomputed allow-list", () => {
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+  const source = bridgeSource();
 
   assert.match(source, /from "\.\/capabilitySkillSelection\.mjs"/);
   assert.match(source, /applySkillSelection\(base\.skills, capabilityPaths\.skillSelection/);
@@ -290,7 +291,7 @@ test("the server judges skills through the live policy, not a precomputed allow-
 });
 
 test("runtime-time snapshots reuse the loader's inventory instead of re-running discovery", () => {
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+  const source = bridgeSource();
 
   assert.match(source, /const allSkills = targetRuntime\.capabilityPaths\?\.skillInventory/);
   const total = source.match(/await discoverAllProjectSkills\(project, targetRuntime\.settingsManager\)/g)?.length ?? 0;
@@ -300,7 +301,7 @@ test("runtime-time snapshots reuse the loader's inventory instead of re-running 
 });
 
 test("trust is resolved before the capability inventory", () => {
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+  const source = bridgeSource();
   const start = source.indexOf("async function createRuntime(");
   const end = source.indexOf("function ensureBuiltinPackages(", start);
   const body = source.slice(start, end);
@@ -314,7 +315,7 @@ test("trust is resolved before the capability inventory", () => {
 });
 
 test("the inventory scan is explicitly extension-free", () => {
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+  const source = bridgeSource();
   const start = source.indexOf("async function discoverAllProjectSkills(");
   const end = source.indexOf("function loadedExtensionReport(", start);
   assert.ok(start !== -1 && end > start);
@@ -323,7 +324,7 @@ test("the inventory scan is explicitly extension-free", () => {
 });
 
 test("a capability change refreshes the live policy and the inventory together", () => {
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+  const source = bridgeSource();
   const start = source.indexOf("async function refreshRuntimeCapabilityPaths(");
   const end = source.indexOf("function allowHttp429Retry(", start);
   const body = source.slice(start, end);

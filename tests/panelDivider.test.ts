@@ -12,9 +12,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { appSource } from "./lib/appSource.ts";
 
 const stylesCss = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");
-const appTsx = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appTsx = appSource();
 
 /** 以 selector 开头的第一个规则块正文。 */
 function ruleBody(source: string, selector: string): string {

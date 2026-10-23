@@ -20,6 +20,7 @@ import { spawnSync } from "node:child_process";
 
 import { agentRuntimePathEntries, mergePath, packageManagerBinDirs } from "../server/agentEnv.mjs";
 import { createAgentShims } from "../server/agentShims.mjs";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
 // A PATH with nothing but OS directories: no nvm, no Homebrew, no pyenv.
 const HOST_WITHOUT_RUNTIMES = "/usr/bin:/bin:/usr/sbin:/sbin";
@@ -488,7 +489,7 @@ test("built python through its launcher leaves no cache inside the runtime tree"
 });
 
 test("the bridge itself points python caches outside the bundle before spawning anything", () => {
-  const source = readFileSync(join(import.meta.dirname, "..", "server/index.mjs"), "utf8");
+  const source = bridgeSource();
   const apply = source.slice(
     source.indexOf("function applyAgentRuntimePath()"),
     source.indexOf("function applyAgentRuntimePath()") + 1400,

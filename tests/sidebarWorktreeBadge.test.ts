@@ -10,17 +10,19 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { worktreeSessionBadgeKind } from "../src/shared/sessionWorktree.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
-const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const appSourceText = readAppSource();
+const serverSource = bridgeSource();
 const domainSource = readFileSync(new URL("../src/types/domain.ts", import.meta.url), "utf8");
 
 /** 取一个顶层函数的源码段（到下一个顶层 `function ` 为止）。 */
 function functionSection(name: string): string {
-  const start = appSource.indexOf(`function ${name}(`);
+  const start = appSourceText.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} is gone from App.tsx`);
-  const end = appSource.indexOf("\nfunction ", start + 1);
-  return end === -1 ? appSource.slice(start) : appSource.slice(start, end);
+  const end = appSourceText.indexOf("\nfunction ", start + 1);
+  return end === -1 ? appSourceText.slice(start) : appSourceText.slice(start, end);
 }
 
 test("only sessions flagged as worktrees get the list badge", () => {

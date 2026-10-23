@@ -8,8 +8,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource as appSourceAll } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSource = appSourceAll();
 const chatThreadSource = readFileSync(
   new URL("../src/features/chat/ChatThread.tsx", import.meta.url),
   "utf8",
@@ -34,7 +36,7 @@ const imeSource = readFileSync(
   new URL("../src/features/search/useImeSafeInput.ts", import.meta.url),
   "utf8",
 );
-const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const serverSource = bridgeSource();
 const stylesSource = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");
 const codexThemeSource = readFileSync(
   new URL("../src/themes/codex/theme.css", import.meta.url),

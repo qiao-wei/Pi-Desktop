@@ -79,8 +79,10 @@ export function resolveEntryCandidates(rawSource, bases) {
 }
 
 /**
- * @returns every index whose entry is a relative path pointing at `installTarget`. All of them
- * get rewritten: a leftover relative twin for the same directory would keep the id ambiguous.
+ * 每个「指向 `installTarget` 的相对路径条目」的下标。全都要改写：同一个目录留着相对李生条目会让 id 有歧义。
+ *
+ * @param {{ packages?: unknown[], installTarget?: string, bases?: string[] }} [options]
+ * @returns {number[]}
  */
 export function selectEntriesToAbsolutize({ packages = [], installTarget = "", bases = [] } = {}) {
   if (!installTarget) {

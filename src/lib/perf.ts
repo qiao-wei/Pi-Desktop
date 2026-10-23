@@ -1,4 +1,6 @@
 import { reportDiagnostic } from "./api";
+import { getStoragePort } from "./storage.ts";
+import { setPerfPort } from "./perf-port.ts";
 
 /**
  * Zero-dependency performance probe for the streaming hot path.
@@ -123,7 +125,7 @@ function readFlag(key: string, urlValue: string | null): string | null {
     return urlValue;
   }
   try {
-    return globalThis.localStorage?.getItem(key) ?? null;
+    return getStoragePort().read(key);
   } catch {
     return null;
   }
@@ -170,7 +172,7 @@ function overlayRequested(): boolean {
     return true;
   }
   try {
-    return globalThis.localStorage?.getItem(OVERLAY_STORAGE_KEY) === "1";
+    return getStoragePort().read(OVERLAY_STORAGE_KEY) === "1";
   } catch {
     return false;
   }
@@ -178,7 +180,7 @@ function overlayRequested(): boolean {
 
 function consoleRequested(): boolean {
   try {
-    return globalThis.localStorage?.getItem("pi-desktop.perf.console") === "1";
+    return getStoragePort().read("pi-desktop.perf.console") === "1";
   } catch {
     return false;
   }
@@ -439,6 +441,8 @@ export function perfExposeGlobal() {
     return;
   }
   const handle = { enabled: perfEnabled, mark: perfMark };
+  // 装配点：把 devtools 手柄同时装成协议里的 perf 端口（transport 走端口，不再摸 global）。
+  setPerfPort(handle);
   globalThis.__piDesktopPerf = handle;
   Object.assign(handle, {
     enabled: perfEnabled,

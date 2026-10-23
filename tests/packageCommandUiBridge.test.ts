@@ -17,8 +17,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { constObjectBody, functionBody } from "./lib/sourceText.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
-const server = readFileSync(join(import.meta.dirname, "../server/index.mjs"), "utf8");
+const server = bridgeSource();
+// 内核引用只走适配层（kernel-adapter 边界）：断言要同时看 re-export 与导入来源。
+const piKernel = readFileSync(join(import.meta.dirname, "../server/piKernel.mjs"), "utf8");
 test("headlessUiTheme 覆盖 Theme 的颜色/字重 API(/review 的 factory 直接踩 bold)", () => {
   const theme = constObjectBody(server, "headlessUiTheme");
   // pi 的 Theme API:fg/bg(color, text) + bold/italic/underline/inverse/strikethrough(text)。
@@ -54,9 +57,14 @@ test("桥启动即 initTheme（/end-review 的 BorderedLoader→keyHint 依赖�
   // 总结加载器）构造函数无条件调 keyHint → theme.fg，所以桥必须在启动时补上 TUI
   // 才会做的 initTheme。断言限定在 agentDir 定义到 agentBinDir 之间的启动块。
   assert.match(
-    server,
+    piKernel,
     /\n  initTheme,\n\} from "@earendil-works\/pi-coding-agent";/,
-    "initTheme 必须从 pi-coding-agent 导入",
+    "initTheme 必须从 pi-coding-agent 导入（适配层）",
+  );
+  assert.match(
+    server,
+    /\n  initTheme,\n  matchesKey,\n\} from "\.\/piKernel\.mjs";/,
+    "桥必须通过 piKernel.mjs 拿到 initTheme",
   );
   const start = server.indexOf("const agentDir = ");
   const end = server.indexOf("const agentBinDir");

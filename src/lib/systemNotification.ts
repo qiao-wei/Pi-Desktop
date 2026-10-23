@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { hasHostShell, invokeHost } from "./shell/host.ts";
+import type { HostCommandId } from "../shared/protocol/hostCommands.ts";
 
 /**
  * 系统通知的发送端（副作用都在这里）。
@@ -13,7 +14,8 @@ import { invoke } from "@tauri-apps/api/core";
  * 失败：`show()` 不报错、也不显示，只在 `failed` 事件里说话。所以这条链路一律返回
  * `{ delivered, reason }`，让调用方（诊断日志）能区分「发了」和「以为发了」。
  */
-const SHELL_COMMAND = "notify_turn_complete";
+// 类型来自协议：改名/写错会在编译期就红（见 src/shared/protocol/hostCommands.ts）。
+const SHELL_COMMAND: HostCommandId = "notify_turn_complete";
 
 /**
  * renderer → 宿主的命令名。三个宿主必须同名：Electron 的 preload 白名单、Electron 的
@@ -29,9 +31,14 @@ export interface SystemNotificationOutcome {
 
 export type SystemNotificationChannel = "shell" | "browser" | "none";
 
-/** Electron / Tauri 是否在场（两个宿主都实现了 `__TAURI_INTERNALS__.invoke`）。 */
+/**
+ * Electron / Tauri 是否在场。
+ *
+ * 问 shell 端口（`hasHostShell()`），不再自己嗅 `__TAURI_INTERNALS__`：宿主是否存在是 shell 协议的
+ * 一部分，嗅探会让「装上的假宿主仍然被判定为不存在」，也会让同一个问题有两份实现。
+ */
 export function hasShellBridge(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  return hasHostShell();
 }
 
 function browserNotificationApi(): typeof Notification | undefined {
@@ -120,7 +127,7 @@ export async function showSystemNotification({
 
   if (channel === "shell") {
     try {
-      return normalizeShellOutcome(await invoke(SHELL_COMMAND, { title, body }));
+      return normalizeShellOutcome(await invokeHost(SHELL_COMMAND, { title, body }));
     } catch (error) {
       return { delivered: false, reason: error instanceof Error ? error.message : String(error) };
     }

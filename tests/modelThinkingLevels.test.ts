@@ -14,8 +14,14 @@ import { join } from "node:path";
 
 import { buildThinkingLevelMap, emptyThinkingLevels, thinkingLevelsFromMap } from "../src/features/models/customModelForm.ts";
 
-const server = readFileSync(join(import.meta.dirname, "../server/index.mjs"), "utf8");
-const appTsx = readFileSync(join(import.meta.dirname, "../src/app/App.tsx"), "utf8");
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource } from "./lib/appSource.ts";
+
+const server = bridgeSource();
+// 桥对内核的引用现在只走适配层（见 docs/architecture/protocols.md 的 kernel-adapter 边界）：
+// 断言因此要同时看适配层的 re-export 与桥的导入来源，而不能只看桥里的 import 字样。
+const piKernel = readFileSync(join(import.meta.dirname, "../server/piKernel.mjs"), "utf8");
+const appTsx = appSource();
 const settingsTsx = readFileSync(join(import.meta.dirname, "../src/features/models/CustomModelsSettings.tsx"), "utf8");
 const formTs = readFileSync(join(import.meta.dirname, "../src/features/models/customModelForm.ts"), "utf8");
 const apiTs = readFileSync(join(import.meta.dirname, "../src/features/models/customModelsApi.ts"), "utf8");
@@ -54,17 +60,32 @@ function balancedBraces(source: string, openBraceIndex: number, label: string): 
 
 test("桥给每个模型下发 supportedThinkingLevels(复用 pi 的按模型计算)", () => {
   assert.match(
-    server,
+    piKernel,
     /import \{ StringEnum, getSupportedThinkingLevels \} from "@earendil-works\/pi-ai";/,
-    "getSupportedThinkingLevels 必须从 pi-ai 公开入口导入",
+    "getSupportedThinkingLevels 必须从 pi-ai 公开入口导入（适配层）",
+  );
+  // 2026-10-22：改成 `import` 绑定 + `export` 再导出（原来是 `export … from`），因为
+  // `createKernelAdapter` 需要这个绑定在局部作用域里 —— `export … from` 不产生局部绑定
+  // （`node-typecheck` 会用 TS18004 抓住这类写法）。导出面没变，仍由适配层转发给桥。
+  assert.match(
+    piKernel,
+    /export \{\s*StringEnum,\s*getSupportedThinkingLevels,/,
+    "适配层必须把 kernels 的这两个入口再导出给桥",
+  );
+  assert.match(
+    server,
+    /import \{ StringEnum, supportedThinkingLevelsFor, builtinProviders \} from "\.\/piKernel\.mjs";/,
+    "桥自己只能通过 piKernel.mjs 拿到内核入口",
   );
   const describeModel = functionBody(server, "describeModel");
   // 菜单显示几档 = 模型映射表说了算。不要给「没映射表」另立口径（pi 对开了推理的模型
   // 默认放行 off..high），否则菜单与真实能发出的档位脱节。
+  // 2026-10-22：改走 kernel-adapter 缝（`supportedThinkingLevelsFor`），契约不变 —— 真正的
+  // 兑现者仍然是 pi 的按模型计算，行为级别的兑现见 tests/kernelAdapter.test.ts 的假内核用例。
   assert.match(
     describeModel,
-    /supportedThinkingLevels: getSupportedThinkingLevels\(model\),/,
-    "describeModel 必须直接复用 pi 的按模型计算",
+    /supportedThinkingLevels: supportedThinkingLevelsFor\(model\),/,
+    "describeModel 必须复用 pi 的按模型计算（经 kernel-adapter 缝）",
   );
   assert.ok(
     !/supportedThinkingLevels: model\.thinkingLevelMap \?/.test(describeModel),

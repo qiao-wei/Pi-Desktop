@@ -1,0 +1,130 @@
+{
+  "package": "@earendil-works/pi-coding-agent",
+  "version": "1.4.0",
+  "exports": [
+    {
+      "name": "StringEnum",
+      "kind": "function",
+      "arity": 2
+    },
+    {
+      "name": "getSupportedThinkingLevels",
+      "kind": "function",
+      "arity": 1
+    },
+    {
+      "name": "builtinProviders",
+      "kind": "function",
+      "arity": 0
+    },
+    {
+      "name": "createAgentSessionFromServices",
+      "kind": "function",
+      "arity": 1
+    },
+    {
+      "name": "createAgentSessionRuntime",
+      "kind": "function",
+      "arity": 2
+    },
+    {
+      "name": "createAgentSessionServices",
+      "kind": "function",
+      "arity": 1
+    },
+    {
+      "name": "createCodemodeExtension",
+      "kind": "function",
+      "arity": 0
+    },
+    {
+      "name": "createMcpExtension",
+      "kind": "function",
+      "arity": 0
+    },
+    {
+      "name": "createToolSearchExtension",
+      "kind": "function",
+      "arity": 0
+    },
+    {
+      "name": "DefaultResourceLoader",
+      "kind": "function",
+      "arity": 1
+    },
+    {
+      "name": "DefaultPackageManager",
+      "kind": "function",
+      "arity": 1
+    },
+    {
+      "name": "ProjectTrustStore",
+      "kind": "function",
+      "arity": 1
+    },
+    {
+      "name": "ModelRuntime",
+      "kind": "function",
+      "arity": 6
+    },
+    {
+      "name": "SettingsManager",
+      "kind": "function",
+      "arity": 3
+    },
+    {
+      "name": "SessionManager",
+      "kind": "function",
+      "arity": 6
+    },
+    {
+      "name": "withFileMutationQueue",
+      "kind": "function",
+      "arity": 2
+    },
+    {
+      "name": "initTheme",
+      "kind": "function",
+      "arity": 1
+    },
+    {
+      "name": "matchesKey",
+      "kind": "function",
+      "arity": 2
+    },
+    {
+      "name": "resolveProjectTrusted",
+      "kind": "function",
+      "arity": 1
+    },
+    {
+      "name": "hasTrustRequiringProjectResources",
+      "kind": "function",
+      "arity": 1
+    },
+    {
+      "name": "runPiCli",
+      "kind": "function",
+      "arity": 2
+    }
+  ],
+  "deepImports": [
+    {
+      "specifier": "../node_modules/@earendil-works/pi-coding-agent/dist/core/project-trust.js",
+      "ok": true,
+      "symbols": [
+        "resolveProjectTrusted"
+      ]
+    },
+    {
+      "specifier": "../node_modules/@earendil-works/pi-coding-agent/dist/core/trust-manager.js",
+      "ok": true,
+      "symbols": [
+        "ProjectTrustStore",
+        "getProjectTrustOptions",
+        "getProjectTrustParentPath",
+        "hasTrustRequiringProjectResources"
+      ]
+    }
+  ]
+}

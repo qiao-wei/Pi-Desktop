@@ -15,6 +15,7 @@ import test from "node:test";
 
 import { zh } from "../src/i18n/zh.ts";
 import { en } from "../src/i18n/en.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
 /** 语言包自身的文档注释里会出现 `t("...")` 字样，扫源码时要排掉。 */
 const scannedFiles = globSync(["src/**/*.ts", "src/**/*.tsx"]).filter((file) => !file.startsWith("src/i18n/"));
@@ -48,7 +49,8 @@ test("英文包同样不缺（两包成对由类型保证，这里防手滑绕�
 // `t(\`settings.heading.${activeTab}\`)` 是 src 里唯一拼出来的 key（其余 `t(\`...\`)` 都是
 // perfCount，不是文案），这里把它的候选值单独钉住。
 test("拼出来的 settings.heading.* 四个 tab 都有文案", () => {
-  const appSource = readFileSync("src/app/App.tsx", "utf8");
+  // 动态 key 的宿主是设置弹窗，已从 App.tsx 拆到 src/app/SettingsDialogs.tsx —— 按整个目录读。
+  const appSource = readAppSource();
   assert.match(appSource, /t\(`settings\.heading\.\$\{activeTab\}`\)/, "动态 key 的写法变了就要同步这条测试");
   for (const tab of ["models", "personalization", "archived", "notifications"]) {
     assert.ok(`settings.heading.${tab}` in zh, `zh.ts 缺 settings.heading.${tab}`);

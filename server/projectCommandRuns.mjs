@@ -313,6 +313,16 @@ function spawnOnce(spawnImpl, command, args) {
  *
  * `table` 是调用方扫好的进程表（见 `scanProcessTable`）。必须在**发第一个信号之前**拿到它：
  * 一旦开始杀，父子关系就断了，setsid 出去的后代再也找不回来。
+ *
+  * @param {{ id?: string, pid?: number } | null} record
+ * @param {{
+ *   platform?: NodeJS.Platform,
+ *   killImpl?: typeof process.kill,
+ *   spawnImpl?: typeof import("node:child_process").spawn,
+ *   table?: { pid: number, ppid: number, pgid?: number }[],
+ *   graceMs?: number,
+ * }} [options]
+ * @returns {Promise<{ stopped: boolean, reason: string }>}
  */
 export async function stopRunProcess(record, {
   platform = process.platform,
@@ -353,6 +363,19 @@ export async function stopRunProcess(record, {
  *
  * `list()` 只返回**还活着**的记录，并顺手把死掉的从文件里删掉（只在真的有变化时写盘，
  * 免得每 3 秒轮询都写一次磁盘）。传入 `table` 时会顺便把进程树里发现的后代并进记录。
+ *
+ * @param {{
+ *   runsFile?: string,
+ *   limit?: number,
+ *   killImpl?: typeof process.kill,
+ *   spawnImpl?: typeof import("node:child_process").spawn,
+ *   platform?: NodeJS.Platform,
+ *   scanImpl?: (options?: { execFileImpl?: typeof import("node:child_process").execFile }) => Promise<{ pid: number, ppid: number, pgid?: number }[]>,
+ *   exists?: (path: string) => boolean,
+ *   readFile?: typeof readFileSync,
+ *   writeFile?: typeof writeFileSync,
+ *   rename?: typeof renameSync,
+ * }} [options]
  */
 export function createProjectCommandRuns({
   runsFile,
@@ -424,7 +447,11 @@ export function createProjectCommandRuns({
     /** 扫一次系统进程表（没有记录时直接返回空，省掉一个子进程）。 */
     scanProcesses,
 
-    /** 还活着的 run（可选按项目过滤），最新的在前。 */
+    /** 还活着的 run（可选按项目过滤），最新的在前。
+     *
+      * @param {{ projectId?: string, table?: { pid: number, ppid: number, pgid?: number }[] | null }} [options]
+     * @returns {{ id: string, pid: number, command: string, projectId: string, cwd: string, logPath: string, startedAt: number }[]}
+     */
     list({ projectId = "", table = null } = {}) {
       const rows = Array.isArray(table) ? table : [];
       const alive = [];

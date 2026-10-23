@@ -21,13 +21,15 @@ import {
   worktreeRemoveBlockReason,
   worktreeRemoveNeedsForce,
 } from "../src/shared/sessionWorktree.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 const hookSource = readFileSync(new URL("../src/features/chat/useProjectGit.ts", import.meta.url), "utf8");
 const worktreeHookSource = readFileSync(new URL("../src/features/chat/useSessionWorktree.ts", import.meta.url), "utf8");
 const badgeSource = readFileSync(new URL("../src/components/SessionWorktreeBadge.tsx", import.meta.url), "utf8");
 const appHookSource = readFileSync(new URL("../src/features/chat/usePiDesktopApp.ts", import.meta.url), "utf8");
-const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const serverSource = bridgeSource();
 const zhSource = readFileSync(new URL("../src/i18n/zh.ts", import.meta.url), "utf8");
 const enSource = readFileSync(new URL("../src/i18n/en.ts", import.meta.url), "utf8");
 
@@ -90,16 +92,16 @@ test("worktreeRemoveNeedsForce：只有有未提交内容才 force", () => {
 
 test("App：git 徽标按会话的 workspace 取，worktree 徽标同时接线", () => {
   assert.match(
-    appSource,
+    appSourceText,
     /const projectGit = useProjectGit\(\{\s*projectId: bootstrap\.activeProjectId,\s*sessionPath: visibleSessionPath,/,
     "useProjectGit 必须带上 sessionPath（否则 worktree 会话会显示主检出的分支/改动）",
   );
   assert.match(
-    appSource,
+    appSourceText,
     /const sessionWorktree = useSessionWorktree\(\{\s*projectId: bootstrap\.activeProjectId,\s*sessionPath: visibleSessionPath,\s*isStreaming: state\.isStreaming,\s*onError: reportError,\s*onBootstrap: replaceBootstrap,/,
     "useSessionWorktree 要按会话取，并把移除后返回的 bootstrap 交回应用",
   );
-  const header = region(appSource, "<SessionWorktreeBadge", "<GitStatusBadge");
+  const header = region(appSourceText, "<SessionWorktreeBadge", "<GitStatusBadge");
   assert.match(header, /onCreateBranch=\{sessionWorktree\.createBranch\}/);
   assert.match(header, /onRemove=\{sessionWorktree\.removeWorktree\}/);
   assert.match(header, /isStreaming=\{state\.isStreaming\}/);
@@ -117,7 +119,7 @@ test("useProjectGit：读用 sessionPath 查询参数，四个写操作都带 se
 });
 
 test("侧栏「＋」：一次点击就是普通新会话，⌥/Alt 点击走 worktree，项目菜单里也有入口", () => {
-  const plus = region(appSource, "aria-label={t(\"sidebar.newSession\")}", "<SidebarNewSessionIcon size={16} />");
+  const plus = region(appSourceText, "aria-label={t(\"sidebar.newSession\")}", "<SidebarNewSessionIcon size={16} />");
   // 常规路径不能退化成「先开菜单再选一项」：点一下就要建出普通会话。
   assert.match(
     plus,
@@ -128,10 +130,10 @@ test("侧栏「＋」：一次点击就是普通新会话，⌥/Alt 点击走 wo
   assert.match(plus, /title=\{t\("sidebar\.newSessionHint"\)\}/, "tooltip 要说明 ⌥/Alt 的用法");
 
   // worktree 的发现入口放在项目 ⋯ 菜单里（不占「＋」的点击）。
-  const projectMenu = region(appSource, 'aria-label={t("sidebar.projectMenu")}', "</DropdownMenu>");
+  const projectMenu = region(appSourceText, 'aria-label={t("sidebar.projectMenu")}', "</DropdownMenu>");
   assert.match(projectMenu, /createSessionFromSidebar\(project\.id, \{ worktree: true \}\)/, "项目菜单里要有 worktree 入口");
 
-  const fn = region(appSource, "function createSessionFromSidebar", "async function selectSessionFromSidebar");
+  const fn = region(appSourceText, "function createSessionFromSidebar", "async function selectSessionFromSidebar");
   assert.match(fn, /onCreateSession\(projectId, undefined, options\)/, "选项要透传给 onCreateSession");
 
   const create = region(appHookSource, "const createSession = useCallback(", "const updateSession = useCallback(");
@@ -196,17 +198,17 @@ test("服务端接线：worktree 路由 / 会话 cwd / git 写操作都落在会
 
 test("删除弹窗：worktree 会话说清 worktree 会一起删，普通会话保持原文案", () => {
   // 侧栏两处入口（置顶区 / 项目区）都要把会话的 inWorktree 带进弹窗，漏一处就只有一边有提示。
-  const opens = appSource.match(/setDialog\(\{ kind: "archive-session"[^}]*\}\)/g) ?? [];
+  const opens = appSourceText.match(/setDialog\(\{ kind: "archive-session"[^}]*\}\)/g) ?? [];
   assert.equal(opens.length, 2, "置顶与项目两处入口");
   for (const open of opens) {
     assert.match(open, /inWorktree: Boolean\(session\.inWorktree\)/, `入口要带上 inWorktree：${open}`);
   }
   assert.match(
-    appSource,
+    appSourceText,
     /\{ kind: "archive-session"; projectId: string; sessionPath: string; title: string; inWorktree\?: boolean \}/,
     "弹窗状态要带 inWorktree",
   );
-  const desc = region(appSource, '? t("dialog.removeProjectDesc"', "</AlertDialogDescription>");
+  const desc = region(appSourceText, '? t("dialog.removeProjectDesc"', "</AlertDialogDescription>");
   assert.match(
     desc,
     /t\(dialog\.inWorktree \? "dialog\.archiveSessionDescWorktree" : "dialog\.archiveSessionDesc", \{ title: dialog\.title \}\)/,

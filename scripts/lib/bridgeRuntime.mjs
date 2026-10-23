@@ -26,6 +26,15 @@ const BARE_IMPORT = /(?:^|\n)\s*(?:import|export)[^"']*?from\s*"([a-z@][^"]*)"|r
  * 所以退一步去找**真的存在**的 npm-cli.js：调用方给的候选（比如内置运行时里那份），然后是官方
  * Node 发行版里「npm 就在 node 旁边」的位置（POSIX 是 `<node>/../lib/node_modules/npm`，Windows 是
  * `<node>/node_modules/npm`；setup-node / nvm / brew / 官方安装包都是这个形状）。
+ *
+ * @param {{
+ *   env?: NodeJS.ProcessEnv,
+ *   platform?: NodeJS.Platform,
+ *   execPath?: string,
+ *   candidates?: string[],
+ *   exists?: (path: string) => boolean,
+ * }} [options]
+ * @returns {{ command: string, baseArgs: string[], source: string }}
  */
 export function resolveNpmInvocation({
   env = process.env,
@@ -102,6 +111,16 @@ export function packageNameOf(specifier) {
  * The bridge manifest. `versions` maps package name -> exact installed version, and every bare
  * import must be covered by it, otherwise the shipped tree would resolve a package the build
  * machine happened to hoist rather than one we declared.
+ *
+ * `__appVersion` is the app's own version, carried in the same map by the caller (it is not a
+ * dependency, which is why it is spelled with the `__` prefix).
+ *
+ * @param {{
+ *   versions?: Record<string, string>,
+ *   imports?: string[],
+ *   overrides?: Record<string, string>,
+ *   name?: string,
+ * }} [options]
  */
 export function bridgePackageManifest({ versions = {}, imports = [], overrides = {}, name = "pi-desktop-bridge" } = {}) {
   const missing = new Set();

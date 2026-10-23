@@ -72,6 +72,7 @@ export function summarizePackageHealth({ loaded = [], errors = [], packages = []
   const errorEntries = normalizeErrors(errors);
   const active = new Set(activeIds ?? []);
   const claimed = new Set();
+  /** @type {Record<string, { status: string, loadedCount: number, expectedCount: number, tools: string[], commands: string[], errors: string[] }>} */
   const result = {};
 
   for (const pkg of packages ?? []) {

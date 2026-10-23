@@ -8,6 +8,7 @@ import {
   selectRestorableQueuedEntries,
 } from "../src/features/chat/queuedComposerText.ts";
 import type { ChatMessage } from "../src/types/domain.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 
@@ -142,11 +143,11 @@ test("App：停止后按本地 parts 重建徽标退回输入框，最后才退�
 });
 
 test("服务端契约：/api/stop 的 stopSession 必须把 clearQueue() 取出的原文放进响应", () => {
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+  const source = bridgeSource();
   const stopSessionBody = sliceBetween(
     source,
     "async function stopSession(targetRuntime, options = {})",
-    "async function abortSession(session, { requestId, reason })",
+    "async function abortSession(session, { requestId, reason } = {})",
   );
   assert.match(stopSessionBody, /activeSession\.clearQueue\(\)/);
   assert.match(stopSessionBody, /clearedQueue,/);

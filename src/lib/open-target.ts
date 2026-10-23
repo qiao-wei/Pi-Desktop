@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { hasHostShell, invokeHost } from "./shell/host.ts";
 
 const supportedLinkProtocol = /^(https?:|mailto:)/i;
 const absoluteFilePath = /^(?:\/|[a-z]:[\\/]|\\\\)/i;
@@ -16,8 +16,8 @@ export async function openTarget(target: string) {
     throw new Error("Only local files and http, https, or mailto links can be opened.");
   }
 
-  if ("__TAURI_INTERNALS__" in window) {
-    await invoke("open_target", { target });
+  if (hasHostShell()) {
+    await invokeHost("open_target", { target });
     return;
   }
 

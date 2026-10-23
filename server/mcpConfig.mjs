@@ -373,7 +373,7 @@ export function patchMcpServer(config, name, patch) {
       entry.exposure = patch.exposure;
     }
   }
-  return { ...config, mcpServers: { ...config.mcpServers, [serverName]: entry } };
+  return { ...config, mcpServers: { ...config.mcpServers, [String(serverName)]: entry } };
 }
 
 /**

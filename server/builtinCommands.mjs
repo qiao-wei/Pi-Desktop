@@ -25,6 +25,12 @@ export function findBuiltinCommand(name) {
  * - 未登记 → `unknown`（调用方当普通文本处理，不当作命令）；
  * - 带了参数 → `invalid`（目前登记的命令都不吃参数）；
  * - 其余 → `run`。
+ *
+ * 三支的 `command` 字段用可选形态：`unknown` 那支没有命令，调用方要先按 `kind` 判过再取。
+ *
+ * @param {string} name
+ * @param {string} [args]
+ * @returns {{ kind: "unknown", command?: undefined, reason?: undefined } | { kind: "invalid" | "run", command: { name: string, label?: string, description?: string }, reason?: string }}
  */
 export function planBuiltinCommand(name, args = "") {
   const command = findBuiltinCommand(name);

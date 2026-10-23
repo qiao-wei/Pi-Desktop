@@ -11,30 +11,31 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 const prefsSource = readFileSync(new URL("../src/lib/ui-preferences.ts", import.meta.url), "utf8");
 
 /** Source of a top-level `function name(...) { ... }`, delimited at the next flush-left brace. */
 function topLevelFunctionSource(name: string): string {
-  const start = appSource.indexOf(`function ${name}(`);
+  const start = appSourceText.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} is gone from App.tsx`);
-  const end = appSource.indexOf("\n}\n", start);
+  const end = appSourceText.indexOf("\n}\n", start);
   assert.notEqual(end, -1, `${name} body could not be delimited`);
-  return appSource.slice(start, end);
+  return appSourceText.slice(start, end);
 }
 
 test("the conversation surface stays mounted while the Global page is open", () => {
   // 不能再退回「二选一渲染」：那正是丢草稿的原因。
   assert.doesNotMatch(
-    appSource,
+    appSourceText,
     /activeMainView === "capabilities" \? \(\s*<CapabilitiesPage/,
     "the capabilities page must not replace the conversation section",
   );
   // 按 token 断言而不是整串 className：codex 主题会给这层加一个 `conversation-column`
   // class（用来把会话列抬到窗口顶部），整串匹配会把它误判成回归。
   const host = /<div\s+className="([^"]*)"\s*>\s*<section\s+className="conversation-surface/.exec(
-    appSource,
+    appSourceText,
   )?.[1];
   assert.ok(host, "找不到包住会话区的那个栅格格子");
   for (const token of ["relative", "h-full", "min-h-0", "min-w-0", "overflow-hidden"]) {
@@ -44,25 +45,25 @@ test("the conversation surface stays mounted while the Global page is open", () 
     );
   }
   assert.match(
-    appSource,
+    appSourceText,
     /inert=\{activeMainView === "capabilities"\}/,
     "the covered chat must leave the tab order and stop receiving clicks",
   );
   assert.match(
-    appSource,
+    appSourceText,
     /<div className="absolute inset-0 z-20">\s*<CapabilitiesPage/,
     "the page is drawn over the conversation, not instead of it",
   );
 });
 
 test("inert lands on the covered conversation, never on the page itself", () => {
-  const inertAt = appSource.indexOf('inert={activeMainView === "capabilities"}');
+  const inertAt = appSourceText.indexOf('inert={activeMainView === "capabilities"}');
   assert.notEqual(inertAt, -1, "the inert gate is gone");
-  const pageAt = appSource.indexOf("<div className=\"absolute inset-0 z-20\">");
+  const pageAt = appSourceText.indexOf("<div className=\"absolute inset-0 z-20\">");
   assert.notEqual(pageAt, -1, "the overlay host is gone");
   assert.ok(inertAt < pageAt, "inerting the overlay's ancestor would disable the page");
   // It is the conversation <section> that goes inert, so the attribute must sit on its start tag.
-  const sectionOpen = appSource.lastIndexOf("<section", inertAt);
+  const sectionOpen = appSourceText.lastIndexOf("<section", inertAt);
   assert.ok(sectionOpen >= 0 && sectionOpen < inertAt, "inert must be on the conversation section");
 });
 

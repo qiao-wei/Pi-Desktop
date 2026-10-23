@@ -5,6 +5,7 @@ import { once } from "node:events";
 
 import { ALLOWED_REQUEST_HEADERS, respondToPreflight, setCors } from "../server/cors.mjs";
 import { fetchBootstrap } from "../src/lib/api.ts";
+import { PROTOCOL_VERSION } from "../src/shared/protocol/version.ts";
 
 /**
  * 现象：会话结束后前端 console 报
@@ -119,23 +120,32 @@ test("every header the client sends is in the server allow-list", async () => {
   const originalFetch = globalThis.fetch;
   const originalEnv = process.env.VITE_PI_DESKTOP_API_BASE;
   process.env.VITE_PI_DESKTOP_API_BASE = "http://127.0.0.1:6474";
-  globalThis.fetch = (async (_url: string, init: RequestInit = {}) => {
-    calls.push(Object.fromEntries(new Headers(init.headers as HeadersInit | undefined).entries()));
-    return new Response(JSON.stringify({ ok: true }), {
-      status: 200,
-      headers: { ETag: '"v1"' },
+  // 第一次 bootstrap 之前会先走一条 `GET /api/protocol` 握手（见 src/lib/api.ts 的
+  // ensureProtocolProbe），所以桩要按路径应答：握手给版本号，其余给快照。
+  const respond = (body: unknown, status = 200, responseInit: ResponseInit = {}) =>
+    new Response(body === null ? null : JSON.stringify(body), {
+      status,
+      headers: { ETag: '"v1"', ...(responseInit.headers ?? {}) },
     });
+  globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
+    calls.push(Object.fromEntries(new Headers(init.headers as HeadersInit | undefined).entries()));
+    if (String(url).endsWith("/api/protocol")) {
+      return respond({ protocolVersion: PROTOCOL_VERSION, pid: 1 });
+    }
+    return respond({ protocolVersion: PROTOCOL_VERSION, ok: true });
   }) as typeof fetch;
 
   try {
     await fetchBootstrap({ force: true });
     await fetchBootstrap();
     // A 304 shortens the payload, so the cached body is what the caller keeps.
-    globalThis.fetch = (async (_url: string, init: RequestInit = {}) => {
+    globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
       calls.push(Object.fromEntries(new Headers(init.headers as HeadersInit | undefined).entries()));
+      if (String(url).endsWith("/api/protocol")) {
+        return respond({ protocolVersion: PROTOCOL_VERSION, pid: 1 });
+      }
       return new Response(null, { status: 304, headers: { ETag: '"v1"' } });
-    }) as typeof fetch;
-    assert.equal(await fetchBootstrap(), null);
+    }) as typeof fetch;    assert.equal(await fetchBootstrap(), null);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalEnv === undefined) {
@@ -145,11 +155,13 @@ test("every header the client sends is in the server allow-list", async () => {
     }
   }
 
-  assert.equal(calls.length, 3);
-  const [forced, revalidating, notModified] = calls;
+  // 握手那条在最前面（GET /api/protocol，无请求头）；后面三条是两次 bootstrap 与一次 304。
+  assert.equal(calls.length, 4);
+  const [handshake, forced, revalidating, notModified] = calls;
 
   // `If-None-Match` needs the preflight allow-list; a bodyless GET must not drag
   // `Content-Type` along, or every poll pays for that preflight.
+  assert.deepEqual(handshake, {}, "握手是最便宜的裸 GET");
   assert.equal(forced["content-type"], undefined);
   assert.equal(revalidating["if-none-match"], '"v1"');
   assert.equal(notModified["if-none-match"], '"v1"');

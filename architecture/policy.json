@@ -1,0 +1,570 @@
+{
+  "version": 1,
+  "docs": {
+    "architecture": "docs/architecture/architecture.md",
+    "protocols": "docs/architecture/protocols.md"
+  },
+  "scanRoots": [
+    "src",
+    "server",
+    "src-electron"
+  ],
+  "notes": [
+    "Layer order is the enforcement direction: a module may only import modules in layers it lists in its layer's mayImport (plus its own layer). 'type' imports are exempt - they are erased at runtime and cannot create an init cycle.",
+    "bridgeSafe marks the modules that are copied into the packaged bridge sidecar (scripts/build-bridge-runtime.mjs copies server/ and src/shared/). Anything reachable at runtime from a bridge entry must be bridgeSafe, or the packaged app breaks while dev still works."
+  ],
+  "layers": [
+    {
+      "id": "contracts",
+      "order": 0,
+      "title": "Contracts",
+      "summary": "Type declarations only. Erased at runtime, importable from anywhere.",
+      "mayImport": [
+        "contracts"
+      ]
+    },
+    {
+      "id": "foundation",
+      "order": 1,
+      "title": "Foundation",
+      "summary": "Locale and dictionaries. Pure lookups, no I/O, no persistence - persistence is injected by an adapter.",
+      "mayImport": [
+        "contracts",
+        "foundation"
+      ]
+    },
+    {
+      "id": "protocol",
+      "order": 2,
+      "title": "Protocol",
+      "summary": "The declared boundaries: wire version, shell command ids, bridge endpoint surface. Shared by both runtimes.",
+      "mayImport": [
+        "contracts",
+        "protocol"
+      ]
+    },
+    {
+      "id": "kernel",
+      "order": 3,
+      "title": "Kernel",
+      "summary": "Pure domain policy. Runs in the renderer and in the bridge; nothing here may touch React, the DOM, the network, or the filesystem.",
+      "mayImport": [
+        "contracts",
+        "foundation",
+        "protocol",
+        "kernel"
+      ]
+    },
+    {
+      "id": "bridge",
+      "order": 4,
+      "title": "Bridge",
+      "summary": "The pi host and its HTTP/NDJSON/WS surface. Owns the filesystem, git, sqlite and the pi kernel.",
+      "mayImport": [
+        "contracts",
+        "protocol",
+        "kernel",
+        "bridge"
+      ]
+    },
+    {
+      "id": "shell",
+      "order": 4,
+      "title": "Shell",
+      "summary": "Window hosts (Electron main + preload) and packaging. Speaks the shell protocol only.",
+      "mayImport": [
+        "contracts",
+        "protocol",
+        "shell"
+      ]
+    },
+    {
+      "id": "adapters",
+      "order": 5,
+      "title": "Adapters",
+      "summary": "Outward-facing edges of the renderer: bridge transport, host invocation, notifications, preferences, perf.",
+      "mayImport": [
+        "contracts",
+        "foundation",
+        "protocol",
+        "kernel",
+        "adapters"
+      ]
+    },
+    {
+      "id": "presentation",
+      "order": 6,
+      "title": "Presentation",
+      "summary": "React components, feature hooks and themes. Reaches the outside world through adapters only.",
+      "mayImport": [
+        "contracts",
+        "foundation",
+        "protocol",
+        "kernel",
+        "adapters",
+        "presentation"
+      ]
+    },
+    {
+      "id": "app",
+      "order": 7,
+      "title": "App",
+      "summary": "Composition root. The one place allowed to wire every layer together.",
+      "mayImport": [
+        "*"
+      ]
+    },
+    {
+      "id": "tooling",
+      "order": 99,
+      "title": "Tooling",
+      "summary": "Build, packaging, diagnostics and tests. Exempt from layer direction, still registered and size-checked.",
+      "mayImport": [
+        "*"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "id": "types",
+      "layer": "contracts",
+      "roots": [
+        "src/types"
+      ],
+      "owner": "@qiaowei",
+      "bridgeSafe": true
+    },
+    {
+      "id": "i18n",
+      "layer": "foundation",
+      "roots": [
+        "src/i18n"
+      ],
+      "owner": "@qiaowei",
+      "bridgeSafe": false
+    },
+    {
+      "id": "protocol",
+      "layer": "protocol",
+      "roots": [
+        "src/shared/protocol"
+      ],
+      "owner": "@qiaowei",
+      "bridgeSafe": true
+    },
+    {
+      "id": "kernel",
+      "layer": "kernel",
+      "roots": [
+        "src/shared"
+      ],
+      "owner": "@qiaowei",
+      "bridgeSafe": true
+    },
+    {
+      "id": "bridge",
+      "layer": "bridge",
+      "roots": [
+        "server"
+      ],
+      "owner": "@qiaowei",
+      "bridgeSafe": true,
+      "entries": [
+        "server/index.mjs"
+      ]
+    },
+    {
+      "id": "shell",
+      "layer": "shell",
+      "roots": [
+        "src-electron"
+      ],
+      "owner": "@qiaowei",
+      "bridgeSafe": false
+    },
+    {
+      "id": "adapters",
+      "layer": "adapters",
+      "roots": [
+        "src/lib"
+      ],
+      "owner": "@qiaowei",
+      "bridgeSafe": false
+    },
+    {
+      "id": "presentation",
+      "layer": "presentation",
+      "roots": [
+        "src/components",
+        "src/features",
+        "src/themes",
+        "src/hooks"
+      ],
+      "owner": "@qiaowei",
+      "bridgeSafe": false
+    },
+    {
+      "id": "app",
+      "layer": "app",
+      "roots": [
+        "src/app",
+        "src/main.tsx"
+      ],
+      "owner": "@qiaowei",
+      "bridgeSafe": false
+    },
+    {
+      "id": "tooling",
+      "layer": "tooling",
+      "roots": [
+        "scripts",
+        "tests"
+      ],
+      "owner": "@qiaowei",
+      "bridgeSafe": false
+    }
+  ],
+  "sizeRules": [
+    {
+      "match": "**/*.test.ts",
+      "limit": 0
+    },
+    {
+      "match": "**/*.test.tsx",
+      "limit": 0
+    },
+    {
+      "match": "src/i18n/zh.ts",
+      "limit": 1400
+    },
+    {
+      "match": "src/i18n/en.ts",
+      "limit": 1400
+    },
+    {
+      "match": "src/**",
+      "limit": 700
+    },
+    {
+      "match": "server/**",
+      "limit": 900
+    },
+    {
+      "match": "src-electron/**",
+      "limit": 700
+    },
+    {
+      "match": "scripts/**",
+      "limit": 900
+    }
+  ],
+  "protocols": [
+    {
+      "id": "bridge",
+      "title": "Renderer ↔ Bridge",
+      "contract": "src/shared/protocol/bridgeEndpoints.ts",
+      "versionSource": "src/shared/protocol/version.ts",
+      "mirror": "server/protocolVersion.mjs",
+      "doc": "protocols-bridge",
+      "swap": "Implement BridgeTransport (src/lib/bridge/transport.ts) and inject it with setBridgeTransport(). Nothing above the adapter names HTTP.",
+      "conformance": "tests/bridgeProtocol.test.ts",
+      "seam": "bridge"
+    },
+    {
+      "id": "shell",
+      "title": "Renderer ↔ Window host",
+      "contract": "src/shared/protocol/hostCommands.ts",
+      "versionSource": null,
+      "mirror": "src-electron/preload.js",
+      "doc": "protocols-shell",
+      "swap": "Add a host by implementing the ipc surface for HOST_COMMAND_IDS and calling invokeHost() - call sites stay put.",
+      "conformance": "tests/architecture.test.ts",
+      "seam": "shell"
+    },
+    {
+      "id": "kernel-adapter",
+      "title": "Bridge ↔ pi kernel",
+      "contract": "server/piKernel.mjs",
+      "versionSource": null,
+      "mirror": null,
+      "doc": "protocols-kernel",
+      "swap": "Every @earendil-works import the bridge needs is re-exported from server/piKernel.mjs. A kernel bump that moves or renames something inside dist/ is a one-file fix.",
+      "conformance": "tests/kernelAdapter.test.ts",
+      "seam": "kernel-adapter"
+    },
+    {
+      "id": "storage",
+      "title": "Bridge ↔ SQLite",
+      "contract": "server/sqlite.mjs",
+      "versionSource": null,
+      "mirror": null,
+      "doc": "protocols-storage",
+      "swap": "openSqliteDatabase() is the only place node:sqlite is named; the conveniences the callers expect are added there.",
+      "conformance": "tests/bridgeSqlite.test.ts",
+      "seam": null,
+      "seamGap": "openSqliteDatabase() 是唯一命名 node:sqlite 的地方，但还没有注入点（缺一个 setSqliteFactory()）；调用方直接拿单例，所以换驱动只能改文件、不能换实现"
+    },
+    {
+      "id": "perf",
+      "title": "Renderer ↔ 性能探针",
+      "contract": "src/shared/protocol/perf.ts",
+      "versionSource": null,
+      "mirror": null,
+      "doc": "protocols-perf",
+      "swap": "Install a PerfPort with setPerfPort()（真实现是 src/lib/perf.ts，插槽在 src/lib/perf-port.ts）。请求路径只问当前装上的探针，不再摸 globalThis.__piDesktopPerf。",
+      "conformance": "tests/perfPort.test.ts",
+      "seam": "perf"
+    },
+    {
+      "id": "local-store",
+      "title": "Renderer ↔ 本地存储",
+      "contract": "src/shared/protocol/storage.ts",
+      "versionSource": "src/shared/protocol/storage.ts",
+      "mirror": null,
+      "doc": "protocols-local-store",
+      "swap": "实现 KeyValueStorePort 并 setStoragePort()（真实现 src/lib/storage.ts，启动时 installStoragePort() 校验 schema 版本）。只有这一个文件碰 localStorage（规则 no-bypass）。",
+      "conformance": "tests/storagePort.test.ts",
+      "seam": "local-store"
+    },
+    {
+      "id": "locale",
+      "title": "Renderer ↔ 语言偏好存储",
+      "contract": "src/types/protocols.ts",
+      "versionSource": null,
+      "mirror": null,
+      "doc": "protocols-locale",
+      "swap": "实现 LocalePreferencePort 并用 installLocalePreferencePort() 接上（契约在 contracts 层，插槽是 src/i18n/index.ts 的 configureLocalePreference()）。",
+      "conformance": "tests/localePort.test.ts",
+      "seam": "locale"
+    }
+  ],
+  "exceptions": [
+    {
+      "rule": "max-lines",
+      "file": "server/customModels.mjs",
+      "ceiling": 1081,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "server/gitInfo.mjs",
+      "ceiling": 1177,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "server/index.mjs",
+      "ceiling": 7930,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "src/app/App.tsx",
+      "ceiling": 3366,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "src/app/Sidebar.tsx",
+      "ceiling": 1285,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "src/components/assistant-ui/elements/thread.aui.tsx",
+      "ceiling": 1362,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "src/components/GitStatusBadge.tsx",
+      "ceiling": 1028,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "src/features/chat/ChatThread.tsx",
+      "ceiling": 1379,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "src/features/chat/MessageEditBox.tsx",
+      "ceiling": 918,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "src/features/chat/usePiDesktopApp.ts",
+      "ceiling": 3006,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "src/features/models/AddModelsDialog.tsx",
+      "ceiling": 834,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "src/features/models/customModelForm.ts",
+      "ceiling": 716,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "src/features/models/CustomModelsSettings.tsx",
+      "ceiling": 986,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "src/features/models/ProviderDialog.tsx",
+      "ceiling": 748,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "src/i18n/en.ts",
+      "ceiling": 930,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "src/i18n/zh.ts",
+      "ceiling": 935,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    },
+    {
+      "rule": "max-lines",
+      "file": "src/shared/chatBubbles.ts",
+      "ceiling": 1165,
+      "owner": "@qiaowei",
+      "deadline": "2026-12-31",
+      "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
+    }
+  ],
+  "processBoundaries": [
+    {
+      "id": "renderer",
+      "root": [
+        "src"
+      ],
+      "config": "tsconfig.json",
+      "checked": true,
+      "why": "Vite 渲染进程：src/**，DOM + JSX"
+    },
+    {
+      "id": "node-runtime",
+      "root": [
+        "server",
+        "scripts",
+        "src-electron"
+      ],
+      "config": "tsconfig.node-runtime.json",
+      "checked": true,
+      "why": "非渲染侧的运行时代码：桥（server/**）、宿主主进程与 preload（src-electron/**）、构建脚本（scripts/**）。checkJs + 棘轮（规则 node-typecheck）"
+    },
+    {
+      "id": "vite-config",
+      "root": [
+        "vite.config.ts"
+      ],
+      "config": "tsconfig.node.json",
+      "checked": true,
+      "why": "构建配置本身单独一份（composite，被 tsconfig.json 引用）"
+    },
+    {
+      "id": "rust-shell",
+      "root": [
+        "src-tauri/src"
+      ],
+      "config": null,
+      "checked": false,
+      "why": "Rust 不适用 tsc：由 cargo check 检查，见 README 的 tauri:build"
+    }
+  ],
+  "bypassGuards": [
+    {
+      "id": "local-storage",
+      "regex": "\\blocalStorage\\b\\s*[?.\\[]",
+      "scope": [
+        "src/**/*.ts",
+        "src/**/*.tsx"
+      ],
+      "allowed": [
+        {
+          "file": "src/lib/storage.ts",
+          "why": "唯一实现；其余代码走 getStoragePort()（协议 local-store）"
+        }
+      ],
+      "why": "散落的 localStorage 调用无法换宿主存储、无法在无 DOM 环境测试，也没有 schema 版本闸"
+    },
+    {
+      "id": "http-fetch",
+      "regex": "(?<![\\w.$])fetch\\s*\\(",
+      "scope": [
+        "src/**/*.ts",
+        "src/**/*.tsx"
+      ],
+      "allowed": [
+        {
+          "file": "src/lib/bridge/transport.ts",
+          "why": "桥的 HTTP 实现本体（协议 bridge）"
+        },
+        {
+          "file": "src/components/assistant-ui/elements/image.tsx",
+          "why": "取图片二进制自己造 blob URL，不是桥的路由；桥只送 URL"
+        }
+      ],
+      "why": "HTTP 语义只该有一个地方知道（状态码、ETag、NDJSON 分帧、诊断）"
+    },
+    {
+      "id": "host-invoke",
+      "regex": "(?<![\\w.$])invoke\\s*\\(",
+      "scope": [
+        "src/**/*.ts",
+        "src/**/*.tsx"
+      ],
+      "allowed": [
+        {
+          "file": "src/lib/shell/host.ts",
+          "why": "宿主调用入口本体（协议 shell）；其余代码走 invokeHost()/invokeHostQuietly()"
+        }
+      ],
+      "why": "调用点自己直接调 invoke 会绕过命令白名单类型，也会让宿主的可替换性失效"
+    }
+  ]
+}

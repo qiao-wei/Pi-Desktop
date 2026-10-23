@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
 /**
  * Wiring guard for the "推理面板一直转圈" fix.
@@ -16,7 +17,7 @@ import { join } from "node:path";
  * `chatStreamProjection.test.ts`.
  */
 
-const server = readFileSync(join(import.meta.dirname, "../server/index.mjs"), "utf8");
+const server = bridgeSource();
 
 test("the adapter synthesizes a textless settle instead of waiting for the provider", () => {
   assert.match(

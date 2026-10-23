@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeHost, invokeHostQuietly } from "./shell/host.ts";
 
 import { hasShellBridge } from "./systemNotification.ts";
 
@@ -24,5 +24,5 @@ export function syncShellAppearance(theme: ShellAppearance): void {
   }
 
   // 同步失败只影响原生材质的明暗，不该把渲染层拖下水（renderer 里的主题已经生效了）。
-  void invoke("set_window_appearance", { appearance: theme }).catch(() => undefined);
+  invokeHostQuietly("set_window_appearance", { appearance: theme });
 }

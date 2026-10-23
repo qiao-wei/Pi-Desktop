@@ -16,8 +16,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { createScrollToBottomBus, type ScrollToBottomRequest } from "../src/shared/chatScrollBus.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 const chatThreadSource = readFileSync(
   new URL("../src/features/chat/ChatThread.tsx", import.meta.url),
   "utf8",
@@ -116,14 +117,14 @@ test("unsubscribing stops delivery and reports the session as unowned", () => {
 });
 
 test("the composer asks the live owner, not just the saved record", () => {
-  const follow = appSource.match(/function followLatestScroll\(sessionPath: string\) \{[\s\S]*?\n  \}/);
+  const follow = appSourceText.match(/function followLatestScroll\(sessionPath: string\) \{[\s\S]*?\n  \}/);
   assert.ok(follow, "followLatestScroll is still there");
   assert.match(follow[0], /scrollStateRef\.current\.set\(sessionPath,\s*\{[\s\S]*?shouldFollow: true/);
   assert.match(follow[0], /chatScrollToBottomBus\.request\(sessionPath, "submit"\)/);
   // The request has to happen where the record was already being flipped: on submit.
-  const submit = appSource.slice(appSource.indexOf("async function handleSubmit"));
+  const submit = appSourceText.slice(appSourceText.indexOf("async function handleSubmit"));
   assert.match(submit.slice(0, submit.indexOf("submitTurn(")), /followLatestScroll\(visibleSessionPath\)/);
-  assert.equal(appSource.match(/submitTurn\(/g)?.length, 1, "one submit path, so one pin path");
+  assert.equal(appSourceText.match(/submitTurn\(/g)?.length, 1, "one submit path, so one pin path");
 });
 
 test("the viewport owner consumes the request and re-pins", () => {

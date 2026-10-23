@@ -12,9 +12,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const server = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const server = bridgeSource();
+const appSourceText = readAppSource();
 
 /** Extract a named `function` body by brace counting. */
 function functionBody(source: string, name: string): string {
@@ -78,7 +80,7 @@ test("composer only dispatches an exact, currently loaded package command", () =
   const args = functionBody(server, "readCapabilityCommandArguments");
   assert.match(args, /findCapabilityPackageCommand\(targetRuntime, packageId, commandName\)/);
 
-  const submit = functionBody(appSource, "handleSubmit");
+  const submit = functionBody(appSourceText, "handleSubmit");
   assert.match(submit, /matchSlashCommandArgs\(orderedText\)/);
   assert.match(submit, /findSlashCommand\(capabilities, submittedCommand\.name\)/);
   // 派发必须早于聊天提交，命中命令时 `return`，不会落到 submitTurn。
