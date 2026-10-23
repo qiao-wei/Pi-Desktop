@@ -42,11 +42,11 @@ function fakeTransport({ responses = {}, onRequest } = {}) {
       return typeof value === "function" ? value() : (value ?? null);
     },
     lastEtag: () => undefined,
-    async stream(path, body, onEvent) {
+    async stream(path, _body, onEvent) {
       calls.push({ path, method: "POST" });
       for (const event of responses.stream ?? []) onEvent(event);
     },
-    fireAndForget(path, body) {
+    fireAndForget(path, __body) {
       calls.push({ path, method: "POST" });
     },
   };
@@ -62,7 +62,11 @@ test("版本号两侧字面量相等，且是一个正整数", () => {
 test("握手分类：相等是 ok，缺字段是 missing，低于/高于都算不兼容", () => {
   assert.equal(checkProtocolCompatibility(PROTOCOL_VERSION), "ok");
   assert.equal(checkProtocolCompatibility(PROTOCOL_VERSION - 1), "older");
-  assert.equal(checkProtocolCompatibility(PROTOCOL_VERSION + 1), "newer", "新桥也不算兼容：渲染进程只认识自己构建时的形状");
+  assert.equal(
+    checkProtocolCompatibility(PROTOCOL_VERSION + 1),
+    "newer",
+    "新桥也不算兼容：渲染进程只认识自己构建时的形状",
+  );
   assert.equal(checkProtocolCompatibility(undefined), "missing");
   assert.equal(checkProtocolCompatibility(null), "missing");
   assert.equal(checkProtocolCompatibility(Number.NaN), "missing");
@@ -172,11 +176,17 @@ test("协议模块声明了 4 条边界，且每条都有契约、文档锚点�
   // local-store（渲染进程本地存储）、locale（语言偏好）。断言从「数量」改成「集合 + 每条都要有证据」——
   // 数量本身不是契约，「哪些边界、有没有契约/换实现说明/一致性测试」才是。
   const ids = policy.protocols.map((protocol) => protocol.id).sort();
-  assert.deepEqual(ids, ["bridge", "kernel-adapter", "locale", "local-store", "perf", "shell", "storage"].sort());
+  assert.deepEqual(
+    ids,
+    ["bridge", "kernel-adapter", "locale", "local-store", "perf", "shell", "storage"].sort(),
+  );
   for (const protocol of policy.protocols) {
     assert.ok(protocol.contract, `${protocol.id} 缺契约文件`);
     assert.ok(protocol.swap?.length > 20, `${protocol.id} 没有写"换实现"的做法`);
     assert.ok(protocol.conformance?.startsWith("tests/"), `${protocol.id} 缺一致性测试`);
-    assert.ok(readFileSync(join(REPO_ROOT, protocol.contract), "utf8").length > 0, `${protocol.contract} 不存在`);
+    assert.ok(
+      readFileSync(join(REPO_ROOT, protocol.contract), "utf8").length > 0,
+      `${protocol.contract} 不存在`,
+    );
   }
 });

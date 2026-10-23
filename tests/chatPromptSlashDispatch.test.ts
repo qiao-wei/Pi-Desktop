@@ -10,7 +10,7 @@
  * **精确命中已加载包命令** 时，而且走的是独立的 /api/capabilities/package/command。
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import test from "node:test";
 import { bridgeSource } from "./lib/bridgeSource.ts";
 import { appSource as readAppSource } from "./lib/appSource.ts";
@@ -53,7 +53,7 @@ test("chat submissions never dispatch extension commands", () => {
   assert.match(
     call?.[1] ?? "",
     /expandPromptTemplates: false/,
-    "typed chat text must reach the model even when it starts with \"/\"",
+    'typed chat text must reach the model even when it starts with "/"',
   );
   assert.doesNotMatch(
     call?.[1] ?? "",
@@ -81,10 +81,12 @@ test("composer only dispatches an exact, currently loaded package command", () =
   assert.match(args, /findCapabilityPackageCommand\(targetRuntime, packageId, commandName\)/);
 
   const submit = functionBody(appSourceText, "handleSubmit");
-  assert.match(submit, /matchSlashCommandArgs\(orderedText\)/);
+  // 手动技能调用（`/skill:<名字>`）之后，提交路径判断命令用的是翻译过的文本 `promptText`
+  // （不再是原始的 `orderedText`），否则 `/skill:foo` 会被当成一条未知的斜杠命令。
+  assert.match(submit, /matchSlashCommandArgs\(promptText\)/);
   assert.match(submit, /findSlashCommand\(capabilities, submittedCommand\.name\)/);
   // 派发必须早于聊天提交，命中命令时 `return`，不会落到 submitTurn。
   const dispatch = submit.indexOf("findSlashCommand(capabilities, submittedCommand.name)");
-  const chatSubmit = submit.indexOf("submitTurn(orderedText");
+  const chatSubmit = submit.indexOf("submitTurn(promptText");
   assert.ok(dispatch !== -1 && chatSubmit !== -1 && dispatch < chatSubmit);
 });

@@ -13,7 +13,7 @@
  * 先切出卡片组件区间，再在区间内检查。
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import test from "node:test";
 import { appSource as readAppSource } from "./lib/appSource.ts";
 

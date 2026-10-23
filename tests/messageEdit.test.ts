@@ -10,12 +10,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { bridgeSource } from "./lib/bridgeSource.ts";
+import { bridgeSource, routeBody as sharedRouteBody } from "./lib/bridgeSource.ts";
 import { appSource } from "./lib/appSource.ts";
+import { sourceDir } from "./lib/sourceDir.ts";
 
 const server = bridgeSource();
 const chatThread = readFileSync(new URL("../src/features/chat/ChatThread.tsx", import.meta.url), "utf8");
-const editBox = readFileSync(new URL("../src/features/chat/MessageEditBox.tsx", import.meta.url), "utf8");
+const editBox = sourceDir("src/features/chat");
 const thread = readFileSync(new URL("../src/components/assistant-ui/elements/thread.aui.tsx", import.meta.url), "utf8");
 const app = appSource();
 const useApp = readFileSync(new URL("../src/features/chat/usePiDesktopApp.ts", import.meta.url), "utf8");
@@ -74,18 +75,18 @@ function callbackBody(source: string, name: string): string {
   assert.fail(`callback ${name} body never closes`);
 }
 
-/** Body of one `url.pathname === "<path>"` route, up to the shared 404 tail. */
-function routeBody(path: string): string {
-  const marker = `url.pathname === "${path}"`;
-  const start = server.indexOf(marker);
-  assert.notEqual(start, -1, `route ${path} not found`);
-  const end = server.indexOf("sendJson(res, 404", start);
-  assert.notEqual(end, -1, `route ${path} tail not found`);
-  return server.slice(start, end);
+/**
+ * Body of one `url.pathname === "<path>"` route.
+ *
+ * 分支体已抽成 `handle_xxx(ctx)` 顶层处理器函数（见 `.scratch/branch-to-handlers.mjs`），
+ * 所以按处理器取体，而不是「按标记切到 404 兜底」—— 后者在路由被拆分后必然假红。
+ */
+function routeBodyOf(path: string): string {
+  return sharedRouteBody(server, `url.pathname === "${path}"`);
 }
 
 test("edit route rewinds the branch before prompting", () => {
-  const route = routeBody("/api/messages/edit");
+  const route = routeBodyOf("/api/messages/edit");
   assert.match(route, /parseChatBubbleId/);
   assert.match(route, /ref\.role !== "user"/);
   assert.match(route, /rewindTurn: ref\.turn/);

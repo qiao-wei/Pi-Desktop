@@ -28,8 +28,15 @@ import { removeBundledShims, runtimeShimSpecs } from "../server/agentShimFiles.m
 
 const require = createRequire(import.meta.url);
 
-const { resolveRuntimeMode, resolveNodeOnPath, resolvePythonOnPath, systemHostPath, loginShellPath, joinPathValues, bundledNodePaths } =
-  require("../src-electron/paths.js");
+const {
+  resolveRuntimeMode,
+  resolveNodeOnPath,
+  resolvePythonOnPath,
+  systemHostPath,
+  loginShellPath,
+  joinPathValues,
+  bundledNodePaths,
+} = require("../src-electron/paths.js");
 const { bridgeEnv } = require("../src-electron/sidecar.js");
 
 function withTemp(fn) {
@@ -84,7 +91,8 @@ function scaffoldRuntimes(root, { node = true, python = true } = {}) {
 
 test("带齐两个 runtime 判成 bundled，缺任一个判成 system", () => {
   // 每个断言一个新目录：同一个 root 里“造过”的 runtime 不会因为下一次参数就消失。
-  const modeOf = (options) => withTemp((root) => resolveRuntimeMode(scaffoldRuntimes(root, options), {}));
+  const modeOf = (options) =>
+    withTemp((root) => resolveRuntimeMode(scaffoldRuntimes(root, options), {}));
   assert.equal(modeOf({}), "bundled");
   assert.equal(modeOf({ python: false }), "system");
   assert.equal(modeOf({ node: false }), "system");
@@ -131,32 +139,40 @@ test("登录 shell 读不出来就原样透传 GUI 的 PATH", () => {
   assert.equal(systemHostPath({ env, platform: "darwin" }), "/usr/bin:/bin");
 });
 
-test("bundled 模式也回读登录 shell：nvm/pyenv 的解释器就是我们要让位的那些", { skip: process.platform === "win32" }, () =>
-  withTemp((root) => {
-    // `~/.local/bin` 是 pipx / 各类 CLI 安装器的落点（bsk 就在那里），brew 在 /opt/homebrew/bin。
-    // 两者都写在 .zprofile 里，所以不需要读 .zshrc 就能拿到。
-    const shell = fakeLoginShell(root, "/opt/homebrew/bin:/Users/me/.local/bin:/usr/bin:/bin");
-    const merged = systemHostPath({
-      env: { PATH: "/usr/bin:/bin", SHELL: shell },
-      platform: "darwin",
-    });
+test(
+  "bundled 模式也回读登录 shell：nvm/pyenv 的解释器就是我们要让位的那些",
+  { skip: process.platform === "win32" },
+  () =>
+    withTemp((root) => {
+      // `~/.local/bin` 是 pipx / 各类 CLI 安装器的落点（bsk 就在那里），brew 在 /opt/homebrew/bin。
+      // 两者都写在 .zprofile 里，所以不需要读 .zshrc 就能拿到。
+      const shell = fakeLoginShell(root, "/opt/homebrew/bin:/Users/me/.local/bin:/usr/bin:/bin");
+      const merged = systemHostPath({
+        env: { PATH: "/usr/bin:/bin", SHELL: shell },
+        platform: "darwin",
+      });
 
-    assert.equal(merged, "/opt/homebrew/bin:/Users/me/.local/bin:/usr/bin:/bin");
-    // 内置运行时只在用户没有自己的解释器时才接管，而 nvm / pyenv 只从交互式 rc 文件里
-    // 导 PATH——所以两种模式问的都是 -lic（`systemHostPath` 上方的注释是完整理由）。
-    assert.equal(loginShellArgs(root)[0], "-lic");
-  }));
+      assert.equal(merged, "/opt/homebrew/bin:/Users/me/.local/bin:/usr/bin:/bin");
+      // 内置运行时只在用户没有自己的解释器时才接管，而 nvm / pyenv 只从交互式 rc 文件里
+      // 导 PATH——所以两种模式问的都是 -lic（`systemHostPath` 上方的注释是完整理由）。
+      assert.equal(loginShellArgs(root)[0], "-lic");
+    }),
+);
 
-test("system 模式问的同样是交互式的 -lic（nvm / pyenv 的 node 只在 .zshrc 里）", { skip: process.platform === "win32" }, () =>
-  withTemp((root) => {
-    const shell = fakeLoginShell(root, "/usr/bin:/bin");
-    systemHostPath({
-      env: { PATH: "/usr/bin:/bin", SHELL: shell },
-      platform: "darwin",
-    });
+test(
+  "system 模式问的同样是交互式的 -lic（nvm / pyenv 的 node 只在 .zshrc 里）",
+  { skip: process.platform === "win32" },
+  () =>
+    withTemp((root) => {
+      const shell = fakeLoginShell(root, "/usr/bin:/bin");
+      systemHostPath({
+        env: { PATH: "/usr/bin:/bin", SHELL: shell },
+        platform: "darwin",
+      });
 
-    assert.equal(loginShellArgs(root)[0], "-lic", "少了 -i 就找不到 nvm 装的 node");
-  }));
+      assert.equal(loginShellArgs(root)[0], "-lic", "少了 -i 就找不到 nvm 装的 node");
+    }),
+);
 
 test("PATH 里已经有用户 node 和 python 时不再问登录 shell", () =>
   withTemp((root) => {
@@ -167,30 +183,41 @@ test("PATH 里已经有用户 node 和 python 时不再问登录 shell", () =>
     writeFileSync(python, "", "utf8");
     const path = `/usr/bin:${root}`;
     // SHELL 指向一个不存在的东西：两个解释器都在，就绝不该走到那一步。
-    assert.equal(systemHostPath({ env: { PATH: path, SHELL: "/missing" }, platform: "darwin" }), path);
+    assert.equal(
+      systemHostPath({ env: { PATH: path, SHELL: "/missing" }, platform: "darwin" }),
+      path,
+    );
   }));
 
-test("只有 node 不够：python 仍然可能只在 .zshrc 里，所以还会去问", { skip: process.platform === "win32" }, () =>
-  withTemp((root) => {
-    mkdirSync(root, { recursive: true });
-    const node = join(root, "node");
-    writeFileSync(node, "", "utf8");
-    const shell = fakeLoginShell(root, `${root}:/opt/homebrew/bin:/usr/bin:/bin`);
+test(
+  "只有 node 不够：python 仍然可能只在 .zshrc 里，所以还会去问",
+  { skip: process.platform === "win32" },
+  () =>
+    withTemp((root) => {
+      mkdirSync(root, { recursive: true });
+      const node = join(root, "node");
+      writeFileSync(node, "", "utf8");
+      const shell = fakeLoginShell(root, `${root}:/opt/homebrew/bin:/usr/bin:/bin`);
 
-    systemHostPath({ env: { PATH: `${root}:/usr/bin:/bin`, SHELL: shell }, platform: "darwin" });
+      systemHostPath({ env: { PATH: `${root}:/usr/bin:/bin`, SHELL: shell }, platform: "darwin" });
 
-    assert.equal(loginShellArgs(root)[0], "-lic", "只看 node 会把 pyenv 的 python 漏掉");
-  }));
+      assert.equal(loginShellArgs(root)[0], "-lic", "只看 node 会把 pyenv 的 python 漏掉");
+    }),
+);
 
-test("工具链自带的 python 不算「用户已有」，回读照样发生", { skip: process.platform === "win32" }, () =>
-  withTemp((root) => {
-    // 只装了 Command Line Tools 的 Mac：/usr/bin/python3 存在，但它是 3.9.6 + pip 21.x，
-    // 不能拿它当「用户已经有 Python」而跳过回读。
-    const shell = fakeLoginShell(root, "/opt/homebrew/bin:/usr/bin:/bin");
-    systemHostPath({ env: { PATH: "/usr/bin:/bin", SHELL: shell }, platform: "darwin" });
+test(
+  "工具链自带的 python 不算「用户已有」，回读照样发生",
+  { skip: process.platform === "win32" },
+  () =>
+    withTemp((root) => {
+      // 只装了 Command Line Tools 的 Mac：/usr/bin/python3 存在，但它是 3.9.6 + pip 21.x，
+      // 不能拿它当「用户已经有 Python」而跳过回读。
+      const shell = fakeLoginShell(root, "/opt/homebrew/bin:/usr/bin:/bin");
+      systemHostPath({ env: { PATH: "/usr/bin:/bin", SHELL: shell }, platform: "darwin" });
 
-    assert.equal(loginShellArgs(root)[0], "-lic");
-  }));
+      assert.equal(loginShellArgs(root)[0], "-lic");
+    }),
+);
 
 test("找 python 时跳过工具链目录，Linux 的 /usr/bin 不算工具链", () =>
   withTemp((root) => {
@@ -198,8 +225,16 @@ test("找 python 时跳过工具链目录，Linux 的 /usr/bin 不算工具链",
     const python = join(root, "python3");
     writeFileSync(python, "", "utf8");
 
-    assert.equal(resolvePythonOnPath(`/usr/bin:${root}`, "darwin"), python, "macOS /usr/bin 里的不算");
-    assert.equal(resolvePythonOnPath("/usr/bin", "linux"), join("/usr/bin", "python3"), "Linux 是发行版真环境");
+    assert.equal(
+      resolvePythonOnPath(`/usr/bin:${root}`, "darwin"),
+      python,
+      "macOS /usr/bin 里的不算",
+    );
+    assert.equal(
+      resolvePythonOnPath("/usr/bin", "linux"),
+      join("/usr/bin", "python3"),
+      "Linux 是发行版真环境",
+    );
     assert.equal(resolvePythonOnPath("/usr/bin:/bin", "darwin"), null);
   }));
 
@@ -210,25 +245,34 @@ test("PI_DESKTOP_HOST_PATH 能直接指定", () => {
 
 // macOS GUI 应用拿不到登录 shell 的 PATH（launchctl 的 PATH 是空的），nvm / pyenv / /opt/homebrew
 // 装的 node 只能靠回读登录 shell 的 PATH 才看得见。这里用一个假 shell 验证回读与污染处理。
-test("找得到登录 shell 里的 node（rc 输出污染也要能吃下）", { skip: process.platform === "win32" }, () =>
-  withTemp((root) => {
-    const bin = join(root, "nvm-bin");
-    mkdirSync(bin, { recursive: true });
-    const node = join(bin, "node");
-    writeFileSync(node, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-    chmodSync(node, 0o755);
+test(
+  "找得到登录 shell 里的 node（rc 输出污染也要能吃下）",
+  { skip: process.platform === "win32" },
+  () =>
+    withTemp((root) => {
+      const bin = join(root, "nvm-bin");
+      mkdirSync(bin, { recursive: true });
+      const node = join(bin, "node");
+      writeFileSync(node, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      chmodSync(node, 0o755);
 
-    const shell = fakeLoginShell(root, `${bin}:/usr/bin:/bin`);
-    const env = { PATH: "/usr/bin:/bin", SHELL: shell };
-    assert.equal(loginShellPath(env, "darwin"), `${bin}:/usr/bin:/bin`);
+      const shell = fakeLoginShell(root, `${bin}:/usr/bin:/bin`);
+      const env = { PATH: "/usr/bin:/bin", SHELL: shell };
+      assert.equal(loginShellPath(env, "darwin"), `${bin}:/usr/bin:/bin`);
 
-    const merged = systemHostPath({ env, platform: "darwin" });
-    assert.equal(merged, `${bin}:/usr/bin:/bin`, "登录 shell 的值在前，且不重复");
-    // 真的能从这条 PATH 里解析出 node —— 这才是这一整段存在的理由。
-    assert.equal(resolveNodeOnPath(merged, "darwin"), node);
-    // 并且把它交给子进程时，node 确实可以被执行。
-    assert.equal(execFileSync("/bin/sh", ["-c", "command -v node"], { env: { PATH: merged } }).toString().trim(), node);
-  }));
+      const merged = systemHostPath({ env, platform: "darwin" });
+      assert.equal(merged, `${bin}:/usr/bin:/bin`, "登录 shell 的值在前，且不重复");
+      // 真的能从这条 PATH 里解析出 node —— 这才是这一整段存在的理由。
+      assert.equal(resolveNodeOnPath(merged, "darwin"), node);
+      // 并且把它交给子进程时，node 确实可以被执行。
+      assert.equal(
+        execFileSync("/bin/sh", ["-c", "command -v node"], { env: { PATH: merged } })
+          .toString()
+          .trim(),
+        node,
+      );
+    }),
+);
 
 test("登录 shell 读不出来时不能编造 PATH", { skip: process.platform === "win32" }, () =>
   withTemp((root) => {
@@ -240,10 +284,14 @@ test("登录 shell 读不出来时不能编造 PATH", { skip: process.platform =
       systemHostPath({ env: { PATH: "/usr/bin:/bin", SHELL: silent }, platform: "darwin" }),
       "/usr/bin:/bin",
     );
-  }));
+  }),
+);
 
 test("PATH 合并去重且保序", () => {
-  assert.equal(joinPathValues(["/a/bin:/usr/bin", "/usr/bin:/bin"], "darwin"), "/a/bin:/usr/bin:/bin");
+  assert.equal(
+    joinPathValues(["/a/bin:/usr/bin", "/usr/bin:/bin"], "darwin"),
+    "/a/bin:/usr/bin:/bin",
+  );
   assert.equal(joinPathValues(["", ":/x::", "/x"], "darwin"), "/x");
   assert.equal(joinPathValues(["C:\\A;C:\\B", "c:\\a;D:\\E"], "win32"), "C:\\A;C:\\B;D:\\E");
 });
@@ -266,14 +314,17 @@ test("精简环境下 bridgeEnv 说清楚缺的是 Node，且不再设 BUNDLED_*
     };
 
     assert.throws(
-      () => bridgeEnv({ ...base, runtimeMode: "system", systemNode: null, hostPath: "/usr/bin:/bin" }),
+      () =>
+        bridgeEnv({ ...base, runtimeMode: "system", systemNode: null, hostPath: "/usr/bin:/bin" }),
       /找不到 Node\.js[\s\S]*Node\.js 22/,
       "精简版的失败要能直接照做，不是一句 missing runtime",
     );
 
     // 本进程自己也跑在某个宿主里（可能带着上一层的 PI_DESKTOP_*），所以要拿基线对比，
     // 而不是断言整个 env 里没有这些 key。
-    const inflated = Object.keys(process.env).filter((key) => key.startsWith("PI_DESKTOP_BUNDLED_"));
+    const inflated = Object.keys(process.env).filter((key) =>
+      key.startsWith("PI_DESKTOP_BUNDLED_"),
+    );
     const saved = Object.fromEntries(inflated.map((key) => [key, process.env[key]]));
     for (const key of inflated) {
       delete process.env[key];
@@ -352,12 +403,21 @@ test("旧 bundled 安装写下的 launcher 会被清掉，用户自己的文件�
     const names = runtimeShimSpecs("darwin").map((spec) => spec.name);
     assert.deepEqual(names.slice(0, 4), ["node", "nodejs", "npm", "npx"]);
     assert.ok(names.includes("python3.13") && names.includes("pip3.13"));
-    assert.deepEqual(runtimeShimSpecs("win32").slice(0, 2).map((spec) => spec.name), ["node.cmd", "nodejs.cmd"]);
+    assert.deepEqual(
+      runtimeShimSpecs("win32")
+        .slice(0, 2)
+        .map((spec) => spec.name),
+      ["node.cmd", "nodejs.cmd"],
+    );
 
-    writeFileSync(join(root, "node"), '#!/bin/sh\nexport PI_DESKTOP_BUNDLED_NODE_BIN=/x\n', "utf8");
-    writeFileSync(join(root, "pip3"), '#!/bin/sh\nexport PI_DESKTOP_BUNDLED_PYTHON_BIN=/y\n', "utf8");
+    writeFileSync(join(root, "node"), "#!/bin/sh\nexport PI_DESKTOP_BUNDLED_NODE_BIN=/x\n", "utf8");
+    writeFileSync(
+      join(root, "pip3"),
+      "#!/bin/sh\nexport PI_DESKTOP_BUNDLED_PYTHON_BIN=/y\n",
+      "utf8",
+    );
     // 用户自己放的：内容里没有我们的标记，不能被删。
-    writeFileSync(join(root, "python3"), "#!/bin/sh\nexec /usr/bin/python3 \"$@\"\n", "utf8");
+    writeFileSync(join(root, "python3"), '#!/bin/sh\nexec /usr/bin/python3 "$@"\n', "utf8");
     // 升级后残留的悬空软链：目标带 -runtime，算我们的。
     symlinkSync("/gone/node-runtime/bin/node", join(root, "npm"));
 
@@ -372,10 +432,11 @@ test("旧 bundled 安装写下的 launcher 会被清掉，用户自己的文件�
       warn: (message) => warned.push(message),
     });
 
-    assert.deepEqual(
-      removed.map((path) => path.slice(root.length + 1)).sort(),
-      ["node", "npm", "pip3"],
-    );
+    assert.deepEqual(removed.map((path) => path.slice(root.length + 1)).sort(), [
+      "node",
+      "npm",
+      "pip3",
+    ]);
     assert.ok(readFileSync(join(root, "python3"), "utf8").includes("exec /usr/bin/python3"));
     assert.deepEqual(warned, []);
   }));

@@ -21,17 +21,17 @@ import { attachmentKindFromMimeType, DIRECTORY_MIME_TYPE } from "../../shared/at
 import { pickNewFolderDrops, planComposerDrop } from "../../shared/composerDrop";
 import { htmlToSanitizedMarkup, escapeHtml } from "./pasteSanitize";
 import {
-  applyAttachmentBadgeAttributes,
-  applyCapabilityBadgeAttributes,
   replacePasteBadgePlaceholders,
   type ClipboardBadge,
 } from "./badgeClipboard";
 import {
+  applyManualSkillCommand,
   buildSlashMenuItems,
   findSlashStart,
   matchSlashTrigger,
   moveHighlight,
   readTriggerText,
+  skillCommandsDisabled,
   type SlashMenuItem,
 } from "./slashMenu";
 import {
@@ -46,6 +46,7 @@ import {
   type EditorPart,
 } from "./editorParts";
 import { badgeBeforeCaret, isMarkerOnlyTextNode, stepOverCaretMarker } from "./caretMarkerStep";
+import { createAttachmentBadgeNode, createCapabilityBadgeNode } from "./editorBadges";
 
 const MAX_ATTACHMENT_COUNT = 10;
 const MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024;
@@ -62,7 +63,7 @@ export interface MessageEditBoxProps {
   parts: ChatMessagePart[];
   attachments: ChatAttachment[];
   fallbackText: string;
-  capabilities: Pick<CapabilitiesState, "skills" | "packages">;
+  capabilities: Pick<CapabilitiesState, "skills" | "packages" | "skillCommandsEnabled">;
   canSubmit: boolean;
   submitting?: boolean;
   /**
@@ -73,12 +74,8 @@ export interface MessageEditBoxProps {
   onCancel: () => void;
   onSubmit: (messageId: string, payload: MessageEditPayload) => Promise<boolean>;
 }
+/* moved to src/features/chat/editorBadges.tsx */
 
-function formatFileSize(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
-}
 
 function createAttachmentId() {
   return `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -106,93 +103,10 @@ function escapeCssIdent(value: string) {
     ? CSS.escape(value)
     : value.replace(/["\\]/g, "\\$&");
 }
+/* moved to src/features/chat/editorBadges.tsx */
 
-function createAttachmentBadgeNode(
-  attachment: ChatAttachment,
-  onRemove: (id: string) => void,
-  /** 目录徽标的副标题。模块级函数拿不到 `t`，所以由组件侧传进来。 */
-  folderLabel: string,
-) {
-  const badge = document.createElement("span");
-  badge.className = `attachment-badge ${attachment.kind}`;
-  badge.dataset.attachmentId = attachment.id;
-  applyAttachmentBadgeAttributes(badge, attachment);
-  badge.contentEditable = "false";
+/* moved to src/features/chat/editorBadges.tsx */
 
-  if (attachment.kind === "image" && attachment.previewUrl) {
-    const image = document.createElement("img");
-    image.alt = "";
-    image.src = attachment.previewUrl;
-    badge.appendChild(image);
-  } else {
-    const icon = document.createElement("span");
-    icon.className = "attachment-badge-icon";
-    // 这个编辑框的徽标是字母凸排（文件是 "F"），目录用路径分隔符；真正的文件夹图标
-    // 在主编输入框和气泡里。
-    icon.textContent = attachment.kind === "directory" ? "/" : "F";
-    badge.appendChild(icon);
-  }
-
-  const copy = document.createElement("span");
-  copy.className = "attachment-badge-copy";
-  const title = document.createElement("strong");
-  title.title = attachment.name;
-  title.textContent = attachment.name;
-  const size = document.createElement("small");
-  size.textContent = attachment.kind === "directory" ? folderLabel : formatFileSize(attachment.size);
-  copy.append(title, size);
-
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.setAttribute("aria-label", `Remove ${attachment.name}`);
-  remove.title = `Remove ${attachment.name}`;
-  remove.innerHTML = "<span aria-hidden='true'>×</span>";
-  remove.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    onRemove(attachment.id);
-  });
-
-  badge.append(copy, remove);
-  return badge;
-}
-
-function createCapabilityBadgeNode(capability: EditorCapability, onRemove: (capability: EditorCapability) => void) {
-  const badge = document.createElement("span");
-  badge.className = `attachment-badge capability-badge ${capability.kind}`;
-  badge.dataset.capabilityId = capability.id;
-  badge.dataset.capabilityKind = capability.kind;
-  badge.dataset.capabilityInstanceId = capability.instanceId ?? "";
-  applyCapabilityBadgeAttributes(badge, capability);
-  badge.contentEditable = "false";
-
-  const icon = document.createElement("span");
-  icon.className = "attachment-badge-icon";
-  icon.textContent = "S";
-
-  const copy = document.createElement("span");
-  copy.className = "attachment-badge-copy";
-  const title = document.createElement("strong");
-  title.title = capability.name;
-  title.textContent = capability.name;
-  const subtitle = document.createElement("small");
-  subtitle.textContent = "Skill";
-  copy.append(title, subtitle);
-
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.setAttribute("aria-label", `Remove ${capability.name}`);
-  remove.title = `Remove ${capability.name}`;
-  remove.innerHTML = "<span aria-hidden='true'>×</span>";
-  remove.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    onRemove(capability);
-  });
-
-  badge.append(icon, copy, remove);
-  return badge;
-}
 
 export function MessageEditBox({
   messageId,
@@ -219,6 +133,8 @@ export function MessageEditBox({
 
   const [text, setText] = useState("");
   const [attachmentCount, setAttachmentCount] = useState(0);
+  /** 技能徽标数量：只挂徽标不打字也是一次合法提交（等价于 TUI 的 `/skill:name` 无参数）。 */
+  const [capabilityCount, setCapabilityCount] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -244,6 +160,7 @@ export function MessageEditBox({
     const next = readEditorParts(editor, attachmentByIdRef.current, capabilityByKeyRef.current);
     setText(editorText(next));
     setAttachmentCount(editorAttachments(next).length);
+    setCapabilityCount(next.filter((part) => part.kind === "capability").length);
   }, []);
 
   const focusEditor = useCallback(() => {
@@ -252,7 +169,6 @@ export function MessageEditBox({
 
   const caretRange = useCallback((): Range => {
     const editor = editorRef.current;
-    const selection = window.getSelection();
     const saved = rangeRef.current;
     if (saved && editor && editor.contains(saved.startContainer) && editor.contains(saved.endContainer)) {
       return saved.cloneRange();
@@ -376,9 +292,7 @@ export function MessageEditBox({
     return () => document.removeEventListener("selectionchange", handleSelectionChange);
   }, []);
 
-  function attachmentMap() {
-    return attachmentByIdRef.current;
-  }
+  
 
   function removeAttachment(id: string) {
     attachmentByIdRef.current.delete(id);
@@ -762,7 +676,14 @@ export function MessageEditBox({
     const partsNow = readEditorParts(editor, attachmentByIdRef.current, capabilityByKeyRef.current);
     const nextText = editorText(partsNow);
     const attachmentList = editorAttachments(partsNow);
-    if (!nextText.trim() && !attachmentList.length) {
+    const editorParts = toPromptMessageParts(partsNow);
+    // 与主 composer 同一套语义（共用 applyManualSkillCommand）：`/skill:<名字> [args]` 翻译成
+    // 「徽标 + 参数」；只有徽标、没有文字也算提交。两处不一致，同一条消息编辑重发后的行为
+    // 就会和首次发送不同。
+    const manualSkillCommand = applyManualSkillCommand(nextText, capabilities.skills, editorParts);
+    const promptText = manualSkillCommand.text;
+    const promptParts = manualSkillCommand.parts;
+    if (!promptText.trim() && !attachmentList.length && !promptParts.some((part) => part.kind === "capability")) {
       return;
     }
     setError("");
@@ -770,8 +691,8 @@ export function MessageEditBox({
     try {
       const attachmentInputs = await toAttachmentInputs(attachmentList, (attachment) => fileByIdRef.current.get(attachment.id));
       const accepted = await onSubmit(messageId, {
-        text: nextText,
-        messageParts: toPromptMessageParts(partsNow),
+        text: promptText,
+        messageParts: promptParts,
         attachments: attachmentInputs,
       });
       if (!accepted) {
@@ -783,7 +704,7 @@ export function MessageEditBox({
   }
 
   const submitDisabled =
-    busy || submitting || !canSubmit || (!text.trim() && attachmentCount === 0);
+    busy || submitting || !canSubmit || (!text.trim() && attachmentCount === 0 && capabilityCount === 0);
 
   return (
     <div
@@ -877,6 +798,12 @@ export function MessageEditBox({
             </div>
           </div>
 
+          {menuQuery != null && skillCommandsDisabled(capabilities) ? (
+            // 技能被 pi 设置藏掉时得说一声，并且把仍然可用的手打入口写出来。
+            <div className="capability-picker slash-menu" role="status">
+              <p className="slash-menu-hint">{t("capability.slashMenu.skillCommandsDisabled")}</p>
+            </div>
+          ) : null}
           {menuQuery != null && skillItems.length ? (
             <div className="capability-picker slash-menu" role="listbox" aria-label={t("message.editSkills")}>
               <div className="slash-menu-section">

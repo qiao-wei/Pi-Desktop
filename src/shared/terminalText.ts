@@ -89,8 +89,11 @@ const ANSI_BASIC_COLOR_NAMES = [
 /** Drop every escape sequence, keep the printable text (and the existing behaviour of callers). */
 export function stripTerminalSequences(value: string): string {
   return value
+    // oxlint-disable-next-line no-control-regex -- 目的就是匹配控制字符（终端转义序列）
     .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "")
+    // oxlint-disable-next-line no-control-regex -- 目的就是匹配控制字符（终端转义序列）
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    // oxlint-disable-next-line no-control-regex -- 目的就是匹配控制字符（终端转义序列）
     .replace(/\u001b[@-_]/g, "");
 }
 

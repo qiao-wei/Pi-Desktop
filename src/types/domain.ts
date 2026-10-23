@@ -538,6 +538,29 @@ export interface CapabilitiesState {
   mcpServers?: CapabilityMcpServer[];
   builtinCommands?: BuiltinCommand[];
   session: CapabilitySessionSelection;
+  /**
+   * pi 加载器对技能的诊断。目前会出现的两类：
+   * - `collision`：同名技能（pi 保留先发现的那份，`collision.winnerPath` 是赢家）；
+   * - `warning`：frontmatter 缺失/非法等，这条技能根本没被加载。
+   */
+  skillDiagnostics?: CapabilitySkillDiagnostic[];
+  /**
+   * pi 设置 `enableSkillCommands`（default true）。false 时技能不列在 `/` 菜单里，
+   * 手打 `/skill:<名字>` 仍然能调用（与 pi TUI 同一语义）。
+   */
+  skillCommandsEnabled?: boolean;
+}
+
+export interface CapabilitySkillDiagnostic {
+  type: "warning" | "error" | "collision";
+  message: string;
+  /** 出问题的技能文件（冲突时是输掉的那份）。 */
+  path: string;
+  collision?: {
+    name: string;
+    winnerPath: string;
+    loserPath: string;
+  } | null;
 }
 
 export interface AppSnapshot {

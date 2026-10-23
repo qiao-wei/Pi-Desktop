@@ -12,7 +12,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 const root = join(import.meta.dirname, "..");
-import { bridgeSource } from "./lib/bridgeSource.ts";
+import { routeBody, bridgeSource } from "./lib/bridgeSource.ts";
 
 const serverSource = bridgeSource();
 const brokerSource = readFileSync(join(root, "server", "modelLogin.mjs"), "utf8");
@@ -49,7 +49,7 @@ const providerIds = ["openai-codex", "anthropic", "github-copilot", "kimi-coding
 test("桥用 pi 的登录实现，而不是自己拼一套：ModelRuntime.login + AuthInteraction", () => {
   const body = functionBody(serverSource, "streamModelLogin");
   assert.match(body, /modelRuntime\.login\(providerId, authType, interaction/, "要走 pi 的登录流程");
-  assert.match(body, /getDeviceId: \(\) => runtime\.settingsManager\.getOrCreateDeviceId\(\)/, "OpenAI 订阅登录需要的 device id 要接上");
+  assert.match(body, /getDeviceId: \(\) => state\.runtime\.settingsManager\.getOrCreateDeviceId\(\)/, "OpenAI 订阅登录需要的 device id 要接上");
   assert.match(body, /providerLoginMethods\(provider\)/, "支持哪些登录方式按 provider.auth 判，不写死");
   assert.match(body, /modelLoginBroker\.start\(/, "交互事件要通过 broker 转成 NDJSON");
   assert.match(body, /res\.on\("close", \(\) => modelLoginBroker\.cancel\(sessionId\)\)/, "客户端断开要取消这次登录");
@@ -59,7 +59,9 @@ test("登录路由按 :id + authType 分派，respond / cancel 是独立口", ()
   assert.match(serverSource, /url\.pathname === "\/api\/model-providers\/login\/respond"/);
   assert.match(serverSource, /url\.pathname === "\/api\/model-providers\/login\/cancel"/);
   assert.match(serverSource, /url\.pathname\.endsWith\("\/login"\)/);
-  assert.match(serverSource, /await streamModelLogin\(req, res, providerId, requestId\)/);
+  // 分支体已抽成处理器函数：按处理器取体（见 tests/lib/bridgeSource.ts#routeBody）。
+  const login = routeBody(serverSource, 'url.pathname.endsWith("/login")');
+  assert.match(login, /await streamModelLogin\(ctx\.req, ctx\.res, providerId, ctx\.requestId\)/);
   // respond / cancel 必须排在 /:id/login 之前，否则会被当成某家的登录。
   const respondAt = serverSource.indexOf('"/api/model-providers/login/respond"');
   const loginAt = serverSource.indexOf('url.pathname.endsWith("/login")');

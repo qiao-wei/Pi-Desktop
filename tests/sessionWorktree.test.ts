@@ -21,14 +21,26 @@ import {
   worktreeRemoveBlockReason,
   worktreeRemoveNeedsForce,
 } from "../src/shared/sessionWorktree.ts";
-import { bridgeSource } from "./lib/bridgeSource.ts";
+import { routeBody, bridgeSource, functionBody } from "./lib/bridgeSource.ts";
 import { appSource as readAppSource } from "./lib/appSource.ts";
 
 const appSourceText = readAppSource();
-const hookSource = readFileSync(new URL("../src/features/chat/useProjectGit.ts", import.meta.url), "utf8");
-const worktreeHookSource = readFileSync(new URL("../src/features/chat/useSessionWorktree.ts", import.meta.url), "utf8");
-const badgeSource = readFileSync(new URL("../src/components/SessionWorktreeBadge.tsx", import.meta.url), "utf8");
-const appHookSource = readFileSync(new URL("../src/features/chat/usePiDesktopApp.ts", import.meta.url), "utf8");
+const hookSource = readFileSync(
+  new URL("../src/features/chat/useProjectGit.ts", import.meta.url),
+  "utf8",
+);
+const worktreeHookSource = readFileSync(
+  new URL("../src/features/chat/useSessionWorktree.ts", import.meta.url),
+  "utf8",
+);
+const badgeSource = readFileSync(
+  new URL("../src/components/SessionWorktreeBadge.tsx", import.meta.url),
+  "utf8",
+);
+const appHookSource = readFileSync(
+  new URL("../src/features/chat/usePiDesktopApp.ts", import.meta.url),
+  "utf8",
+);
 const serverSource = bridgeSource();
 const zhSource = readFileSync(new URL("../src/i18n/zh.ts", import.meta.url), "utf8");
 const enSource = readFileSync(new URL("../src/i18n/en.ts", import.meta.url), "utf8");
@@ -43,7 +55,16 @@ function region(source: string, startMark: string, endMark: string): string {
 }
 
 function info(patch = {}) {
-  return { isWorktree: true, path: "/agent/worktrees/app-1", displayName: "app-1", exists: true, branch: "", detached: true, changes: { changed: 0, untracked: 0, ignored: 0 }, ...patch };
+  return {
+    isWorktree: true,
+    path: "/agent/worktrees/app-1",
+    displayName: "app-1",
+    exists: true,
+    branch: "",
+    detached: true,
+    changes: { changed: 0, untracked: 0, ignored: 0 },
+    ...patch,
+  };
 }
 
 test("worktreeBadgeKind：null / 非 worktree 都隐藏，只有真 worktree 才显示", () => {
@@ -55,8 +76,16 @@ test("worktreeBadgeKind：null / 非 worktree 都隐藏，只有真 worktree 才
 
 test("worktreeChangeTotals / isWorktreeDirty：缺字段按 0，三类任一非零就是脏", () => {
   assert.deepEqual(worktreeChangeTotals(null), { changed: 0, untracked: 0, ignored: 0, total: 0 });
-  assert.deepEqual(worktreeChangeTotals({ isWorktree: true }), { changed: 0, untracked: 0, ignored: 0, total: 0 });
-  assert.equal(isWorktreeDirty({ isWorktree: true, changes: { changed: 2, untracked: 0, ignored: 1 } }), true);
+  assert.deepEqual(worktreeChangeTotals({ isWorktree: true }), {
+    changed: 0,
+    untracked: 0,
+    ignored: 0,
+    total: 0,
+  });
+  assert.equal(
+    isWorktreeDirty({ isWorktree: true, changes: { changed: 2, untracked: 0, ignored: 1 } }),
+    true,
+  );
   assert.equal(isWorktreeDirty(info()), false);
 });
 
@@ -72,9 +101,22 @@ test("worktreeCreateBranchBlockReason：streaming > busy > 目录消失 > 可操
   const ok = { isStreaming: false, isBusy: false, info: info() };
   assert.equal(worktreeCreateBranchBlockReason(ok), "ok");
   assert.equal(worktreeCreateBranchBlockReason({ ...ok, isBusy: true }), "busy");
-  assert.equal(worktreeCreateBranchBlockReason({ ...ok, isStreaming: true, isBusy: true }), "streaming");
-  assert.equal(worktreeCreateBranchBlockReason({ isStreaming: false, isBusy: false, info: info({ exists: false }) }), "missing");
-  assert.equal(worktreeCreateBranchBlockReason({ isStreaming: false, isBusy: false, info: null }), "missing");
+  assert.equal(
+    worktreeCreateBranchBlockReason({ ...ok, isStreaming: true, isBusy: true }),
+    "streaming",
+  );
+  assert.equal(
+    worktreeCreateBranchBlockReason({
+      isStreaming: false,
+      isBusy: false,
+      info: info({ exists: false }),
+    }),
+    "missing",
+  );
+  assert.equal(
+    worktreeCreateBranchBlockReason({ isStreaming: false, isBusy: false, info: null }),
+    "missing",
+  );
 });
 
 test("worktreeRemoveBlockReason：目录消失不拦（移除就是清残留登记信息的入口）", () => {
@@ -85,9 +127,20 @@ test("worktreeRemoveBlockReason：目录消失不拦（移除就是清残留登�
 
 test("worktreeRemoveNeedsForce：只有有未提交内容才 force", () => {
   assert.equal(worktreeRemoveNeedsForce(info()), false);
-  assert.equal(worktreeRemoveNeedsForce(info({ changes: { changed: 1, untracked: 0, ignored: 0 } })), true);
-  assert.equal(worktreeRemoveNeedsForce(info({ changes: { changed: 0, untracked: 0, ignored: 3 } })), true);
-  assert.equal(worktreeRemoveNeedsForce(info({ exists: false, changes: { changed: 4, untracked: 0, ignored: 0 } })), true);
+  assert.equal(
+    worktreeRemoveNeedsForce(info({ changes: { changed: 1, untracked: 0, ignored: 0 } })),
+    true,
+  );
+  assert.equal(
+    worktreeRemoveNeedsForce(info({ changes: { changed: 0, untracked: 0, ignored: 3 } })),
+    true,
+  );
+  assert.equal(
+    worktreeRemoveNeedsForce(
+      info({ exists: false, changes: { changed: 4, untracked: 0, ignored: 0 } }),
+    ),
+    true,
+  );
 });
 
 test("App：git 徽标按会话的 workspace 取，worktree 徽标同时接线", () => {
@@ -109,7 +162,11 @@ test("App：git 徽标按会话的 workspace 取，worktree 徽标同时接线",
 
 test("useProjectGit：读用 sessionPath 查询参数，四个写操作都带 sessionPath", () => {
   assert.match(hookSource, /sessionPath\?: string;/, "选项要声明 sessionPath");
-  assert.match(hookSource, /query\.set\("sessionPath", sessionPath\)/, "GET /api/projects/git 要带 sessionPath");
+  assert.match(
+    hookSource,
+    /query\.set\("sessionPath", sessionPath\)/,
+    "GET /api/projects/git 要带 sessionPath",
+  );
   for (const route of ["switch", "create-branch", "commit"]) {
     const call = region(hookSource, `"/api/projects/git/${route}"`, ");");
     assert.match(call, /projectId, sessionPath,/, `${route} 的请求体要带 sessionPath`);
@@ -119,7 +176,11 @@ test("useProjectGit：读用 sessionPath 查询参数，四个写操作都带 se
 });
 
 test("侧栏「＋」：一次点击就是普通新会话，⌥/Alt 点击走 worktree，项目菜单里也有入口", () => {
-  const plus = region(appSourceText, "aria-label={t(\"sidebar.newSession\")}", "<SidebarNewSessionIcon size={16} />");
+  const plus = region(
+    appSourceText,
+    'aria-label={t("sidebar.newSession")}',
+    "<SidebarNewSessionIcon size={16} />",
+  );
   // 常规路径不能退化成「先开菜单再选一项」：点一下就要建出普通会话。
   assert.match(
     plus,
@@ -130,70 +191,158 @@ test("侧栏「＋」：一次点击就是普通新会话，⌥/Alt 点击走 wo
   assert.match(plus, /title=\{t\("sidebar\.newSessionHint"\)\}/, "tooltip 要说明 ⌥/Alt 的用法");
 
   // worktree 的发现入口放在项目 ⋯ 菜单里（不占「＋」的点击）。
-  const projectMenu = region(appSourceText, 'aria-label={t("sidebar.projectMenu")}', "</DropdownMenu>");
-  assert.match(projectMenu, /createSessionFromSidebar\(project\.id, \{ worktree: true \}\)/, "项目菜单里要有 worktree 入口");
+  const projectMenu = region(
+    appSourceText,
+    'aria-label={t("sidebar.projectMenu")}',
+    "</DropdownMenu>",
+  );
+  assert.match(
+    projectMenu,
+    /createSessionFromSidebar\(project\.id, \{ worktree: true \}\)/,
+    "项目菜单里要有 worktree 入口",
+  );
 
-  const fn = region(appSourceText, "function createSessionFromSidebar", "async function selectSessionFromSidebar");
-  assert.match(fn, /onCreateSession\(projectId, undefined, options\)/, "选项要透传给 onCreateSession");
+  const fn = region(
+    appSourceText,
+    "function createSessionFromSidebar",
+    "async function selectSessionFromSidebar",
+  );
+  assert.match(
+    fn,
+    /onCreateSession\(projectId, undefined, options\)/,
+    "选项要透传给 onCreateSession",
+  );
 
-  const create = region(appHookSource, "const createSession = useCallback(", "const updateSession = useCallback(");
-  assert.match(create, /worktree: options\?\.worktree \? \{ enabled: true \} : undefined/, "createSession 要把 worktree 开关发给 /api/sessions");
+  const create = region(
+    appHookSource,
+    "const createSession = useCallback(",
+    "const updateSession = useCallback(",
+  );
+  assert.match(
+    create,
+    /worktree: options\?\.worktree \? \{ enabled: true \} : undefined/,
+    "createSession 要把 worktree 开关发给 /api/sessions",
+  );
 });
 
 test("useSessionWorktree：移除会把服务端返回的 bootstrap 整体替换，建分支只刷新徽标", () => {
   assert.match(worktreeHookSource, /\/api\/sessions\/worktree\?/, "读 worktree 信息");
   assert.match(worktreeHookSource, /"\/api\/sessions\/worktree\/branch"/, "建分支路由");
   assert.match(worktreeHookSource, /"\/api\/sessions\/worktree\/remove"/, "移除路由");
-  assert.match(worktreeHookSource, /onBootstrap\?\.\(response\.result\)/, "移除后必须整体替换 bootstrap（会话已退回主检出）");
+  assert.match(
+    worktreeHookSource,
+    /onBootstrap\?\.\(response\.result\)/,
+    "移除后必须整体替换 bootstrap（会话已退回主检出）",
+  );
   assert.match(worktreeHookSource, /force: Boolean\(options\.force\)/, "force 要透传给服务端");
 });
 
 test("徽标组件：移除永远先弹确认框，force 由纯函数决定", () => {
   assert.match(badgeSource, /worktreeBadgeKind\(info\) === "hidden"/, "非 worktree 直接不渲染");
   assert.match(badgeSource, /<AlertDialog open=\{isRemoveOpen\}/, "移除要走确认框");
-  assert.match(badgeSource, /onRemove\(\{ force: worktreeRemoveNeedsForce\(info\) \}\)/, "force 由共享规则决定");
-  assert.match(badgeSource, /worktreeCreateBranchBlockReason\(\{ isStreaming, isBusy: busy, info \}\)/, "建分支按钮的禁用口径走共享规则");
-  assert.match(badgeSource, /const removeBlock = worktreeRemoveBlockReason\(\{ isStreaming, isBusy: busy \}\)/, "移除按钮的禁用口径走共享规则");
-  assert.match(badgeSource, /const removeDisabled = removeBlock !== "ok"/, "移除是否禁用只看这个规则（不看目录是否存在）");
+  assert.match(
+    badgeSource,
+    /onRemove\(\{ force: worktreeRemoveNeedsForce\(info\) \}\)/,
+    "force 由共享规则决定",
+  );
+  assert.match(
+    badgeSource,
+    /worktreeCreateBranchBlockReason\(\{ isStreaming, isBusy: busy, info \}\)/,
+    "建分支按钮的禁用口径走共享规则",
+  );
+  assert.match(
+    badgeSource,
+    /const removeBlock = worktreeRemoveBlockReason\(\{ isStreaming, isBusy: busy \}\)/,
+    "移除按钮的禁用口径走共享规则",
+  );
+  assert.match(
+    badgeSource,
+    /const removeDisabled = removeBlock !== "ok"/,
+    "移除是否禁用只看这个规则（不看目录是否存在）",
+  );
   assert.match(badgeSource, /disabled=\{removeDisabled\}/, "移除按钮要真的用上这个结果");
-  assert.match(badgeSource, /t\("worktree.removeMissingDesc"\)/, "目录已消失时确认框要说清楚只是清登记信息");
+  assert.match(
+    badgeSource,
+    /t\("worktree.removeMissingDesc"\)/,
+    "目录已消失时确认框要说清楚只是清登记信息",
+  );
 });
 
 test("徽标组件：操作按钮的副标题会换行，不溢出弹层", () => {
   // Button 基类带 `whitespace-nowrap`（给单行标签用的）。这里是「图标 + 单行标题 + 一段说明」
   // 的两行式按钮，不覆盖就只能让说明横着冲出弹层（2026-09-23 真机截图发现）。
-  const actionButtons = badgeSource.match(/className="h-auto [^"]*flex-col items-start[^"]*"/g) ?? [];
+  const actionButtons =
+    badgeSource.match(/className="h-auto [^"]*flex-col items-start[^"]*"/g) ?? [];
   assert.equal(actionButtons.length, 2, "建分支/移除两个按钮要保持两行式结构");
   for (const button of actionButtons) {
     assert.match(button, /whitespace-normal/, `两行式按钮必须覆盖 whitespace-nowrap：${button}`);
     assert.match(button, /w-full/, "按钮要撑满弹层宽度，否则 flex 子项不收缩");
   }
-  const hintSpans = badgeSource.match(/className="w-full text-left text-\[0\.7rem\] leading-snug font-normal text-muted-foreground"/g) ?? [];
+  const hintSpans =
+    badgeSource.match(
+      /className="w-full text-left text-\[0\.7rem\] leading-snug font-normal text-muted-foreground"/g,
+    ) ?? [];
   assert.equal(hintSpans.length, 2, "两段说明都要能换行（w-full + leading-snug）");
 });
 
 test("服务端接线：worktree 路由 / 会话 cwd / git 写操作都落在会话 workspace 上", () => {
   assert.match(serverSource, /url\.pathname === "\/api\/sessions\/worktree"/, "worktree 信息路由");
-  assert.match(serverSource, /url\.pathname === "\/api\/sessions\/worktree\/branch"/, "worktree 建分支路由");
-  assert.match(serverSource, /url\.pathname === "\/api\/sessions\/worktree\/remove"/, "worktree 移除路由");
-  assert.match(serverSource, /worktreeRequest\?\.enabled \? await createSessionWorktree\(project, worktreeRequest\)/, "新会话按开关建 worktree");
+  assert.match(
+    serverSource,
+    /url\.pathname === "\/api\/sessions\/worktree\/branch"/,
+    "worktree 建分支路由",
+  );
+  assert.match(
+    serverSource,
+    /url\.pathname === "\/api\/sessions\/worktree\/remove"/,
+    "worktree 移除路由",
+  );
+  assert.match(
+    serverSource,
+    /worktreeRequest\?\.enabled \? await createSessionWorktree\(project, worktreeRequest\)/,
+    "新会话按开关建 worktree",
+  );
   // 会话文件头里的 cwd 才是会话自己的工作目录，不能再被 cwdOverride 拽回项目目录。
-  assert.match(serverSource, /SessionManager\.open\(sessionPath, getProjectSessionDir\(project\)\)/, "打开会话不再传 cwdOverride");
+  assert.match(
+    serverSource,
+    /SessionManager\.open\(sessionPath, getProjectSessionDir\(project\)\)/,
+    "打开会话不再传 cwdOverride",
+  );
   // 索引里的 cwd 也要走同一判定，否则删掉 worktree 后还会把死路径写回去。
-  assert.match(serverSource, /cwd: sessionWorkspaceCwd\(project, sessionManager\)/, "会话索引 cwd 走 workspace 判定");
+  assert.match(
+    serverSource,
+    /cwd: sessionWorkspaceCwd\(project, sessionManager\)/,
+    "会话索引 cwd 走 workspace 判定",
+  );
   // git 的四个写操作必须按会话 workspace 干活（否则会提交到主检出）。
   for (const route of ["switch", "create-branch", "commit"]) {
-    const call = region(serverSource, `url.pathname === "/api/projects/git/${route}"`, "return;");
-    assert.match(call, /requestWorkspaceCwd\(project, body\)/, `${route} 要在会话 workspace 里执行`);
+    // 分支体已抽成处理器函数（见 tests/lib/bridgeSource.ts#routeBody）：region 那种「切到下一个 return」
+    // 的写法在分支被抽走后必然假红。
+    const call = routeBody(serverSource, `url.pathname === "/api/projects/git/${route}"`);
+    assert.match(
+      call,
+      /requestWorkspaceCwd\(project, body\)/,
+      `${route} 要在会话 workspace 里执行`,
+    );
   }
   // 删会话时顺手回收 worktree；目录已被外部删掉时也要能把登记信息清掉。
-  assert.match(serverSource, /scheduleWorktreeCleanup\(project, resolvedPath\)/, "删除会话要回收 worktree");
-  const remove = region(serverSource, "async function removeSessionWorktree", "function scheduleWorktreeCleanup");
+  assert.match(
+    serverSource,
+    /scheduleWorktreeCleanup\(project, resolvedPath\)/,
+    "删除会话要回收 worktree",
+  );
+  // 取函数体而不是「到 scheduleWorktreeCleanup 为止」：两个函数现在住在不同文件
+  // （removeSessionWorktree → server/projectSessions.mjs），按拼接顺序取区间会找不到终点。
+  const remove = functionBody(serverSource, "async function removeSessionWorktree");
   assert.ok(
     !/requireSessionWorktreeCwd/.test(remove),
     "移除 worktree 不能用「目录必须存在」的闸：目录被外部删掉时那是唯一的清理入口",
   );
-  assert.match(remove, /isManagedWorktreePath\(worktreesRoot, cwd\)/, "移除仍然限定在应用自己的 worktree 里");
+  assert.match(
+    remove,
+    /isManagedWorktreePath\(worktreesRoot, cwd\)/,
+    "移除仍然限定在应用自己的 worktree 里",
+  );
 });
 
 test("删除弹窗：worktree 会话说清 worktree 会一起删，普通会话保持原文案", () => {
@@ -201,7 +350,11 @@ test("删除弹窗：worktree 会话说清 worktree 会一起删，普通会话�
   const opens = appSourceText.match(/setDialog\(\{ kind: "archive-session"[^}]*\}\)/g) ?? [];
   assert.equal(opens.length, 2, "置顶与项目两处入口");
   for (const open of opens) {
-    assert.match(open, /inWorktree: Boolean\(session\.inWorktree\)/, `入口要带上 inWorktree：${open}`);
+    assert.match(
+      open,
+      /inWorktree: Boolean\(session\.inWorktree\)/,
+      `入口要带上 inWorktree：${open}`,
+    );
   }
   assert.match(
     appSourceText,

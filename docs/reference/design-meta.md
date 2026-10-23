@@ -1,4 +1,22 @@
 ---
+title: "Meta 设计系统分析笔记（外部参考，不是我方规范）"
+type: doc
+status: archived
+owner: "@qiaowei"
+created: 2026-10-22
+updated: 2026-10-23
+summary: "从 Meta 的页面反推出来的设计系统笔记，保留原文与设计令牌；我方 UI 约定见 CONTEXT.md 与 src/app/styles.css。"
+tags: [reference, design, external]
+related: [ADR-001]
+---
+
+> **这不是本项目的设计规范。** 这份笔记是对 Meta 设计系统的分析（原文含设计令牌），
+> 2026-10-23 从仓库根目录的 `DESIGN.md` 移到这里，只为「我们参考过什么」留痕。
+> 本项目自己的 UI 约定在 `CONTEXT.md`（词表）与 `src/app/styles.css` 及 `src/components/ui/`。
+
+## 原设计令牌（frontmatter 原文，保留以便对照）
+
+```yaml
 version: alpha
 name: Meta-design-analysis
 description: Meta's design system spans hardware commerce (Quest VR, Ray-Ban Meta AI glasses) and brand surfaces with a confident product-merchandising voice. The system pairs a stark white canvas with full-bleed photographic product cards, a confident Optimistic VF wordmark/headline face, dual-CTA hero patterns (black primary + outlined secondary), and a saturated cobalt blue (#0064E0) for in-product purchase actions. Pill-shaped 100px-radius buttons, generous 24-32px card rounding, and tight three-tier text hierarchy carry across homepage, product detail (PDP), buy-now configurator, and accessory subpages.
@@ -346,7 +364,15 @@ components:
     rounded: "{rounded.xl}"
     padding: "{spacing.xxl}"
     border: "1px solid {colors.hairline-soft}"
----
+type: doc
+status: archived
+owner: "@qiaowei"
+created: 2026-10-22
+updated: 2026-10-23
+summary: "Meta 设计系统的分析笔记（外部参考，不是我方的设计规范）。我方 UI 约定见 CONTEXT.md 与 src/app/styles.css。"
+tags: [reference, design]
+```
+
 
 # 这份文件是什么（定位说明，2026-10-22 补）
 
@@ -684,7 +710,7 @@ The system runs predominantly flat. Elevation is reserved for two interaction la
 
 1. Focus on ONE component at a time. The system has high internal consistency — small precision wins compound.
 2. Reference component names and tokens directly (`{colors.primary}`, `{component-name}-pressed`, `{rounded.full}`) — do not paraphrase.
-3. Run `npx @google/design.md lint DESIGN.md` after edits to catch broken refs, contrast issues, orphaned tokens.
+3. Run `npx @google/design.md lint docs/reference/design-meta.md` after edits to catch broken refs, contrast issues, orphaned tokens.
 4. Add new variants as separate `components:` entries (`-pressed`, `-disabled`, `-focused`) — do not bury them inside prose.
 5. Default to `{typography.body-md}` for body and `{typography.subtitle-lg}` for emphasis. Headlines step down through `hero-display → display-lg → heading-lg → heading-md → heading-sm`.
 6. Keep `{colors.primary}` (cobalt) scarce. If it appears outside the buy-now flow on a viewport, ask whether the surface really needs to look like a checkout panel.

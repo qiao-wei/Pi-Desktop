@@ -22,7 +22,6 @@ import { homedir } from "node:os";
 
 const AGENT_DIR = process.env.PI_AGENT_DIR || join(homedir(), ".pi", "agent");
 const MODELS_FILE = join(AGENT_DIR, "models.json");
-const SETTINGS_FILE = join(AGENT_DIR, "settings.json");
 const PROVIDER = "bailian";
 const MODEL = "qwen3.8-flash";
 
@@ -85,8 +84,6 @@ export function applyCompactionEnv(mode, agentDir = AGENT_DIR) {
   const modelsFile = join(agentDir, "models.json");
   const settingsFile = join(agentDir, "settings.json");
 
-  const models = readJson(modelsFile);
-  const entry = modelEntry(models);
   const contextWindow = patchContextWindow(modelsFile, mode === "change" ? 64000 : 256000);
 
   const settings = readJson(settingsFile);

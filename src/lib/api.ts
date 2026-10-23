@@ -509,12 +509,13 @@ function assertProtocolVersion(response: { protocolVersion?: number } | null, pa
  * 同一个桥只问一次；换 transport（测试/别的宿主）会重新问。
  */
 let probedTransport: unknown = null;
-let probedVersion: number | undefined;
+
 
 export async function probeBridgeProtocol(): Promise<BridgeHandshake> {
   const transport = getBridgeTransport();
   const handshake = await transport.request<BridgeHandshake>("/api/protocol");
-  probedVersion = assertProtocolVersion(handshake, "/api/protocol");
+  // 只做校验（不匹配就抛），版本本身不用留 —— 留成变量会变成「只写不读」的死存储。
+  assertProtocolVersion(handshake, "/api/protocol");
   probedTransport = transport;
   return handshake as BridgeHandshake;
 }

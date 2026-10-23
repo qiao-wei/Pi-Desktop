@@ -10,14 +10,14 @@ import { markThreadSwitch } from "../components/assistant-ui/elements/thread.aui
 import { AutoHideScroll } from "../components/AutoHideScroll";
 import { SidebarArchiveIcon, SidebarFolderIcon, SidebarFolderOpenIcon, SidebarMessageIcon, SidebarMonitorIcon, SidebarNewSessionIcon, SidebarPinIcon } from "../components/sidebarIcons";
 import { SIDEBAR_SESSION_BUSY_ICON_CLASS, SIDEBAR_SESSION_BUSY_SLOT_CLASS, sidebarSessionBusyIndicator } from "../features/chat/sidebarStreaming";
-import { t } from "../i18n/index.ts";
+
 import { useT } from "../i18n/react";
 import { reportDiagnostic } from "../lib/api";
 import { createId } from "../lib/id";
-import { hasHostShell, invokeHost } from "../lib/shell/host.ts";
+
 import { loadUiPreferences, saveUiPreferences } from "../lib/ui-preferences";
 import { collectDroppedItems, pickDroppedProjectFolder, supportsDroppedFolderPaths } from "../shared/droppedProjectFolder";
-import { findProjectByCwd } from "../shared/projectPaths";
+
 import { resolveProjectSidebarLock } from "../shared/projectSidebarLock";
 import { platformRevealFolderLabelKey } from "../shared/revealFolderLabel";
 import { worktreeSessionBadgeKind } from "../shared/sessionWorktree";
@@ -25,15 +25,15 @@ import { sidebarHoverActionClass } from "../shared/sidebarActionVisibility";
 import { SIDEBAR_PROJECT_CARD_HEIGHT, SIDEBAR_PROJECT_CARD_WIDTH, SIDEBAR_SESSION_CARD_HEIGHT, SIDEBAR_SESSION_CARD_WIDTH, formatSidebarRelativeTime, formatSidebarSessionCount, placeSidebarHoverCard, pointerKeepsSidebarCardOpen, sidebarSessionPreview } from "../shared/sidebarHoverPreview";
 import { expandProjectForNewSession } from "../shared/sidebarProjectExpansion";
 import type { CreateProjectResult, ProjectSummary, ToolToggleState } from "../types";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+
 import { cn } from "@/lib/utils";
-import { AlertTriangle, ChevronRight, FolderOpen, GitFork, Loader, Moon, MoreHorizontal, Plus, Settings, Sun, Trash2, Wrench } from "lucide-react";
+import { ChevronRight, FolderOpen, GitFork, Loader, Moon, MoreHorizontal, Plus, Settings, Sun, Trash2, Wrench } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";

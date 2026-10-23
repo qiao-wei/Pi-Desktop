@@ -12,7 +12,16 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -65,8 +74,14 @@ test("two bundled runtimes: launchers first, then both package-manager outputs",
   const result = agentRuntimePathEntries({
     agentDir: "/home/user/.pi/agent",
     selection: {
-      node: { source: "bundled", path: "/Applications/Pi Desktop.app/Contents/Resources/node-runtime/bin/node" },
-      python: { source: "bundled", path: "/Applications/Pi Desktop.app/Contents/Resources/python-runtime/bin/python3.13" },
+      node: {
+        source: "bundled",
+        path: "/Applications/Pi Desktop.app/Contents/Resources/node-runtime/bin/node",
+      },
+      python: {
+        source: "bundled",
+        path: "/Applications/Pi Desktop.app/Contents/Resources/python-runtime/bin/python3.13",
+      },
     },
     platform: "darwin",
   });
@@ -92,13 +107,19 @@ test("package-manager output directories follow each platform's convention", () 
     join("C:\\agent", "node"),
     join("C:\\agent", "python", "Scripts"),
   ]);
-  assert.deepEqual(packageManagerBinDirs("/agent", "linux"), packageManagerBinDirs("/agent", "darwin"));
+  assert.deepEqual(
+    packageManagerBinDirs("/agent", "linux"),
+    packageManagerBinDirs("/agent", "darwin"),
+  );
 });
 
 test("a runtime the user already has keeps its place; only the gaps are filled", () => {
   const systemOnly = agentRuntimePathEntries({
     agentDir: "/agent",
-    selection: { node: { source: "system", path: "/opt/homebrew/bin/node" }, python: { source: "system", path: "/usr/bin/python3" } },
+    selection: {
+      node: { source: "system", path: "/opt/homebrew/bin/node" },
+      python: { source: "system", path: "/usr/bin/python3" },
+    },
     platform: "darwin",
     dirExists: () => false,
   });
@@ -116,12 +137,18 @@ test("a runtime the user already has keeps its place; only the gaps are filled",
     platform: "darwin",
     dirExists: (dir) => dir === join("/agent", "node", "bin"),
   });
-  assert.deepEqual(mixed, { prepend: ["/agent/bin", join("/agent", "python", "bin")], append: [join("/agent", "node", "bin")] });
+  assert.deepEqual(mixed, {
+    prepend: ["/agent/bin", join("/agent", "python", "bin")],
+    append: [join("/agent", "node", "bin")],
+  });
 
   // Nothing installed yet -> nothing appended.
   const mixedEmpty = agentRuntimePathEntries({
     agentDir: "/agent",
-    selection: { node: { source: "system", path: "/opt/homebrew/bin/node" }, python: { source: "system", path: "/usr/bin/python3" } },
+    selection: {
+      node: { source: "system", path: "/opt/homebrew/bin/node" },
+      python: { source: "system", path: "/usr/bin/python3" },
+    },
     platform: "darwin",
     dirExists: () => false,
   });
@@ -184,10 +211,7 @@ test("npm and pip point at their own entry modules and keep the isolated prefix"
     const nodeBin = join(root, "node.exe.sh");
     fakeInterpreter(nodeBin, "NODE");
     const npmLauncher = join(root, "npm");
-    writeExecutable(
-      npmLauncher,
-      shims.renderPosixNodeShim(nodeBin, "/bundle/npm-cli.js", "npm"),
-    );
+    writeExecutable(npmLauncher, shims.renderPosixNodeShim(nodeBin, "/bundle/npm-cli.js", "npm"));
     const npm = run(npmLauncher, ["i", "-g", "left-pad"]);
     assert.equal(npm.status, 0, npm.stderr);
     assert.match(npm.stdout, /NODE \/bundle\/npm-cli\.js i -g left-pad/);
@@ -202,14 +226,20 @@ test("npm and pip point at their own entry modules and keep the isolated prefix"
     assert.match(pip.stdout, /PY -m pip install requests/);
 
     const pythonLauncher = join(root, "python3");
-    writeExecutable(pythonLauncher, shims.renderPosixShim(pythonBin, "python", join(root, "py-home")));
+    writeExecutable(
+      pythonLauncher,
+      shims.renderPosixShim(pythonBin, "python", join(root, "py-home")),
+    );
     const py = run(pythonLauncher, ["-c", "print(1)"]);
     assert.match(py.stdout, /PY -c print\(1\)/);
   }));
 
 test("a launcher whose baked runtime vanished fails loudly instead of silently", () =>
   withTemp((root) => {
-    const gone = join(root, "Volumes/DELETED/Pi Desktop.app/Contents/Resources/node-runtime/bin/node");
+    const gone = join(
+      root,
+      "Volumes/DELETED/Pi Desktop.app/Contents/Resources/node-runtime/bin/node",
+    );
     const launcher = join(root, "node");
     writeExecutable(launcher, shims.renderPosixNodeShim(gone, join(root, "npm-cli.js"), "node"));
 
@@ -226,14 +256,21 @@ test("a launcher whose baked runtime vanished fails loudly instead of silently",
 
 test("the python launcher reports a missing runtime the same way", () =>
   withTemp((root) => {
-    const gone = join(root, "Volumes/DELETED/Pi Desktop.app/Contents/Resources/python-runtime/bin/python3.13");
+    const gone = join(
+      root,
+      "Volumes/DELETED/Pi Desktop.app/Contents/Resources/python-runtime/bin/python3.13",
+    );
     const launcher = join(root, "python3");
     writeExecutable(launcher, shims.renderPosixShim(gone, "python", join(root, "nope")));
 
     const result = run(launcher, ["--version"]);
     assert.equal(result.status, 127);
     assert.match(result.stderr, /bundled runtime is unavailable/);
-    assert.doesNotMatch(result.stderr, /No such file or directory/, "the message, not sh's, is what the user sees");
+    assert.doesNotMatch(
+      result.stderr,
+      /No such file or directory/,
+      "the message, not sh's, is what the user sees",
+    );
   }));
 
 test("a launcher written by an older launch self-heals from the live environment", () =>
@@ -330,7 +367,8 @@ test("built runtimes serve node / python / npm / pip without a host install", (t
       PYTHONDONTWRITEBYTECODE: "1",
       PYTHONUSERBASE: join(agentDir, "python"),
     };
-    const exec = (file, args) => spawnSync(file, args, { encoding: "utf8", env: cleanHost, timeout: 180000 });
+    const exec = (file, args) =>
+      spawnSync(file, args, { encoding: "utf8", env: cleanHost, timeout: 180000 });
 
     const node = exec("node", ["-e", "console.log(process.execPath)"]);
     assert.equal(node.status, 0, node.stderr);
@@ -371,9 +409,16 @@ test("built runtimes serve node / python / npm / pip without a host install", (t
     mkdirSync(join(pkg, "bin"), { recursive: true });
     writeFileSync(
       join(pkg, "package.json"),
-      JSON.stringify({ name: "hello-pi-desktop", version: "1.0.0", bin: { "hello-pi-desktop": "bin/cli.js" } }),
+      JSON.stringify({
+        name: "hello-pi-desktop",
+        version: "1.0.0",
+        bin: { "hello-pi-desktop": "bin/cli.js" },
+      }),
     );
-    writeFileSync(join(pkg, "bin", "cli.js"), "#!/usr/bin/env node\nconsole.log('installed and callable');\n");
+    writeFileSync(
+      join(pkg, "bin", "cli.js"),
+      "#!/usr/bin/env node\nconsole.log('installed and callable');\n",
+    );
     const install = exec("npm", ["i", "-g", "--no-audit", "--no-fund", pkg]);
     assert.equal(install.status, 0, install.stderr);
     const called = exec("sh", ["-c", "hello-pi-desktop"]);
@@ -391,7 +436,11 @@ test("built runtimes serve node / python / npm / pip without a host install", (t
 });
 
 test("windows launchers keep the same resolution order and failure code", () => {
-  const python = shims.renderWindowsShim("C:\\Pi Desktop\\python3.13.exe", "python", "C:\\Pi Desktop");
+  const python = shims.renderWindowsShim(
+    "C:\\Pi Desktop\\python3.13.exe",
+    "python",
+    "C:\\Pi Desktop",
+  );
   assert.match(python, /@echo off/);
   assert.match(python, /if defined PI_DESKTOP_BUNDLED_PYTHON_BIN if exist/);
   assert.match(python, /:pybaked/);
@@ -402,7 +451,11 @@ test("windows launchers keep the same resolution order and failure code", () => 
   const pip = shims.renderWindowsShim("C:\\Pi Desktop\\python3.13.exe", "pip", "C:\\Pi Desktop");
   assert.match(pip, /-m pip %\*/);
 
-  const npx = shims.renderWindowsNodeShim("C:\\Pi Desktop\\node.exe", "C:\\Pi Desktop\\npm-cli.js", "npx");
+  const npx = shims.renderWindowsNodeShim(
+    "C:\\Pi Desktop\\node.exe",
+    "C:\\Pi Desktop\\npm-cli.js",
+    "npx",
+  );
   assert.match(npx, /"%PI_DESKTOP_BUNDLED_NODE_BIN%" "%PI_DESKTOP_BUNDLED_NPM_CLI%" exec -- %\*/);
   assert.match(npx, /if not defined PI_DESKTOP_BUNDLED_NPM_CLI/);
 
@@ -440,7 +493,10 @@ test("python launchers keep bytecode cache out of the shipped runtime", () => {
     shims.renderPosixShim(pythonBin, "python", pythonHome),
     /^export PYTHONPYCACHEPREFIX="\/home\/user\/\.pi\/agent\/python\/cache\/pycache"$/m,
   );
-  assert.match(shims.renderPosixShim(pythonBin, "pip", pythonHome), /^export PYTHONPYCACHEPREFIX=/m);
+  assert.match(
+    shims.renderPosixShim(pythonBin, "pip", pythonHome),
+    /^export PYTHONPYCACHEPREFIX=/m,
+  );
   assert.match(shims.renderWindowsShim(pythonBin, "python", pythonHome), /PYTHONPYCACHEPREFIX=/);
 });
 
@@ -464,7 +520,10 @@ test("built python through its launcher leaves no cache inside the runtime tree"
       agentNodeCacheDir: join(agentDir, "npm-cache"),
       agentNodeConfigFile: join(agentDir, "node", "npmrc"),
     });
-    writeExecutable(join(shimDir, "python3"), live.renderPosixShim(pythonBin, "python", pythonHome));
+    writeExecutable(
+      join(shimDir, "python3"),
+      live.renderPosixShim(pythonBin, "python", pythonHome),
+    );
 
     const before = countFiles(pythonHome, isPyc);
     const run = spawnSync("python3", ["-c", "import json, base64, uuid; print('imported')"], {
@@ -480,7 +539,11 @@ test("built python through its launcher leaves no cache inside the runtime tree"
     });
     assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
     assert.match(run.stdout, /imported/);
-    assert.equal(countFiles(pythonHome, isPyc), before, "the shipped runtime tree must not gain bytecode caches");
+    assert.equal(
+      countFiles(pythonHome, isPyc),
+      before,
+      "the shipped runtime tree must not gain bytecode caches",
+    );
     assert.ok(
       countFiles(join(agentDir, "python", "cache", "pycache"), isPyc) > 0,
       "caching still happens, just outside the bundle",
@@ -498,5 +561,8 @@ test("the bridge itself points python caches outside the bundle before spawning 
   // Children inherit process.env, so this is what catches python calls that bypass the
   // ~/.pi/agent/bin launchers (MCP stdio servers, skill scripts, absolute paths).
   assert.match(apply, /process\.env\.PYTHONPYCACHEPREFIX = join\(agentPythonCacheDir, "pycache"\)/);
-  assert.ok(apply.indexOf("PYTHONPYCACHEPREFIX") < apply.indexOf("process.env.PATH = "), "must be set for every child we spawn");
+  assert.ok(
+    apply.indexOf("PYTHONPYCACHEPREFIX") < apply.indexOf("process.env.PATH = "),
+    "must be set for every child we spawn",
+  );
 });

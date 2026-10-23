@@ -12,7 +12,7 @@
  * App.tsx 是 .tsx，node --test 只能按源码断言，沿用仓库既有做法。
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import test from "node:test";
 import { appSource as readAppSource } from "./lib/appSource.ts";
 
@@ -60,8 +60,13 @@ test("右侧项目面板的 Packages 区块也有目录入口", () => {
   assert.notEqual(packagesSectionStart, -1, "面板的 packages 区块不见了");
   const packagesSection = panel.slice(packagesSectionStart);
   const nextSectionStart = packagesSection.indexOf("renderSection(", 1);
-  const section = nextSectionStart === -1 ? packagesSection : packagesSection.slice(0, nextSectionStart);
-  assert.match(section, /openTarget\(PACKAGE_CATALOG_URL\)/, "面板 Packages 区块要有 Package Catalog 入口");
+  const section =
+    nextSectionStart === -1 ? packagesSection : packagesSection.slice(0, nextSectionStart);
+  assert.match(
+    section,
+    /openTarget\(PACKAGE_CATALOG_URL\)/,
+    "面板 Packages 区块要有 Package Catalog 入口",
+  );
 });
 
 test("两个入口都有可读的 aria/tooltip 文案（图标按钮不能只有图标）", () => {

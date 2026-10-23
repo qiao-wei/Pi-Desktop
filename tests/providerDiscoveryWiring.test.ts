@@ -7,18 +7,18 @@
  * 拉不了就必须自己去打端点的 `/models`，而不是继续报「已刷新」。
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+
 import test from "node:test";
 
-import { bridgeSource } from "./lib/bridgeSource.ts";
+import { routeBody, bridgeSource } from "./lib/bridgeSource.ts";
 
 const source = bridgeSource();
 
 function functionBody(name) {
-  const start = source.indexOf(`async function ${name}(`) === -1
-    ? source.indexOf(`function ${name}(`)
-    : source.indexOf(`async function ${name}(`);
+  const start =
+    source.indexOf(`async function ${name}(`) === -1
+      ? source.indexOf(`function ${name}(`)
+      : source.indexOf(`async function ${name}(`);
   assert.notEqual(start, -1, `找不到 ${name}，桥的实现被挪走了？`);
   // 先跳过参数表：解构参数里的 `{ withModelsFor = "" }` 不是函数体的开头。
   let paren = source.indexOf("(", start);
@@ -50,13 +50,25 @@ test("discover：能不能让 runtime 拉列表按 provider 的 refreshModels �
 test("discover：自定义 provider 走端点实时列表，key 没填就用已存的那份", () => {
   const body = functionBody("discoverProviderModels");
   assert.match(body, /await requestModelListing\(\{/, "非动态 provider 要自己去 GET 列表端点");
-  assert.match(body, /apiKey: apiKey \|\| readStoredApiKey\(providerId\)/, "用户没重填 key 时应复用存好的 key");
-  assert.match(body, /models = mergeListingRows\(/, "端点列表要和文件里已存的行合并，别把老模型变隐形");
+  assert.match(
+    body,
+    /apiKey: apiKey \|\| readStoredApiKey\(providerId\)/,
+    "用户没重填 key 时应复用存好的 key",
+  );
+  assert.match(
+    body,
+    /models = mergeListingRows\(/,
+    "端点列表要和文件里已存的行合并，别把老模型变隐形",
+  );
 });
 
 test("discover：只有 runtime 真的联网拉过才叫 refreshed，回退本地目录时给出原因", () => {
   const body = functionBody("discoverProviderModels");
-  assert.match(body, /refreshed = runtimeCanList;/, "自定义 provider 的空跑 refresh 不能再报「已刷新」");
+  assert.match(
+    body,
+    /refreshed = runtimeCanList;/,
+    "自定义 provider 的空跑 refresh 不能再报「已刷新」",
+  );
   assert.match(body, /warning = listing\.error;/, "列表拉失败要把原因带回去，而不是静默显示旧目录");
 });
 
@@ -65,22 +77,34 @@ test("discover：只有 runtime 真的联网拉过才叫 refreshed，回退本�
 
 test("discover：这家没端点时直说，不去打一个空地址", () => {
   const body = functionBody("discoverProviderModels");
-  assert.match(body, /const listingBaseUrl = String\(row\?\.baseUrl \|\| providerConfigBaseUrl\(providerId\) \|\| ""\)\.trim\(\);/);
-  assert.match(body, /if \(!listingBaseUrl\) \{[\s\S]{0,260}no endpoint to refresh from/, "没地址要给人话，不是抛异常");
+  assert.match(
+    body,
+    /const listingBaseUrl = String\(row\?\.baseUrl \|\| providerConfigBaseUrl\(providerId\) \|\| ""\)\.trim\(\);/,
+  );
+  assert.match(
+    body,
+    /if \(!listingBaseUrl\) \{[\s\S]{0,260}no endpoint to refresh from/,
+    "没地址要给人话，不是抛异常",
+  );
   const guardAt = body.indexOf("if (!listingBaseUrl)");
   const fetchAt = body.indexOf("await requestModelListing(");
-  assert.ok(guardAt >= 0 && fetchAt > guardAt, "取数必须排在“有没有地址”的判断之后（空地址曾漏出一个 500）");
+  assert.ok(
+    guardAt >= 0 && fetchAt > guardAt,
+    "取数必须排在“有没有地址”的判断之后（空地址曾漏出一个 500）",
+  );
 });
 
 test("verify-key：没端点的内置供应商不假装在验 key", () => {
   // 断言限定在这段路由里：全文件搜会得到别处的同名写法，那是假绿。
-  const at = source.indexOf("/verify-key");
-  assert.ok(at > 0, "verify-key 路由不在了");
-  const route = source.slice(at, source.indexOf('"/api/model-providers/update"', at));
+  // 分支体已抽成处理器函数（见 tests/lib/bridgeSource.ts#routeBody）——按处理器取，不按标记切区间。
+  const route = routeBody(source, 'url.pathname.endsWith("/verify-key")');
   assert.match(route, /if \(!String\(row\.baseUrl \?\? ""\)\.trim\(\)\) \{/);
   assert.match(route, /no endpoint to check a key against/);
-  assert.ok(route.indexOf("no endpoint to check a key against") < route.indexOf("await requestModelListing("),
-    "先判有没有端点，再去打网络");
+  assert.ok(
+    route.indexOf("no endpoint to check a key against") <
+      route.indexOf("await requestModelListing("),
+    "先判有没有端点，再去打网络",
+  );
 });
 
 test("runtime 的能力判断读的是 provider.refreshModels", () => {
@@ -102,23 +126,40 @@ test("saveCustomModel：probe 那一步也得放过内置供应商的空 baseUrl
   // 回归：路由先要 probe 一次“这条草稿落到哪家”，而这次 probe 发生在 builtinTarget 判出来之前。
   // 它依旧要求 baseUrl 的话，“往内置供应商加模型”第一步就 500（用户红框里看到的就是这句）。
   const body = functionBody("saveCustomModel");
-  assert.match(body, /const probeBody = builtInProviderIds\(\)\.has\(String\(body\?\.providerId \?\? ""\)\.trim\(\)\)[\s\S]{0,160}providerMode: "builtin"/);
+  assert.match(
+    body,
+    /const probeBody = builtInProviderIds\(\)\.has\(String\(body\?\.providerId \?\? ""\)\.trim\(\)\)[\s\S]{0,160}providerMode: "builtin"/,
+  );
   assert.match(body, /normalizeCustomModelInputs\(probeBody, \{ requireApiKey: false \}\)/);
-  assert.ok(body.indexOf("normalizeCustomModelInputs(probeBody") < body.indexOf("const builtinTarget ="),
-    "probe 排在 builtinTarget 判定之前，所以它自己得先对 baseUrl 放行");
+  assert.ok(
+    body.indexOf("normalizeCustomModelInputs(probeBody") < body.indexOf("const builtinTarget ="),
+    "probe 排在 builtinTarget 判定之前，所以它自己得先对 baseUrl 放行",
+  );
 });
 
 /* ------------------------------------------------- 单个 provider 的读与改 */
 
 test("GET /api/model-providers/:id 只读配置，不联网", () => {
-  assert.match(source, /\/api\/model-providers\/"\)\) \{\s*\n\s*const pathParts/);
+  assert.match(
+    source,
+    /url\.pathname\.startsWith\("\/api\/model-providers\/"\)/,
+    "分支条件还在（分发在入口里）",
+  );
+  assert.match(
+    routeBody(source, 'url.pathname.startsWith("/api/model-providers/")'),
+    /const pathParts = ctx\.url\.pathname\.split/,
+  );
   const body = functionBody("providerCatalogRow");
   assert.doesNotMatch(body, /requestModelListing|refresh\(/, "读单个 provider 不该打网络");
 });
 
 test("POST /api/model-providers/update 走 updateProviderSettings，内置供应商直接拒", () => {
   const body = functionBody("updateProvider");
-  assert.match(body, /builtInProviderIds\(\)\.has\(providerId\)/, "内置供应商的 baseUrl 会盖到该家所有模型上，不许改");
+  assert.match(
+    body,
+    /builtInProviderIds\(\)\.has\(providerId\)/,
+    "内置供应商的 baseUrl 会盖到该家所有模型上，不许改",
+  );
   assert.match(body, /updateProviderSettings\(readCustomModelsConfig\(\)/);
   assert.match(body, /writeCustomModelsConfig\(result\.config\)/);
   assert.match(body, /await reloadCustomModelProviders\(\[result\.providerId\]\)/);
@@ -133,9 +174,10 @@ test("编辑 provider 时 key 格式先校验，别写了半截 models.json 才�
 
 test("verify-key：key 留空 = 验已存的那一份", () => {
   // 断言必须落在 verify-key 这段路由里：整个文件搜会得到别处的同名写法，那是假绿。
-  const at = source.indexOf("/verify-key");
-  assert.ok(at > 0, "verify-key 路由不在了");
-  assert.match(source.slice(at, at + 900), /resolveListingApiKey\(\{ apiKey: body\?\.apiKey, storedKey: readStoredApiKey\(providerId\) \}\)/);
+  assert.match(
+    routeBody(source, 'url.pathname.endsWith("/verify-key")'),
+    /resolveListingApiKey\(\{ apiKey: body\?\.apiKey, storedKey: readStoredApiKey\(providerId\) \}\)/,
+  );
 });
 
 test("provider 目录带 provider 级 api，编辑弹窗才回显得出来", () => {
@@ -148,7 +190,10 @@ test("拉列表不再被“先填 key”拦住：没 key 也放它去打端点",
   // 这条 throw 就是「Add provider 里按了 Fetch 什么也没有」的根因之一：
   // 本地网关（Ollama / vLLM / LM Studio）的 /models 根本不要 key。
   assert.doesNotMatch(body, /Enter an API key first/, "桥不能替端点决定要不要 key");
-  assert.match(body, /String\(body\?\.apiKey \?\? ""\)\.trim\(\) \|\| readStoredApiKey\(providerId\)/);
+  assert.match(
+    body,
+    /String\(body\?\.apiKey \?\? ""\)\.trim\(\) \|\| readStoredApiKey\(providerId\)/,
+  );
   // 拉不到时仍然要按 api 类型分派，并把可读的报错交回去（前端直接贴这句）
   assert.match(body, /listingPlan\(body\?\.api, baseUrl, apiKey\)/);
   assert.match(body, /describeConnectionFailure\(baseUrl, error\)/);

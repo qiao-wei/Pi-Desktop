@@ -15,6 +15,7 @@ code_refs:
   - tests/bridgeProtocol.test.ts
 tags: [architecture, protocol, versioning]
 summary: "桥与渲染进程各自声明协议版本，握手在搬 MB 级快照之前发生；比渲染进程新的桥同样判为不兼容。"
+reviewers: ["@qiaowei"]
 ---
 
 # ADR-002：协议版本握手与兼容策略

@@ -9,7 +9,7 @@
  * —— `App.tsx` 是 .tsx，node --test 只擦类型不认 JSX，所以只能读源码。
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import test from "node:test";
 
 import {
@@ -30,7 +30,11 @@ function sessionRowSource(): string {
 }
 
 test("状态槽优先级：pending 压过 streaming，两者都不是就留空", () => {
-  assert.equal(sidebarSessionBusyIndicator(true, true), "pending", "刚点下去的那一行才是用户在看的");
+  assert.equal(
+    sidebarSessionBusyIndicator(true, true),
+    "pending",
+    "刚点下去的那一行才是用户在看的",
+  );
   assert.equal(sidebarSessionBusyIndicator(true, false), "pending");
   assert.equal(sidebarSessionBusyIndicator(false, true), "streaming");
   assert.equal(sidebarSessionBusyIndicator(false, false), "none", "空闲行不画占位圆点");
@@ -38,7 +42,11 @@ test("状态槽优先级：pending 压过 streaming，两者都不是就留空",
 
 test("旋转挂在槽位（HTML）上，绝不挂在图标（SVG）上", () => {
   assert.match(SIDEBAR_SESSION_BUSY_SLOT_CLASS, /animate-spin/);
-  assert.doesNotMatch(SIDEBAR_SESSION_BUSY_ICON_CLASS, /animate-/, "SVG 自己转会让浏览器逐帧重算样式");
+  assert.doesNotMatch(
+    SIDEBAR_SESSION_BUSY_ICON_CLASS,
+    /animate-/,
+    "SVG 自己转会让浏览器逐帧重算样式",
+  );
 });
 
 test("会话行用会转的 Loader，不再是脉冲的时钟", () => {
@@ -56,6 +64,12 @@ test("会话行用会转的 Loader，不再是脉冲的时钟", () => {
 });
 
 test("Loader 图标来自 lucide，而不是自绘的替代品", () => {
-  assert.match(appSourceText, /^\s*Loader,$/m, "App.tsx 要从 lucide-react 引入 Loader");
-  assert.doesNotMatch(appSourceText, /^\s*Clock3,$/m, "Clock3 已无调用点，不该留着");
+  // 断言「符号集合里有 Loader」而不是「某一行恰好是 `Loader,`」：import 写成单行还是多行是格式，
+  // 拆文件/格式化都会改，那不是契约（同样的坑 2026-10-23 在 initTheme 那条断言上踩过一次）。
+  const lucide = appSourceText.match(/import \{([^}]+)\} from "lucide-react";/g) ?? [];
+  const symbols = lucide
+    .flatMap((line) => line.replace(/^import \{|\} from "lucide-react";$/g, "").split(","))
+    .map((s) => s.trim());
+  assert.ok(symbols.includes("Loader"), "src/app 里要从 lucide-react 引入 Loader");
+  assert.ok(!symbols.includes("Clock3"), "Clock3 已无调用点，不该留着");
 });

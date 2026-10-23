@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { constObjectBody, functionBody } from "./lib/sourceText.ts";
-import { bridgeSource } from "./lib/bridgeSource.ts";
+import { bridgeEntrySource, bridgeSource } from "./lib/bridgeSource.ts";
 
 const server = bridgeSource();
 // 内核引用只走适配层（kernel-adapter 边界）：断言要同时看 re-export 与导入来源。
@@ -56,29 +56,49 @@ test("桥启动即 initTheme（/end-review 的 BorderedLoader→keyHint 依赖�
   // "Theme not initialized. Call initTheme() first."。BorderedLoader（/end-review
   // 总结加载器）构造函数无条件调 keyHint → theme.fg，所以桥必须在启动时补上 TUI
   // 才会做的 initTheme。断言限定在 agentDir 定义到 agentBinDir 之间的启动块。
-  assert.match(
-    piKernel,
-    /\n  initTheme,\n\} from "@earendil-works\/pi-coding-agent";/,
+  // 只断言「这两个符号确实来自那条 import」，不钉 import 列表的完整字面量 ——
+  // 列表里加一个符号（本轮加了 stripFrontmatter）不该把这条测试弄红。
+  // 同一模块可能有多条 import（桥就分成两条：一条拿 runtime 工具，一条拿 initTheme 等）——
+  // 把所有 `from "<spec>"` 的具名导入合起来看。
+  // 用「字面量切分」拿 import 列表，不走正则转义：文件里有 JSDoc 用
+  // `import { x } ... from "@earendil-works/pi-coding-agent"` 举例（讲 `export { x } from` 的坑），
+  // 用正则很容易命中那段注释。这里按 `} from "<spec>";` 切，再往前找最近的 `import {`。
+  const symbolsOf = (source, spec) => {
+    const marker = `} from "${spec}";`;
+    const chunks = source.split(marker);
+    return chunks
+      .slice(0, -1)
+      .map((chunk) => {
+        const start = chunk.lastIndexOf("import {");
+        return start >= 0 ? chunk.slice(start + "import {".length) : "";
+      })
+      .flatMap((block) => block.split(/[,\s]+/).filter(Boolean));
+  };
+  assert.ok(
+    symbolsOf(piKernel, "@earendil-works/pi-coding-agent").includes("initTheme"),
     "initTheme 必须从 pi-coding-agent 导入（适配层）",
   );
-  assert.match(
-    server,
-    /\n  initTheme,\n  matchesKey,\n\} from "\.\/piKernel\.mjs";/,
+  assert.ok(
+    symbolsOf(server, "./piKernel.mjs").includes("initTheme"),
     "桥必须通过 piKernel.mjs 拿到 initTheme",
   );
-  const start = server.indexOf("const agentDir = ");
-  const end = server.indexOf("const agentBinDir");
-  assert.ok(start >= 0 && end > start, "找不到启动常量区");
-  const startupBlock = server.slice(start, end);
+  // 启动时真的调了 initTheme：调用点现在在**启动工厂** server/boot.mjs（路径/环境常量与装配一起搬过去了），
+  // 所以断言看整棵桥树，再钉住「入口在启动时确实调了这个工厂」。
+  const all = bridgeSource();
   assert.match(
-    startupBlock,
+    all,
     /initTheme\(SettingsManager\.create\(appCwd, agentDir, \{ projectTrusted: false \}\)\.getTheme\(\), false\)/,
-    "启动块必须用全局设置的主题调 initTheme",
+    "启动时必须用全局设置的主题调 initTheme",
   );
-  assert.match(startupBlock, /\} catch \{\s*initTheme\(undefined, false\);/, "主题读取失败必须回退默认主题");
+  assert.match(all, /\} catch \{\s*initTheme\(undefined, false\);/, "主题读取失败必须回退默认主题");
+  assert.match(
+    bridgeEntrySource(),
+    /const boot = await createBridgeBoot\(\);/,
+    "入口必须在启动时（组合区之前）就跑启动工厂，否则上面的 initTheme 不会发生",
+  );
 });
 
-test("包命令执行期间的扩展错误转发成 {type:\"error\"} 事件(消静默失败)", () => {
+test('包命令执行期间的扩展错误转发成 {type:"error"} 事件(消静默失败)', () => {
   const handler = functionBody(server, "streamCapabilityPackageCommand");
   assert.match(
     handler,
@@ -101,6 +121,6 @@ test("包命令执行期间的扩展错误转发成 {type:\"error\"} 事件(消�
  */
 test('扩展上下文 mode 标为 "tui",让依赖 custom() 的交互面板不再退化', () => {
   const bind = functionBody(server, "bindPiDesktopSessionExtensions");
-  assert.match(bind, /mode:\s*"tui"/, "bindExtensions 必须用 mode: \"tui\"");
-  assert.doesNotMatch(bind, /mode:\s*"rpc"/, "bindExtensions 不允许再标 \"rpc\"");
+  assert.match(bind, /mode:\s*"tui"/, 'bindExtensions 必须用 mode: "tui"');
+  assert.doesNotMatch(bind, /mode:\s*"rpc"/, 'bindExtensions 不允许再标 "rpc"');
 });

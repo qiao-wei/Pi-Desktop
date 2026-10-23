@@ -1,3 +1,14 @@
+---
+title: "早期产品方案：英语陪练原型（已作废）"
+type: doc
+status: archived
+owner: "@qiaowei"
+created: 2026-09-01
+updated: 2026-10-23
+summary: "这还是「英语陪练」原型时写的产品方案。当前规范在 docs/architecture/ 与 CONTEXT.md，这里只作历史留存。"
+tags: [legacy, product]
+---
+
 # Pi Desktop 方案
 
 ## 目标

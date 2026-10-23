@@ -10,7 +10,7 @@
  * 这里做区域限定断言：只读 aside 那段 className，不锁整文件其它写法。
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import test from "node:test";
 import { appSource as readAppSource } from "./lib/appSource.ts";
 
@@ -26,7 +26,11 @@ function sliceBetween(source: string, marker: string, endMarker: string): string
 }
 
 test("窄屏浮层面板从标题栏下面开始铺（不是 inset-y-0）", () => {
-  const aside = sliceBetween(appSourceText, '"context-panel-surface grid', 'aria-label={t("capability.context.panelAria")}');
+  const aside = sliceBetween(
+    appSourceText,
+    '"context-panel-surface grid',
+    'aria-label={t("capability.context.panelAria")}',
+  );
 
   assert.match(aside, /max-\[920px\]:fixed/, "面板在窄屏应是 fixed 浮层");
   assert.match(aside, /max-\[920px\]:top-\[var\(--titlebar-height\)\]/, "面板顶边要对齐标题栏下沿");

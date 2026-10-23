@@ -33,7 +33,7 @@ import {
   type GitFileChange,
   type GitInfo,
 } from "../src/shared/gitStatusBadge.ts";
-import { bridgeSource } from "./lib/bridgeSource.ts";
+import { bridgeSource, routeBody } from "./lib/bridgeSource.ts";
 import { appSource as readAppSource } from "./lib/appSource.ts";
 
 const appSourceText = readAppSource();
@@ -684,11 +684,14 @@ test("弹层高度封顶：信息写长了不会顶出窗口，内容自己滚",
 
 test("生成信息走服务端且用当前会话的模型，不把 diff 发到别处", () => {
   assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/commit-message"/, "缺少生成信息的路由");
-  assert.match(serverSource, /const cwd = requestWorkspaceCwd\(project, body\);\s*const context = await readCommitDiff\(cwd, body\?\.paths\)/, "服务端自己读 diff，不信客户端传的内容");
-  assert.match(serverSource, /const model = getRuntimeForRequest\(body\)\.session\.model;/, "要用目标会话的模型（而不是面板里碰巧选中的那个）");
-  assert.match(serverSource, /buildCommitMessagePrompt\(\{ locale: body\?\.locale, context \}\)/, "prompt 由纯函数拼");
-  assert.match(serverSource, /normalizeGeneratedCommitMessage\(assistantContentText\(response\)\)/, "模型输出要规范化");
-  assert.match(serverSource, /sendJson\(res, 200, \{ message, model: `\$\{model\.provider\}\/\$\{model\.id\}` \}\)/, "只回文本，不直接提交");
+  // 分支体已抽成处理器函数（见 tests/lib/bridgeSource.ts#routeBody）：断言「这段路由的行为」，
+  // 原来直接在整份桥源码上跨行匹配，拆分后必然假红。
+  const route = routeBody(serverSource, 'url.pathname === "/api/projects/git/commit-message"');
+  assert.match(route, /const cwd = requestWorkspaceCwd\(project, body\);\s*const context = await readCommitDiff\(cwd, body\?\.paths\)/, "服务端自己读 diff，不信客户端传的内容");
+  assert.match(route, /const model = getRuntimeForRequest\(body\)\.session\.model;/, "要用目标会话的模型（而不是面板里碰巧选中的那个）");
+  assert.match(route, /buildCommitMessagePrompt\(\{ locale: body\?\.locale, context \}\)/, "prompt 由纯函数拼");
+  assert.match(route, /normalizeGeneratedCommitMessage\(assistantContentText\(response\)\)/, "模型输出要规范化");
+  assert.match(route, /sendJson\(ctx\.res, 200, \{ message, model: `\$\{model\.provider\}\/\$\{model\.id\}` \}\)/, "只回文本，不直接提交");
 });
 
 test("分支行是按钮：当前分支不可点，脏工作区先弹确认", () => {

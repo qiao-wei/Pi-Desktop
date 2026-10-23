@@ -71,7 +71,7 @@ if (sourceOverride) {
   rmSync(dirname(archivePath), { recursive: true, force: true });
 }
 
-const pruned = pruneNodeRuntime(outputDir);
+pruneNodeRuntime(outputDir);
 const layout = bundledNodeLayout(targetTriple, outputDir);
 ensureNodeRuntime(layout);
 // node.exe / bin/node: tar keeps the mode, the zip does not.

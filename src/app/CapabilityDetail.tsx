@@ -11,7 +11,7 @@ import { useT } from "../i18n/react";
 import { fetchJson, postJson } from "../lib/api";
 import { MarkdownContent } from "../lib/markdown";
 import { canDeleteCapability, capabilitySourceLabel } from "../shared/capabilityScope";
-import { themes } from "../themes/index.ts";
+
 import { CAPABILITY_PACKAGE_RESOURCE_TYPES } from "../types";
 import type { CapabilityKind, CapabilityMcpDetail, CapabilityMcpInspection, CapabilityPackage, CapabilityPackageFilePreview, CapabilityPackageResourceDetails, CapabilityPackageResourceEntry, CapabilityPackageResourceType } from "../types";
 import { McpServerEditor } from "./CapabilitiesMcp";
@@ -157,6 +157,9 @@ function CapabilityDetailDialog({
             <>
               <p className="text-sm">{item.description || item.path}</p>
               <code className="rounded-md bg-muted px-2 py-1 font-mono text-xs break-all">{item.path}</code>
+              {item.disableModelInvocation ? (
+                <p className="text-sm text-muted-foreground">{t("capability.detail.manualOnlyNote")}</p>
+              ) : null}
               {isReadingSkill ? <p className="text-sm text-muted-foreground">{t("capability.detail.readingContent")}</p> : null}
               {skillContent ? <MarkdownContent text={skillContent} /> : null}
             </>
@@ -225,7 +228,13 @@ function CapabilityMarketCard({
           {item.kind === "extension" ? (
             <Badge variant="secondary">standalone</Badge>
           ) : null}
-          {item.kind === "skill" && item.disableModelInvocation ? <Badge variant="secondary">工具</Badge> : null}
+          {/* manual-only 技能（disable-model-invocation）不会进模型的自动选择清单，徽标必须这么说，
+              别写成「工具」——那会让人以为它在模型技能列表里。 */}
+          {item.kind === "skill" && item.disableModelInvocation ? (
+            <Badge variant="secondary" title={t("capability.detail.manualOnlyNote")}>
+              {t("capability.badge.manualOnly")}
+            </Badge>
+          ) : null}
         </div>
         <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
           {item.kind === "package" ? (

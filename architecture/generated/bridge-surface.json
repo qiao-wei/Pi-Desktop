@@ -282,6 +282,7 @@
     },
     "/api/custom-models/reload": {
       "methods": [
+        "GET",
         "POST"
       ],
       "transport": "json",
@@ -312,6 +313,7 @@
     },
     "/api/diagnostic": {
       "methods": [
+        "GET",
         "POST"
       ],
       "transport": "ndjson",
@@ -322,6 +324,7 @@
     },
     "/api/extension-ui/response": {
       "methods": [
+        "GET",
         "POST"
       ],
       "transport": "json",
@@ -411,6 +414,7 @@
     },
     "/api/model-providers/discover": {
       "methods": [
+        "GET",
         "POST"
       ],
       "transport": "json",
@@ -505,7 +509,7 @@
       "transport": "json",
       "bridge": true,
       "callers": [
-        "src/app/App.tsx"
+        "src/app/useAppCore.ts"
       ]
     },
     "/api/projects/commands/run": {
@@ -530,7 +534,8 @@
     },
     "/api/projects/commands/status": {
       "methods": [
-        "GET"
+        "GET",
+        "POST"
       ],
       "transport": "json",
       "bridge": true,
@@ -560,7 +565,8 @@
     },
     "/api/projects/git": {
       "methods": [
-        "GET"
+        "GET",
+        "POST"
       ],
       "transport": "json",
       "bridge": true,
@@ -790,7 +796,8 @@
     },
     "/api/search": {
       "methods": [
-        "GET"
+        "GET",
+        "POST"
       ],
       "transport": "json",
       "bridge": true,
@@ -800,6 +807,7 @@
     },
     "/api/sessions": {
       "methods": [
+        "GET",
         "POST"
       ],
       "transport": "json",
@@ -870,7 +878,8 @@
     },
     "/api/sessions/worktree": {
       "methods": [
-        "GET"
+        "GET",
+        "POST"
       ],
       "transport": "json",
       "bridge": true,

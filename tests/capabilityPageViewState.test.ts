@@ -34,9 +34,8 @@ test("the conversation surface stays mounted while the Global page is open", () 
   );
   // 按 token 断言而不是整串 className：codex 主题会给这层加一个 `conversation-column`
   // class（用来把会话列抬到窗口顶部），整串匹配会把它误判成回归。
-  const host = /<div\s+className="([^"]*)"\s*>\s*<section\s+className="conversation-surface/.exec(
-    appSourceText,
-  )?.[1];
+  // 会话区 <section> 现在住在 `ComposerRegion.tsx`：宿主里那个栅格格子直接渲染它。
+  const host = /<div\s+className="([^"]*)"\s*>\s*<ComposerRegion\b/.exec(appSourceText)?.[1];
   assert.ok(host, "找不到包住会话区的那个栅格格子");
   for (const token of ["relative", "h-full", "min-h-0", "min-w-0", "overflow-hidden"]) {
     assert.ok(
@@ -57,14 +56,20 @@ test("the conversation surface stays mounted while the Global page is open", () 
 });
 
 test("inert lands on the covered conversation, never on the page itself", () => {
-  const inertAt = appSourceText.indexOf('inert={activeMainView === "capabilities"}');
-  assert.notEqual(inertAt, -1, "the inert gate is gone");
-  const pageAt = appSourceText.indexOf("<div className=\"absolute inset-0 z-20\">");
-  assert.notEqual(pageAt, -1, "the overlay host is gone");
-  assert.ok(inertAt < pageAt, "inerting the overlay's ancestor would disable the page");
-  // It is the conversation <section> that goes inert, so the attribute must sit on its start tag.
-  const sectionOpen = appSourceText.lastIndexOf("<section", inertAt);
-  assert.ok(sectionOpen >= 0 && sectionOpen < inertAt, "inert must be on the conversation section");
+  // 会话区（带 inert 的 <section>）与覆盖层现在分居两个文件，所以不能再靠「在整篇源码里谁的
+  // 下标更小」来断言覆盖层不在 section 里 —— 直接看 <section> 的开始标签与它的内容。
+  const sectionTag = /<section\b[^>]*className="conversation-surface[^>]*>/.exec(appSourceText)?.[0];
+  assert.ok(sectionTag, "找不到会话区的 <section> 开始标签");
+  assert.match(
+    sectionTag,
+    /inert=\{activeMainView === "capabilities"\}/,
+    "inert 必须落在会话 <section> 自己的开始标签上（落在祖先上会把盖在它上面的页面一起禁掉）",
+  );
+
+  const overlayAt = appSourceText.indexOf('<div className="absolute inset-0 z-20">');
+  assert.notEqual(overlayAt, -1, "覆盖层宿主不见了");
+  const sectionAt = appSourceText.indexOf(sectionTag);
+  assert.ok(overlayAt < sectionAt || sectionAt < 0, "覆盖层不能被放进会话区里面");
 });
 
 test("the Global page remembers the last tab across visits and restarts", () => {

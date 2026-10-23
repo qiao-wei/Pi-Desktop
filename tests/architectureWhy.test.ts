@@ -19,8 +19,8 @@ test("既有依赖方也有被依赖方（两个方向都列）", () => {
   assert.ok(report.dependents.length > 10, "api.ts 是被广泛依赖的模块");
   assert.ok(report.dependencies.includes("src/lib/bridge/transport.ts"), "api.ts 依赖 bridge transport");
   assert.ok(
-    report.dependents.includes("src/app/App.tsx"),
-    "App.tsx 是主要调用方（B2 拆它时要看这份清单）",
+    report.dependents.includes("src/app/useAppCore.ts"),
+    "useAppCore（原 App.tsx 拆出的第 1 段）直接调 api.ts：B2 拆分后主要调用方从这里看",
   );
 });
 
@@ -36,13 +36,14 @@ test("区分「仅类型」依赖（移动文件时类型依赖比运行时依�
 test("层级、模块、规模与棘轮都报出来（拆分时就是靠这些判断边界）", () => {
   const report = JSON.parse(why("src/app/App.tsx", { asJson: true }));
   assert.equal(report.module.layer, "app");
-  // 规模必须是「文件此刻的真实行数」—— App.tsx 正在按簇往外拆，硬写 9000 这种常量
-  // 会在每次合法拆分时假红（这条断言曾经就钉着 9000）。拆到 700 行以下时例外会消失，
-  // 那时把这一条改成「不该再有例外」即可。
+  // 规模必须是「文件此刻的真实行数」—— 硬写常量会在每次合法拆分时假红（这条断言曾经就钉着 9000）。
   assert.equal(report.size.lines, appEntrySource().split("\n").length, "报出来的行数要和盘上文件一致");
-  assert.ok(report.size.lines > 700, `App.tsx 还没拆到上限（700）以下，应仍有例外；现在 ${report.size.lines} 行`);
-  assert.ok(report.size.exception, "App.tsx 应该在棘轮例外清单里，否则 checker 早就红了");
-  assert.equal(typeof report.size.exception.ceiling, "number");
+  // B2 已完成：App.tsx 只剩两行胶水（useAppModel + AppShell），原来的超大文件棘轮例外
+  // 被 `architecture:write` 自动删除 —— 规则是「降到上限以下时例外必须删」，这里钉住它。
+  assert.ok(report.size.lines < 700, `App.tsx 应已拆到 700 行以下；现在 ${report.size.lines} 行`);
+  assert.equal(report.size.exception, undefined, "拆到上限以下后不该再有 max-lines 例外（JSON 里这个键会整个消失）");
+  assert.ok(report.dependencies.includes("src/app/useAppModel.ts"), "App.tsx 现在依赖 model 装配点");
+  assert.ok(report.dependencies.includes("src/app/AppShell.tsx"), "App.tsx 现在依赖视图");
 });
 
 test("协议文件会标出它属于哪条边界（改契约时提醒连带的东西）", () => {

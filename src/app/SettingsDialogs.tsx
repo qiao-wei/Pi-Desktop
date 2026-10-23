@@ -10,7 +10,7 @@ import { CustomModelsSettings } from "../features/models/CustomModelsSettings";
 import type { CustomModelsController } from "../features/models/useCustomModels";
 import { ArchivedChatsSettings } from "../features/settings/ArchivedChatsSettings";
 import { NotificationSettings } from "../features/settings/NotificationSettings";
-import { t } from "../i18n/index.ts";
+
 import { useLocale, useT } from "../i18n/react";
 import type { ToolSettingsPayload } from "../lib/api";
 import { themes } from "../themes/index.ts";

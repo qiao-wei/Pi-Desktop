@@ -479,7 +479,7 @@ function rememberTarget(view: ChatStreamView, event: PromptStreamEvent): ChatStr
   return { ...view, activeBubbleId: named.bubbleId };
 }
 
-function drop(view: ChatStreamView, event: PromptStreamEvent): ChatStreamView {
+function drop(view: ChatStreamView, _event: PromptStreamEvent): ChatStreamView {
   // Counted, not guessed: the next reconcile gets the real content from the
   // transcript. `bubbles` keeps its identity so the thread does not re-render.
   return { ...view, droppedEvents: view.droppedEvents + 1 };

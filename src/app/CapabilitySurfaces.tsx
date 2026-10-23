@@ -7,27 +7,27 @@
  * 大文件被 `max-lines` 棘轮冻着不许再长，所以按「一簇一文件」往外搬，调用点零改动。
  */
 import { AutoHideScroll } from "../components/AutoHideScroll";
-import type { SlashMenuItem } from "../features/chat/slashMenu";
-import { t } from "../i18n/index.ts";
+
+
 import { useT } from "../i18n/react";
 import { fetchJson } from "../lib/api";
 import { MarkdownContent } from "../lib/markdown";
 import { filterPackageCommands } from "../shared/capabilityCommands";
 import { canDeleteCapability } from "../shared/capabilityScope";
-import type { McpKeyValueRow } from "../shared/mcpForm";
+
 import type { CapabilityCommand, CapabilityExtension, CapabilityKind, CapabilityMcpServer, CapabilityPackage, CapabilitySkill, SkillSummary } from "../types";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
 import { cn } from "@/lib/utils";
-import { BookOpen, ChevronRight, Loader2, Pin, Plus, Save, Search, Terminal, Trash2 } from "lucide-react";
-import { Fragment, useEffect, useId, useRef, useState } from "react";
+import { BookOpen, ChevronRight, Loader2, Pin, Search, Terminal, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { SlashMenu, slashMenuItemKey } from "./SlashMenu";
 import { KeyValueEditor, PackageInstallDialog, SkillImportDialog } from "./SkillImportSurfaces";

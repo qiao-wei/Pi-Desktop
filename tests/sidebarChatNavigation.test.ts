@@ -12,7 +12,7 @@
  * - that handler flips the view synchronously, before waiting on the server.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import test from "node:test";
 import { appSource as readAppSource } from "./lib/appSource.ts";
 
@@ -66,7 +66,11 @@ test("the project row's new-session button goes through the sidebar handler", ()
   // The row now also has an earlier `isExpanded ?` (the folder icon), so delimit at the
   // end of the project section instead of the first expansion check.
   const rowBlock = appSourceText.slice(rowStart, appSourceText.indexOf("</section>", rowStart));
-  assert.match(rowBlock, /aria-label=\{t\("sidebar\.newSession"\)\}/, "new-session button markup changed");
+  assert.match(
+    rowBlock,
+    /aria-label=\{t\("sidebar\.newSession"\)\}/,
+    "new-session button markup changed",
+  );
   // 「＋」一次点击就建会话（会先把主区域切到 chat）；⌥/Alt 点击才是 worktree。
   assert.match(
     rowBlock,
@@ -87,11 +91,7 @@ test("opening a conversation from the sidebar flips the view before awaiting the
     // 只数语句行，不数注释里的 `onOpenChat()` —— 下面的注释会提到它（自 363c473
     // composer-focus 起把注释也数进去了，测试一直是红的，实现是对的）。
     const calls = [...body.matchAll(/^\s*onOpenChat\(\);/gm)];
-    assert.equal(
-      calls.length,
-      1,
-      `${handler} should switch to chat exactly once`,
-    );
+    assert.equal(calls.length, 1, `${handler} should switch to chat exactly once`);
 
     const openAt = calls[0].index ?? -1;
     const actionAt = body.indexOf(action);

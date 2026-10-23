@@ -15,6 +15,7 @@ code_refs:
   - server/piKernel.mjs
 tags: [architecture, protocol, governance]
 summary: "把分层、边界协议与债务登记变成可机械校验的东西，并说明为什么借用 ZCode 的机制而不是它的规模。"
+reviewers: ["@qiaowei"]
 ---
 
 # ADR-001：引入可校验的分层架构与边界协议
@@ -33,7 +34,7 @@ Pi Desktop 已经长到 6.2 万行生产代码（`src` + `server` + `src-electro
 3. **宿主命令名写在三处**（preload 白名单、`host-commands.js`、调用点），没有任何东西比对。
 4. **桥对内核的两个非公共入口按相对路径深引**，跨 5 次版本 bump 没动过，但签名漂移是静默的。
 5. **没有任何架构约束机制**：没有 lint、没有架构文档、没有依赖方向检查，
-   `DESIGN.md` 还是一份 Meta 设计系统分析（名实不符）。
+   `docs/reference/design-meta.md` 还是一份 Meta 设计系统分析（名实不符）。
 
 参考对象 `~/Downloads/Zcode` 是 112 万行、20 个包的生产系统，有一套成熟的架构治理
 （`architecture-policy.yaml` 35KB + `architecture:check/adopt/baseline` + 治理 skill +

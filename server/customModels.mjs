@@ -734,7 +734,6 @@ export function upsertCustomModel(config, entry, { target, seed } = {}) {
   const next = { ...config, providers };
 
   const { providerId, existing } = resolveProviderTarget(next, entry, target);
-  const editing = Boolean(target?.providerId && existing);
 
   if (!existing && Object.keys(providers).length >= MAX_PROVIDERS) {
     throw new Error(`At most ${MAX_PROVIDERS} custom providers are supported.`);

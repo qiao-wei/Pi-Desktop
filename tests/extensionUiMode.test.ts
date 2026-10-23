@@ -58,7 +58,8 @@ test("模式写入/读出 personalization.json 并随快照回到前端", () => 
 
   const save = functionBody(server, "setPersonalization");
   assert.match(save, /const extensionUi = normalizeExtensionUiMode\(body\?\.extensionUi\);/);
-  assert.match(save, /personalization = \{ style, customInstructions, persona, extensionUi \};/);
+  // 可变状态收进显式 state 对象后，赋值的接收方从裸 `personalization` 变成 `state.personalization`。
+  assert.match(save, /state\.personalization = \{ style, customInstructions, persona, extensionUi \};/);
   // 它是 UI 偏好,不是模型指令:不能混进系统提示词。
   const instruction = functionBody(server, "personalizationInstruction");
   assert.doesNotMatch(instruction, /extensionUi/, "呈现方式不能进系统提示词");
@@ -75,7 +76,7 @@ test("webui 才发颜色：activeUiTheme 只在 webui 下换成 ansiUiTheme", ()
   assert.match(pick, /return extensionUiRenderMode\(\) === "webui" \? ansiUiTheme : headlessUiTheme;/);
 
   const themed = functionBody(server, "extensionUiRenderMode");
-  assert.match(themed, /normalizeExtensionUiMode\(personalization\?\.extensionUi\)/);
+  assert.match(themed, /normalizeExtensionUiMode\(state\.personalization\?\.extensionUi\)/);
 
   // ansiUiTheme 必须和 headlessUiTheme 一样覆盖整套 Theme API,否则扩展 factory 同步抛错。
   const ansi = constObjectBody(server, "ansiUiTheme");

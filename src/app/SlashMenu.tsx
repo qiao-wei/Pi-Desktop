@@ -5,7 +5,7 @@
  * 大文件被 `max-lines` 棘轮冻着不许再长，所以按「一簇一文件」往外搬，调用点零改动。
  */
 import type { SlashMenuItem } from "../features/chat/slashMenu";
-import { t } from "../i18n/index.ts";
+
 import { useT } from "../i18n/react";
 import { Fragment, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
@@ -15,11 +15,14 @@ function SlashMenu({
   highlightIndex,
   onSelect,
   onHighlight,
+  skillCommandsHidden = false,
 }: {
   items: SlashMenuItem[];
   highlightIndex: number;
   onSelect: (item: SlashMenuItem) => void;
   onHighlight: (index: number) => void;
+  /** pi 设置 `enableSkillCommands: false`：技能不在菜单里，但仍可手打 `/skill:<名字>`。 */
+  skillCommandsHidden?: boolean;
 }) {
   const t = useT();
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -89,6 +92,8 @@ function SlashMenu({
       {!items.length ? <p className="empty-text">{t("capability.slashMenu.empty")}</p> : null}
       {commands.length || builtins.length ? <p className="slash-menu-hint">{t("capability.slashMenu.commandHint")}</p> : null}
       {argumentEntries.length ? <p className="slash-menu-hint">{t("capability.slashMenu.argumentHint")}</p> : null}
+      {/* 技能被 pi 设置藏掉时得说一声：否则「菜单里没有技能」看起来像技能丢了。 */}
+      {skillCommandsHidden ? <p className="slash-menu-hint">{t("capability.slashMenu.skillCommandsDisabled")}</p> : null}
     </div>
   );
 }

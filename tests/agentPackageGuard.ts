@@ -18,14 +18,18 @@ export const AGENT_PACKAGES_DIR = new URL("../../../.pi/agent/packages/", import
 /** 本机有没有那套 agent 包的源码。 */
 export const agentPackageAvailable = existsSync(new URL("pi-monitor/", AGENT_PACKAGES_DIR));
 
-const SKIP_REASON = "本机没有 ~/.pi/agent/packages/pi-monitor 的源码（它在用户 agent 包里，不在仓库里）";
+const SKIP_REASON =
+  "本机没有 ~/.pi/agent/packages/pi-monitor 的源码（它在用户 agent 包里，不在仓库里）";
 
-export const test = (agentPackageAvailable
-  ? testBase
-  : (name: string, optionsOrFn: unknown, maybeFn?: unknown) => {
-      const options = typeof optionsOrFn === "function" ? {} : { ...(optionsOrFn as Record<string, unknown>) };
-      return testBase(name, { ...options, skip: SKIP_REASON }, () => {});
-    }) as typeof testBase;
+export const test = (
+  agentPackageAvailable
+    ? testBase
+    : (name: string, optionsOrFn: unknown, _maybeFn?: unknown) => {
+        const options =
+          typeof optionsOrFn === "function" ? {} : { ...(optionsOrFn as Record<string, unknown>) };
+        return testBase(name, { ...options, skip: SKIP_REASON }, () => {});
+      }
+) as typeof testBase;
 
 /**
  * 动态 import 一个 agent 包模块，源码不在本机时返回 null（配合上面的 `test`，用例根本不会跑，

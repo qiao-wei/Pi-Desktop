@@ -22,9 +22,8 @@ import { patchMessage } from "../src/features/chat/bootstrapPatch.ts";
  * how many thread-message objects have to be rebuilt per streamed token.
  */
 
-const { ExternalStoreThreadRuntimeCore } = await import(
-  "../node_modules/@assistant-ui/core/dist/internal.js"
-);
+const { ExternalStoreThreadRuntimeCore } =
+  await import("../node_modules/@assistant-ui/core/dist/internal.js");
 
 const contextProvider = { getChildContext: () => ({}) };
 
@@ -62,10 +61,7 @@ function simulate({ tokens, inlineConverter }: { tokens: number; inlineConverter
       conversation: {
         sessionFile: "/tmp/s.jsonl",
         updatedAt: 0,
-        messages: [
-          ...makeMessages(13),
-          { id: "live", role: "assistant" as const, content: "" },
-        ],
+        messages: [...makeMessages(13), { id: "live", role: "assistant" as const, content: "" }],
       },
     },
   };
@@ -76,7 +72,6 @@ function simulate({ tokens, inlineConverter }: { tokens: number; inlineConverter
     conversions += 1;
     return { id: message.id, role: message.role, content: message.content };
   };
-  const toExternal = (value: unknown) => value as ExternalMessage;
 
   const adapterFor = (messages: ExternalMessage[]) => ({
     messages,

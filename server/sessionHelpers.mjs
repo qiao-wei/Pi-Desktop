@@ -13,7 +13,7 @@ import { isPathInside } from "./capabilityPathIdentity.mjs";
 import { displayTranscript } from "./sessionTranscript.mjs";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 function inferConversationTitle(messages) {
   const first = messages[0];

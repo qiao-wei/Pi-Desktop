@@ -13,7 +13,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,11 +24,13 @@ import {
   replaceSkillSelectionPolicy,
   skillEnabledBySelection,
 } from "../server/capabilitySkillSelection.mjs";
-import { bridgeSource } from "./lib/bridgeSource.ts";
+import { bridgeSource, functionBody } from "./lib/bridgeSource.ts";
 
-const ROOT = join(import.meta.dirname, "..");
-
-const skill = (name: string, filePath: string) => ({ name, filePath, description: `${name} skill` });
+const skill = (name: string, filePath: string) => ({
+  name,
+  filePath,
+  description: `${name} skill`,
+});
 
 function projectFixture() {
   const root = mkdtempSync(join(tmpdir(), "capability-skill-selection-"));
@@ -36,7 +38,10 @@ function projectFixture() {
   const agentDir = join(root, "agent");
   const skillDir = join(projectCwd, ".pi", "skills", "proj-skill");
   mkdirSync(skillDir, { recursive: true });
-  writeFileSync(join(skillDir, "SKILL.md"), "---\nname: proj-skill\ndescription: project skill\n---\n\nBody.\n");
+  writeFileSync(
+    join(skillDir, "SKILL.md"),
+    "---\nname: proj-skill\ndescription: project skill\n---\n\nBody.\n",
+  );
   return { root, projectCwd, agentDir, skillFilePath: join(skillDir, "SKILL.md") };
 }
 
@@ -48,9 +53,17 @@ test("explicit session selection wins, config supplies the default, unknown ids 
     config: { skills: { on: { defaultEnabled: true }, off: { defaultEnabled: false } } },
   });
 
-  assert.equal(skillEnabledBySelection(policy, "on"), false, "an explicit disable beats the config default");
+  assert.equal(
+    skillEnabledBySelection(policy, "on"),
+    false,
+    "an explicit disable beats the config default",
+  );
   assert.equal(skillEnabledBySelection(policy, "off"), false, "config default is the fallback");
-  assert.equal(skillEnabledBySelection(policy, "forced"), true, "an explicit enable beats a missing default");
+  assert.equal(
+    skillEnabledBySelection(policy, "forced"),
+    true,
+    "an explicit enable beats a missing default",
+  );
   assert.equal(skillEnabledBySelection(policy, "unknown"), false, "unknown skills stay opt-in");
 });
 
@@ -82,8 +95,16 @@ test("unmanaged skills pass through and disabled package roots are dropped", () 
     isDisabledPath: (path: string) => path.startsWith("/agent/npm/pkg/"),
   });
 
-  assert.deepEqual(out.skills.map((item) => item.name), [], "the disabled package's skill and the opted-out project skill both go");
-  assert.deepEqual(out.inventory.map((item) => item.name), ["proj", "pkg"], "the inventory is always pi's raw set");
+  assert.deepEqual(
+    out.skills.map((item) => item.name),
+    [],
+    "the disabled package's skill and the opted-out project skill both go",
+  );
+  assert.deepEqual(
+    out.inventory.map((item) => item.name),
+    ["proj", "pkg"],
+    "the inventory is always pi's raw set",
+  );
 });
 
 /* ------------------------- the regression, pinned directly ------------------------- */
@@ -92,7 +113,11 @@ test("a managed skill the pre-resolve never saw fails open instead of disappeari
   const base = [skill("jev", "/proj/.pi/skills/jev/SKILL.md")];
   // Exactly the old failure: the inventory was resolved before trust, so it knows no
   // managed ids and the config never got an entry for the project skill.
-  const stale = createSkillSelectionPolicy({ selection: {}, config: { skills: {} }, inventorySkills: [] });
+  const stale = createSkillSelectionPolicy({
+    selection: {},
+    config: { skills: {} },
+    inventorySkills: [],
+  });
   const mismatches: string[] = [];
 
   const out = applySkillSelection(base, stale, {
@@ -100,7 +125,11 @@ test("a managed skill the pre-resolve never saw fails open instead of disappeari
     onMismatch: (item) => mismatches.push(item.name),
   });
 
-  assert.deepEqual(out.skills.map((item) => item.name), ["jev"], "losing the skill silently is the bug; keeping it is the fix");
+  assert.deepEqual(
+    out.skills.map((item) => item.name),
+    ["jev"],
+    "losing the skill silently is the bug; keeping it is the fix",
+  );
   assert.deepEqual(mismatches, ["jev"], "the divergence must be reported, not swallowed");
 });
 
@@ -112,13 +141,20 @@ test("once the inventory catches up, the same skill follows the live default", (
     inventorySkills: [skill("jev", filePath)],
     config: { skills: { jev: { defaultEnabled: true } } },
   });
-  assert.deepEqual(applySkillSelection(base, enabled).skills.map((item) => item.name), ["jev"]);
+  assert.deepEqual(
+    applySkillSelection(base, enabled).skills.map((item) => item.name),
+    ["jev"],
+  );
 
   const disabled = createSkillSelectionPolicy({
     inventorySkills: [skill("jev", filePath)],
     config: { skills: { jev: { defaultEnabled: false } } },
   });
-  assert.deepEqual(applySkillSelection(base, disabled).skills.map((item) => item.name), [], "a real opt-out still wins");
+  assert.deepEqual(
+    applySkillSelection(base, disabled).skills.map((item) => item.name),
+    [],
+    "a real opt-out still wins",
+  );
 });
 
 test("replacing a policy in place keeps the loader's live reference pointed at the new selection", () => {
@@ -134,7 +170,7 @@ test("replacing a policy in place keeps the loader's live reference pointed at t
 /* ------------------------------- real pi loader -------------------------------- */
 
 test("pi's own loader keeps a project skill when the inventory is stale", async () => {
-  const { root, projectCwd, agentDir, skillFilePath } = projectFixture();
+  const { root, projectCwd, agentDir } = projectFixture();
   try {
     const settingsManager = SettingsManager.create(projectCwd, agentDir, { projectTrusted: true });
     const capabilityPaths: {
@@ -155,7 +191,11 @@ test("pi's own loader keeps a project skill when the inventory is stale", async 
       noThemes: true,
       noContextFiles: true,
       skillsOverride: (base) => {
-        const { skills, inventory } = applySkillSelection(base.skills, capabilityPaths.skillSelection, { isManaged });
+        const { skills, inventory } = applySkillSelection(
+          base.skills,
+          capabilityPaths.skillSelection,
+          { isManaged },
+        );
         capabilityPaths.skillInventory = inventory;
         return { ...base, skills };
       },
@@ -219,13 +259,18 @@ test("flipping the live policy lands through pi's own skill pass (no session rel
       noContextFiles: true,
       skillsOverride: (base) => ({
         ...base,
-        skills: applySkillSelection(base.skills, capabilityPaths.skillSelection, { isManaged }).skills,
+        skills: applySkillSelection(base.skills, capabilityPaths.skillSelection, { isManaged })
+          .skills,
       }),
     });
     await loader.reload();
     // pi also auto-discovers `~/.agents/skills` from the real home, so scope the
     // assertion to the skills this selection owns.
-    const names = () => loader.getSkills().skills.filter((item) => isManaged(item.filePath)).map((item) => item.name);
+    const names = () =>
+      loader
+        .getSkills()
+        .skills.filter((item) => isManaged(item.filePath))
+        .map((item) => item.name);
     assert.deepEqual(names(), ["proj-skill"]);
 
     const disable = createSkillSelectionPolicy({
@@ -235,7 +280,14 @@ test("flipping the live policy lands through pi's own skill pass (no session rel
       isManaged,
     });
     replaceSkillSelectionPolicy(capabilityPaths.skillSelection, disable);
-    loader.extendResources({ skillPaths: [{ path: join(projectCwd, ".pi", "skills"), metadata: { source: "cli", scope: "temporary", origin: "top-level" } }] });
+    loader.extendResources({
+      skillPaths: [
+        {
+          path: join(projectCwd, ".pi", "skills"),
+          metadata: { source: "cli", scope: "temporary", origin: "top-level" },
+        },
+      ],
+    });
     assert.deepEqual(names(), [], "disabling re-runs the override against the live policy");
 
     const enable = createSkillSelectionPolicy({
@@ -245,7 +297,14 @@ test("flipping the live policy lands through pi's own skill pass (no session rel
       isManaged,
     });
     replaceSkillSelectionPolicy(capabilityPaths.skillSelection, enable);
-    loader.extendResources({ skillPaths: [{ path: join(projectCwd, ".pi", "skills"), metadata: { source: "cli", scope: "temporary", origin: "top-level" } }] });
+    loader.extendResources({
+      skillPaths: [
+        {
+          path: join(projectCwd, ".pi", "skills"),
+          metadata: { source: "cli", scope: "temporary", origin: "top-level" },
+        },
+      ],
+    });
     assert.deepEqual(names(), ["proj-skill"], "an explicit enable beats a config default of false");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -268,7 +327,11 @@ test("the inventory scan does not need extensions to find project skills", async
     await loader.reload();
 
     assert.ok(loader.getSkills().skills.some((item) => item.name === "proj-skill"));
-    assert.equal(loader.getExtensions().extensions.length, 0, "no extension was imported for an inventory-only pass");
+    assert.equal(
+      loader.getExtensions().extensions.length,
+      0,
+      "no extension was imported for an inventory-only pass",
+    );
     assert.ok(skillFilePath.endsWith("SKILL.md"));
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -294,10 +357,28 @@ test("runtime-time snapshots reuse the loader's inventory instead of re-running 
   const source = bridgeSource();
 
   assert.match(source, /const allSkills = targetRuntime\.capabilityPaths\?\.skillInventory/);
-  const total = source.match(/await discoverAllProjectSkills\(project, targetRuntime\.settingsManager\)/g)?.length ?? 0;
-  const guarded = source.match(/\?\?\s*await discoverAllProjectSkills\(project, targetRuntime\.settingsManager\)/g)?.length ?? 0;
+  // 快照与删除/读内容路径都只能把重新发现当兜底，两种写法都算：
+  // - `?? await discoverAllProjectSkills(...)`（只要技能清单）；
+  // - `capabilityPaths?.skillInventory ? null : await discoverAllProjectSkillResources(...)`
+  //   （诊断要和清单同源，所以走 Resources 版本拿 { skills, diagnostics }）。
+  const guarded =
+    source.match(
+      /\?\?\s*await discoverAllProjectSkills\(project, targetRuntime\.settingsManager\)/g,
+    )?.length ?? 0;
+  const explicitFallback =
+    source.match(
+      /capabilityPaths\?\.skillInventory\s*\?\s*null\s*:\s*await discoverAllProjectSkillResources\(project, targetRuntime\.settingsManager\)/g,
+    )?.length ?? 0;
+  const total =
+    source.match(
+      /await discoverAllProjectSkill(?:s|Resources)\(project, targetRuntime\.settingsManager\)/g,
+    )?.length ?? 0;
   assert.ok(total >= 3, "the runtime-time call sites must still exist");
-  assert.equal(guarded, total, "every one of them must be a fallback behind the captured inventory");
+  assert.equal(
+    guarded + explicitFallback,
+    total,
+    "every one of them must be a fallback behind the captured inventory",
+  );
 });
 
 test("trust is resolved before the capability inventory", () => {
@@ -309,18 +390,28 @@ test("trust is resolved before the capability inventory", () => {
   const trustAt = body.indexOf("resolveProjectTrustForRuntime({");
   const inventoryAt = body.indexOf("const capabilityPaths = await resolveRuntimeCapabilityPaths({");
   assert.ok(trustAt !== -1 && inventoryAt !== -1, "both steps must still exist");
-  assert.ok(trustAt < inventoryAt, "an untrusted inventory is exactly how the project skill went missing");
-  assert.match(body, /if \(targetRuntime\.settingsManager\.isProjectTrusted\(\) !== projectTrusted\)/);
-  assert.match(body, /reloadRuntimeSkills\(targetRuntime\)/, "a late trust flip must re-run pi's skill pass");
+  assert.ok(
+    trustAt < inventoryAt,
+    "an untrusted inventory is exactly how the project skill went missing",
+  );
+  assert.match(
+    body,
+    /if \(targetRuntime\.settingsManager\.isProjectTrusted\(\) !== projectTrusted\)/,
+  );
+  assert.match(
+    body,
+    /reloadRuntimeSkills\(targetRuntime\)/,
+    "a late trust flip must re-run pi's skill pass",
+  );
 });
 
 test("the inventory scan is explicitly extension-free", () => {
   const source = bridgeSource();
-  const start = source.indexOf("async function discoverAllProjectSkills(");
-  const end = source.indexOf("function loadedExtensionReport(", start);
-  assert.ok(start !== -1 && end > start);
-
-  assert.match(source.slice(start, end), /noExtensions: true/);
+  // 取函数体：discoverAllProjectSkills 已搬到 server/skillLeaves.mjs，而 loadedExtensionReport
+  // 还在入口里 —— 拼接顺序（按文件名）会让「到下一个函数为止」的区间倒过来。
+  // 真正做扫描的是 discoverAllProjectSkillResources（discoverAllProjectSkills 只是薄封装）。
+  const scan = functionBody(source, "async function discoverAllProjectSkillResources");
+  assert.match(scan, /noExtensions: true/);
 });
 
 test("a capability change refreshes the live policy and the inventory together", () => {
@@ -329,6 +420,9 @@ test("a capability change refreshes the live policy and the inventory together",
   const end = source.indexOf("function allowHttp429Retry(", start);
   const body = source.slice(start, end);
 
-  assert.match(body, /replaceSkillSelectionPolicy\(current\.skillSelection, next\.skillSelection\)/);
+  assert.match(
+    body,
+    /replaceSkillSelectionPolicy\(current\.skillSelection, next\.skillSelection\)/,
+  );
   assert.match(body, /current\.skillInventory = next\.skillInventory/);
 });

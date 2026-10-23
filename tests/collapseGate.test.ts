@@ -56,7 +56,12 @@ test("a block fully below the fold collapses right away", () => {
   assert.equal(canCommitCollapse(geometry({ blockTop: 840, blockBottom: 1200 })), true);
   // 容差边界：还差 5px 才到折线以下 → 仍然算看得见。
   assert.equal(
-    canCommitCollapse(geometry({ blockTop: VIEWPORT.containerBottom - COLLAPSE_GATE_TOLERANCE_PX - 1, blockBottom: 1200 })),
+    canCommitCollapse(
+      geometry({
+        blockTop: VIEWPORT.containerBottom - COLLAPSE_GATE_TOLERANCE_PX - 1,
+        blockBottom: 1200,
+      }),
+    ),
     false,
   );
 });
@@ -154,14 +159,13 @@ function declaration(name: string): string {
  * 本来要把全部过程块重包进一个以折叠态挂载的组（新面板没有旧高度可保持，CSS 还带
  * `data-[starting-style]:h-0`，hold 它等于在读者眼前把页面撑开），所以单独有用例。
  */
-for (const name of [
-  "AssistantToolCall",
-  "AssistantReasoningGroup",
-  "AssistantToolGroup",
-]) {
+for (const name of ["AssistantToolCall", "AssistantReasoningGroup", "AssistantToolGroup"]) {
   test(`${name} defers its auto-collapse through the gate`, () => {
     const body = declaration(name);
-    assert.ok(body.includes("useDeferredCollapse("), `${name} must route through useDeferredCollapse`);
+    assert.ok(
+      body.includes("useDeferredCollapse("),
+      `${name} must route through useDeferredCollapse`,
+    );
     assert.ok(
       /\bopen=\{open\}/.test(body),
       `${name} must render the gated open state, not the raw intent`,
@@ -186,7 +190,9 @@ test("a disclosure that merely mounts closed is never held open", () => {
     "the gate must start disarmed, so a mounting disclosure renders as the state machine wants",
   );
   assert.ok(
-    !/SettleCollapseHold|useState\(mountHold|options\.holdOnMount/.test(deferredCollapse + threadAui),
+    !/SettleCollapseHold|useState\(mountHold|options\.holdOnMount/.test(
+      deferredCollapse + threadAui,
+    ),
     "mount-hold cannot preserve height (the panel has no previous layout); remove it again",
   );
 });
@@ -194,10 +200,7 @@ test("a disclosure that merely mounts closed is never held open", () => {
 test("过程概览全程挂载，整轮结束只是意图翻转而不是重建子树", () => {
   const summary = declaration("PiDesktopProcessGroup");
   // 运行中就展开：收起才是一个能被闸门推后的变化，而不是一次 DOM 替换。
-  assert.match(
-    summary,
-    /useDeferredCollapse\(\s*processRef,\s*messageRunning \|\| userOpen,\s*\)/,
-  );
+  assert.match(summary, /useDeferredCollapse\(\s*processRef,\s*messageRunning \|\| userOpen,\s*\)/);
   assert.doesNotMatch(summary, /open=\{userOpen\}/);
   // 表头本身是一个占位的行：没真折叠、又不是用户自己点开时它必须隐藏，
   // 否则“结束”这一帧光是露出表头就能把读者那一行顶走。
@@ -268,7 +271,7 @@ test("the gate reads geometry and never writes the scroll position", () => {
   assert.ok(!/\.scrollTo\(/.test(deferredCollapse), "deferredCollapse must not scroll");
   assert.ok(!/\.scrollBy\(/.test(deferredCollapse), "deferredCollapse must not scroll");
   assert.ok(
-    deferredCollapse.includes("container.addEventListener(\"scroll\", schedule"),
+    deferredCollapse.includes('container.addEventListener("scroll", schedule'),
     "the gate re-judges on scroll, which is how a held collapse eventually lands",
   );
 });

@@ -27,13 +27,17 @@ import {
   SHADCN_TOKENS,
   themeTokens,
 } from "./lib/cssTokens.ts";
-import { codexThemeCss, defaultThemeCss, orderedThemeIds, themeSourcesCss } from "./lib/themeSources.ts";
+import {
+  codexThemeCss,
+  defaultThemeCss,
+  orderedThemeIds,
+  themeSourcesCss,
+} from "./lib/themeSources.ts";
 import { normalizeAppearance } from "../src/lib/ui-preferences.ts";
 import { appSource } from "./lib/appSource.ts";
 
 /** Tailwind 骨架：layer 声明、`@theme` 映射、@custom-variant。主题 token 已搬到
  *  `src/themes/<id>/theme.css`（见 `src/themes/README.md`）。 */
-const tailwindCss = readFileSync(new URL("../src/app/tailwind.css", import.meta.url), "utf8");
 const stylesCss = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");
 const prefsSource = readFileSync(new URL("../src/lib/ui-preferences.ts", import.meta.url), "utf8");
 // `isMacPlatform` 现在住在拆出来的 src/app/TitleBarChrome.tsx —— 按整个 src/app 读文本，
@@ -62,7 +66,7 @@ test("codex 深色块比浅色块多一个选择器权重，且 darwin 覆盖块
   assert.match(
     defaultCode,
     /(?:^|\n):root\s*\{/,
-    "默认主题必须写裸 `:root`（不能写成 :root[data-appearance=\"default\"]），" +
+    '默认主题必须写裸 `:root`（不能写成 :root[data-appearance="default"]），' +
       "否则未知主题名会渲染成一片没有 token 的白板",
   );
   assert.ok(
@@ -134,7 +138,13 @@ test("codex 的关键角色确实与原配色不同（切换有实际效果）",
 /* ------------------------------------------------------------------ 可读性 */
 
 /** 真实会同时出现的 前景/背景 组合（各自来自规则里的一对声明）。 */
-const CONTRAST_PAIRS: { name: string; fg: string; bg: string; min: number; modes?: ("light" | "dark")[] }[] = [
+const CONTRAST_PAIRS: {
+  name: string;
+  fg: string;
+  bg: string;
+  min: number;
+  modes?: ("light" | "dark")[];
+}[] = [
   // 正文/标签
   { name: "正文前景落在背景上", fg: "--foreground", bg: "--background", min: 4.5 },
   { name: "正文前景落在卡片上", fg: "--foreground", bg: "--card", min: 4.5 },
@@ -344,7 +354,11 @@ test("composer 去掉描边时必须给载体阴影（codex 的白色板子靠�
   // 浅色下 composer 与画布同为 #ffffff，漏掉这层阴影 = 输入框整个消失。
   const codex = appearanceDeclarations(codexThemeCss, "codex");
   for (const mode of ["light", "dark"] as const) {
-    assert.equal(codex[mode]["--app-composer-border"], "transparent", `codex ${mode} 又开始给 composer 描边了`);
+    assert.equal(
+      codex[mode]["--app-composer-border"],
+      "transparent",
+      `codex ${mode} 又开始给 composer 描边了`,
+    );
     assert.equal(
       codex[mode]["--app-shadow-composer"],
       "0 3px 7.5px #0000000a, 0 0 20px #0000000d",
@@ -397,7 +411,10 @@ test("玻璃只在 macOS 成立：其它平台退回不透明侧栏，不叠一�
   const DARWIN_DARK = `${DARWIN_LIGHT}.dark`;
   const light = blockTokens(codexThemeCss, DARWIN_LIGHT);
   const dark = blockTokens(codexThemeCss, DARWIN_DARK);
-  for (const [mode, block] of [["light", light], ["dark", dark]] as const) {
+  for (const [mode, block] of [
+    ["light", light],
+    ["dark", dark],
+  ] as const) {
     const tokens = block.tokens;
     assert.match(
       tokens["--app-sidebar-glass-tint"],
@@ -410,11 +427,21 @@ test("玻璃只在 macOS 成立：其它平台退回不透明侧栏，不叠一�
     // 外壳要让开，否则材质透不出来；但**主格不能**跟着让 —— 参考项目 chrome.css:426-445
     // 写死了 "The main pane and titlebars remain opaque bg-primary"，主格透明会让三列
     // 之间的 3px 抓取条漏出材质（实测过）。
-    assert.equal(tokens["--app-main-surface"], "var(--app-content-surface)", `darwin ${mode} 主格要保持不透明`);
+    assert.equal(
+      tokens["--app-main-surface"],
+      "var(--app-content-surface)",
+      `darwin ${mode} 主格要保持不透明`,
+    );
     assert.equal(tokens["--app-shell-surface"], "transparent", `darwin ${mode} 外壳没让开`);
   }
-  assert.equal(light.tokens["--app-sidebar-glass-tint"], "color-mix(in oklab, #f3f3f3 55%, transparent)");
-  assert.equal(dark.tokens["--app-sidebar-glass-tint"], "color-mix(in oklab, #000000 40%, transparent)");
+  assert.equal(
+    light.tokens["--app-sidebar-glass-tint"],
+    "color-mix(in oklab, #f3f3f3 55%, transparent)",
+  );
+  assert.equal(
+    dark.tokens["--app-sidebar-glass-tint"],
+    "color-mix(in oklab, #000000 40%, transparent)",
+  );
 
   // 权重都是 (0,3,0)：浅色那条必须排在深色块之前，靠顺序让深色赢回来
   const lightAt = codexThemeCss.indexOf(`${DARWIN_LIGHT} {`);
@@ -492,7 +519,9 @@ test("styles.css 里的圆角与浮层阴影都走 token，默认档位保持原
 
   const literalShadows = [...stylesCss.matchAll(/box-shadow:\s*([^;]+);/g)]
     .map((m) => m[1].trim())
-    .filter((value) => !value.includes("var(--app-shadow-") && !value.startsWith("inset 0 0 0 1px"));
+    .filter(
+      (value) => !value.includes("var(--app-shadow-") && !value.startsWith("inset 0 0 0 1px"),
+    );
   // 剩下的只能是 focus ring（用 accent 现算的那种）
   for (const value of literalShadows) {
     assert.ok(value.includes("var(--app-accent)"), `styles.css 还有写死的浮层阴影：${value}`);
@@ -674,10 +703,10 @@ test("codex：标题栏退成一条留白（不留可见的「栏」，中格那
 
 test("codex 的结构规则全部限定在 codex 档（默认主题的 chrome 不许被碰）", () => {
   // 只挑「布局类」属性，避免把别处的 padding 误判进来
-  const layoutRules = [
-    ...codexThemeCss.matchAll(/(^|[^,{]*)\{([^}]*)\}/gm),
-  ].filter(([, selector, body]) =>
-    /--titlebar-height|--left-sidebar-width/.test(body) && /(margin-top|height|padding-top|linear-gradient)/.test(body),
+  const layoutRules = [...codexThemeCss.matchAll(/(^|[^,{]*)\{([^}]*)\}/gm)].filter(
+    ([, , body]) =>
+      /--titlebar-height|--left-sidebar-width/.test(body) &&
+      /(margin-top|height|padding-top|linear-gradient)/.test(body),
   );
 
   assert.ok(layoutRules.length >= 2, "应该能找到那两条 codex chrome 规则");
@@ -694,7 +723,11 @@ test("列宽变量挂在 shell 上（标题栏要按侧栏宽度决定哪一段�
   const shell = appTsx.slice(appTsx.indexOf("app-shell-surface flex h-dvh"));
   const block = shell.slice(0, shell.indexOf("<TitleBar"));
 
-  assert.match(block, /"--left-sidebar-width":/, "shell 上要暴露 --left-sidebar-width，否则标题栏的硬切渐变没有依据");
+  assert.match(
+    block,
+    /"--left-sidebar-width":/,
+    "shell 上要暴露 --left-sidebar-width，否则标题栏的硬切渐变没有依据",
+  );
   assert.match(block, /"--right-panel-width":/);
 
   // 原来挂在 <main> 上；两边都留会让人以为标题栏也能读（它读不到，是兄弟节点）
@@ -719,8 +752,15 @@ test("codex+darwin：只有侧栏是玻璃，主区保持不透明", () => {
       "var(--app-content-surface)",
       `${selector} 的主区必须不透明（否则抓取条漏材质）`,
     );
-    assert.equal(tokens["--app-shell-surface"], "transparent", `${selector} 的外壳要透明才看得到材质`);
-    assert.match(tokens["--app-sidebar-glass-tint"] ?? "", /color-mix\(in oklab, #[0-9a-f]{6} \d+%, transparent\)/);
+    assert.equal(
+      tokens["--app-shell-surface"],
+      "transparent",
+      `${selector} 的外壳要透明才看得到材质`,
+    );
+    assert.match(
+      tokens["--app-sidebar-glass-tint"] ?? "",
+      /color-mix\(in oklab, #[0-9a-f]{6} \d+%, transparent\)/,
+    );
     assert.match(tokens["--app-sidebar-blur"] ?? "", /blur\(/);
     assert.match(tokens["--app-sidebar-sheen-top"] ?? "", /linear-gradient\(/);
   }
@@ -737,9 +777,15 @@ test("codex：不透明底色画在格子上，不画在 .app-main 上（否则�
   // 抬起来的侧栏要允许溢出，否则顶部 46px 被父级裁掉、露出一道硬缝
   assert.match(rule, /overflow:\s*visible/);
 
-  const cells = codexThemeCss.slice(codexThemeCss.indexOf(".app-main > :not(.project-sidebar-surface)"));
+  const cells = codexThemeCss.slice(
+    codexThemeCss.indexOf(".app-main > :not(.project-sidebar-surface)"),
+  );
   const cellRule = cells.slice(0, cells.indexOf("}"));
-  assert.match(cellRule, /background-color:\s*var\(--app-content-surface\)/, "会话列/右侧栏/3px 抓取条要不透明");
+  assert.match(
+    cellRule,
+    /background-color:\s*var\(--app-content-surface\)/,
+    "会话列/右侧栏/3px 抓取条要不透明",
+  );
 });
 
 /**

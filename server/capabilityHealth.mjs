@@ -65,6 +65,10 @@ function normalizeErrors(errors) {
 }
 
 /**
+ * @param {{ loaded?: Array<{path?: string, resolvedPath?: string, tools?: string[], commands?: string[]}>,
+ *   errors?: Array<{path?: string, error?: string, message?: string}>,
+ *   packages?: Array<{id: string, installedPath?: string, paths?: string[]}>,
+ *   activeIds?: string[] }} [input]
  * @returns {{ packages: Record<string, {status: string, loadedCount: number, expectedCount: number, tools: string[], commands: string[], errors: string[]}>, unattributedErrors: Array<{path:string,message:string}> }}
  */
 export function summarizePackageHealth({ loaded = [], errors = [], packages = [], activeIds = [] } = {}) {

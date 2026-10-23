@@ -460,10 +460,8 @@ function assistantTextArchiveMode(
 type AssistantTextArchiveMode = "final" | "process" | "split-at-last-tool";
 
 function assistantHasToolCall(message: TranscriptMessage | undefined): boolean {
-  return (
-    Array.isArray(message?.content) &&
-    (message?.content as { type?: string }[]).some((block) => block?.type === "toolCall")
-  );
+  const content = message?.content;
+  return Array.isArray(content) && content.some((block) => block?.type === "toolCall");
 }
 
 export function assistantMessageConversationView(

@@ -44,7 +44,7 @@ function includeMatches(include, file, root) {
 // the pure logic below stays testable without re-implementing globbing here.
 /** @type {(pattern: string, file: string, root: string) => boolean} */
 let matchGlobish = () => false;
-export function useGlob(matcher) {
+export function setGlobMatcher(matcher) {
   matchGlobish = matcher;
 }
 
@@ -58,7 +58,7 @@ export function useGlob(matcher) {
  * 4. an unchecked boundary without a reason.
  */
 export function checkProcessBoundaries(policy, { root, violation, matchGlob, listSourceFiles, relativeTo }) {
-  useGlob(matchGlob);
+  setGlobMatcher(matchGlob);
   const boundaries = policy.processBoundaries ?? [];
   if (!boundaries.length) {
     return [

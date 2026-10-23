@@ -10,7 +10,7 @@ import { assertBridgePayload } from "../src/shared/protocol/bridgeMessages.ts";
 import { corsHeaders } from "./cors.mjs";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+
 
 function sendBootstrapJson(res, req, snapshot) {
   // 边界 `bridge` 报文自检：按协议字段集检查快照，少了必填字段就在日志里点名。

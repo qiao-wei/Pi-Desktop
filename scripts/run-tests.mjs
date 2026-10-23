@@ -24,8 +24,6 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const TESTS_DIR = join(REPO_ROOT, "tests");
-const CONFIG = join(TESTS_DIR, "isolation.json");
 
 /** Every test file on disk, repo-relative and sorted so the command line is stable. */
 export function listTestFiles(root = REPO_ROOT) {

@@ -6,7 +6,7 @@
  * 或者「高亮的字根本不在结果里」。
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import test from "node:test";
 
 import {
@@ -119,7 +119,9 @@ test("searchDocuments 同一消息里的多次命中只出一行", () => {
 
 test("searchDocuments 空查询没结果，limit 截断并回报 truncated", () => {
   assert.deepEqual(searchDocuments([doc()], "   "), { results: [], truncated: false });
-  const { results, truncated } = searchDocuments([doc(), doc({ projectId: "p2" })], "search", { limit: 2 });
+  const { results, truncated } = searchDocuments([doc(), doc({ projectId: "p2" })], "search", {
+    limit: 2,
+  });
   assert.equal(results.length, 2);
   assert.equal(truncated, true);
 });

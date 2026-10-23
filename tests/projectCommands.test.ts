@@ -32,7 +32,7 @@ import {
   type ProjectCommand,
 } from "../src/shared/projectCommands.ts";
 import { functionBody } from "./lib/sourceText.ts";
-import { bridgeSource } from "./lib/bridgeSource.ts";
+import { routeBody, bridgeSource } from "./lib/bridgeSource.ts";
 import { appSource as readAppSource } from "./lib/appSource.ts";
 
 const appSourceText = readAppSource();
@@ -311,10 +311,8 @@ test("四个命令端点在 server 上都有实现，运行只跑项目列表里
     assert.ok(serverSource.includes(route), `server 少了端点 ${route}`);
   }
 
-  const runBody = serverSource.slice(
-    serverSource.indexOf('url.pathname === "/api/projects/commands/run"'),
-    serverSource.indexOf('url.pathname === "/api/projects/git/commit-message"'),
-  );
+  // 分支体已抽成处理器函数（见 tests/lib/bridgeSource.ts#routeBody）。
+  const runBody = routeBody(serverSource, 'url.pathname === "/api/projects/commands/run"');
   assert.match(runBody, /selectedProjectCommand\(project\.commands \?\? \[\], String\(body\?\.commandId/);
   assert.match(runBody, /resolveCommandCwd\(requestWorkspaceCwd\(project, body\), command\.cwd\)/);
   // 运行方式（后台静默 / 指定终端）从请求体进入 `runProjectCommand`；断言不再锁死旧的两参调用。
@@ -466,7 +464,10 @@ test("后台命令：进程还活着就一直显示运行中，并且能点「�
   assert.match(serverSource, /projectCommandRuns\.register\(/);
   assert.ok(serverSource.includes('url.pathname === "/api/projects/commands/status"'), "桥少了存活状态端点");
   assert.ok(serverSource.includes('url.pathname === "/api/projects/commands/stop"'), "桥少了停止端点");
-  assert.match(serverSource, /projectCommandRuns\.stop\(String\(body\?\.runId/);
+  assert.match(
+    routeBody(serverSource, 'url.pathname === "/api/projects/commands/stop"'),
+    /projectCommandRuns\.stop\(String\(body\?\.runId/,
+  );
 
   // hook：有运行中的命令时轮询状态，进程退出 / 停止后列表清空、轮询自然停
   assert.match(hookSource, /PROJECT_COMMAND_RUN_POLL_MS/);
@@ -509,10 +510,8 @@ test("命令的参数 / 环境变量：弹窗编辑 + 全链路透传", () => {
   assert.match(hookSource, /commandLine\(command\.command, command\.args\)/);
 
   // server：运行端点从 projects.json 命令上读 args / env，登记与返回用带参数的命令行
-  const runBody = serverSource.slice(
-    serverSource.indexOf('url.pathname === "/api/projects/commands/run"'),
-    serverSource.indexOf('url.pathname === "/api/projects/git/commit-message"'),
-  );
+  // 分支体已抽成处理器函数（见 tests/lib/bridgeSource.ts#routeBody）。
+  const runBody = routeBody(serverSource, 'url.pathname === "/api/projects/commands/run"');
   assert.match(runBody, /args: command\.args/);
   assert.match(runBody, /commandEnv: command\.env/);
   assert.match(runBody, /commandLine\(command\.command, command\.args\)/);

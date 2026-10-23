@@ -17,11 +17,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { appSource } from "./lib/appSource.ts";
+
 const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
 const libRs = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
-const composerSources = ["../src/app/App.tsx", "../src/features/chat/MessageEditBox.tsx"].map((path) => ({
+// App 的 composer 已拆到 `src/app/` 多份文件（`AppShell.tsx` 拿视图、`useAppModel.ts` 拿回调），
+// 只钉 `App.tsx` 会在每次合法拆分时假红 —— 读整个目录。
+const composerSources = ["src/app/**", "../src/features/chat/MessageEditBox.tsx"].map((path) => ({
   path,
-  source: readFileSync(new URL(path, import.meta.url), "utf8"),
+  source: path.startsWith("src/app") ? appSource() : readFileSync(new URL(path, import.meta.url), "utf8"),
 }));
 
 test("Tauri main window disables the native drag-drop handler", () => {
