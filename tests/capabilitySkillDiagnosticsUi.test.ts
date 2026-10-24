@@ -82,10 +82,29 @@ test("渲染进程的 normalizeCapabilities 不能把新字段吃掉", () => {
   );
 });
 
+test("能力页：告警默认收起，把手在筛选行右端，展开后才渲染详情", () => {
+  const page = functionBody(appSource, "CapabilitiesPage");
+  // 默认收起：几行重名路径以前会把技能列表整体压下去，用户反馈过「占位太大」。
+  assert.match(page, /const \[skillDiagnosticsOpen, setSkillDiagnosticsOpen\] = useState\(false\)/);
+  // 收起时不是卸载，而是 `hidden`：内容仍在 DOM 里，`aria-controls` 才有指向。
+  assert.match(page, /id=\{SKILL_DIAGNOSTICS_ID\}/);
+  assert.match(page, /hidden=\{!skillDiagnosticsOpen\}/);
+  assert.match(page, /aria-expanded=\{skillDiagnosticsOpen\}/);
+  assert.match(page, /aria-controls=\{SKILL_DIAGNOSTICS_ID\}/);
+  // 把手上的数字就是诊断条数，否则收起后看不出有几条。
+  assert.match(page, /<Badge variant="secondary"[^>]*>\s*\{skillDiagnostics\.length\}/);
+  assert.ok(
+    /const SKILL_DIAGNOSTICS_ID = "[a-z0-9-]+"/.test(appSource),
+    "折叠把手与内容块要共用同一个 id 常量",
+  );
+});
+
 test("i18n：两套语言都有告警文案，且 {path} 槽位一致", () => {
   for (const key of [
     "capability.skillDiagnostics.title",
     "capability.skillDiagnostics.hint",
+    "capability.skillDiagnostics.expand",
+    "capability.skillDiagnostics.collapse",
     "capability.slashMenu.skillCommandsDisabled",
   ]) {
     assert.equal(typeof zh[key], "string", `zh 缺 ${key}`);
