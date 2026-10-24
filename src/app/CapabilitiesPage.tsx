@@ -29,12 +29,15 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 
 import { cn } from "@/lib/utils";
-import { BookOpen, ExternalLink, Folder, FolderOpen, Pencil, Pin, Plug, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, BookOpen, ChevronDown, ChevronUp, ExternalLink, Folder, FolderOpen, Pencil, Pin, Plug, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { MCP_EXPOSURE_HINT_KEYS, MCP_EXPOSURE_LABEL_KEYS, MCP_IMPORT_FORMAT_KEYS, McpServerDialog, McpServerEditor, mcpImportFormatKey } from "./CapabilitiesMcp";
 import { CAPABILITY_RESOURCE_LABEL_KEYS, CapabilityDetailDialog, CapabilityMarketCard, CapabilityResourceChips, PackageResourcesDialog, PackageResourcesLoaded, PackageResourcesRequest, capabilityInitial, capabilityLoadClass, capabilityLoadLabel, formatFileSize, loadPackageResourceFile } from "./CapabilityDetail";
 /* moved to src/app/CapabilityDetail.tsx */
 
+
+/** 告警折叠把手的 `aria-controls` 目标：收起时它指向的块带 `hidden`，仍在 DOM 里。 */
+const SKILL_DIAGNOSTICS_ID = "capability-skill-diagnostics";
 
 const CAPABILITY_TAB_META: Record<CapabilityScopeTab, { label: string; Icon: typeof BookOpen }> = {
   skill: { label: "Skills", Icon: BookOpen },
@@ -80,6 +83,8 @@ function CapabilitiesPage({
   const [detailOpen, setDetailOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<CapabilityItem | null>(null);
   const [skillCategory, setSkillCategory] = useState<SkillSourceCategory>("all");
+  /** 加载器诊断默认收起：它可能列好几条重名路径，展开会把技能列表挤下去。 */
+  const [skillDiagnosticsOpen, setSkillDiagnosticsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [skillImportPath, setSkillImportPath] = useState("");
   const [isChoosingSkillFolder, setIsChoosingSkillFolder] = useState(false);
@@ -336,26 +341,55 @@ function CapabilitiesPage({
               <Badge variant="secondary" className="min-w-[26px] text-sm">{installedItems.length}</Badge>
             </div>
             {tab === "skill" ? (
-              <div className="flex min-w-0 gap-2 overflow-x-auto pb-0.5" aria-label={t("capability.market.sourceCategoryAria")}>
-                {SKILL_SOURCE_CATEGORIES.map((category) => (
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-0.5" aria-label={t("capability.market.sourceCategoryAria")}>
+                  {SKILL_SOURCE_CATEGORIES.map((category) => (
+                    <Button
+                      key={category}
+                      type="button"
+                      size="sm"
+                      variant={skillCategory === category ? "secondary" : "ghost"}
+                      className="font-semibold"
+                      aria-pressed={skillCategory === category}
+                      onClick={() => setSkillCategory(category)}
+                    >
+                      {t(SKILL_SOURCE_CATEGORY_LABEL_KEYS[category])}
+                    </Button>
+                  ))}
+                </div>
+                {/* 折叠把手常驻在筛选行右端：收起时它只占一个按钮的宽度（不新增一行、不用警示色），
+                    因此「有告警」这件事仍然看得见，只是不再把技能列表往下挤。 */}
+                {skillDiagnostics.length ? (
                   <Button
-                    key={category}
                     type="button"
                     size="sm"
-                    variant={skillCategory === category ? "secondary" : "ghost"}
-                    className="font-semibold"
-                    aria-pressed={skillCategory === category}
-                    onClick={() => setSkillCategory(category)}
+                    variant="ghost"
+                    className="h-7 shrink-0 gap-1.5 px-2 text-[11.5px] font-medium text-muted-foreground hover:text-foreground"
+                    aria-expanded={skillDiagnosticsOpen}
+                    aria-controls={SKILL_DIAGNOSTICS_ID}
+                    title={skillDiagnosticsOpen
+                      ? t("capability.skillDiagnostics.collapse")
+                      : t("capability.skillDiagnostics.expand")}
+                    onClick={() => setSkillDiagnosticsOpen((open) => !open)}
                   >
-                    {t(SKILL_SOURCE_CATEGORY_LABEL_KEYS[category])}
+                    <AlertTriangle className="size-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                    {t("capability.skillDiagnostics.title")}
+                    <Badge variant="secondary" className="h-4 min-w-4 px-1 text-[10px] tabular-nums">
+                      {skillDiagnostics.length}
+                    </Badge>
+                    {skillDiagnosticsOpen
+                      ? <ChevronUp className="size-3.5" aria-hidden="true" />
+                      : <ChevronDown className="size-3.5" aria-hidden="true" />}
                   </Button>
-                ))}
+                ) : null}
               </div>
             ) : null}
             {tab === "skill" && skillDiagnostics.length ? (
               // 重名冲突时 pi 保留先发现的那份、丢掉后来的：只看到一个技能不见了而没有任何
               // 解释，是用户最不能自解的一类问题，所以把加载器的诊断原样贴出来。
               <div
+                id={SKILL_DIAGNOSTICS_ID}
+                hidden={!skillDiagnosticsOpen}
                 className="grid gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5"
                 role="status"
                 aria-label={t("capability.skillDiagnostics.title")}

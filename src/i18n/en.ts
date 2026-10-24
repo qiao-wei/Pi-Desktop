@@ -32,6 +32,8 @@ export const en = {
   "capability.skillDiagnostics.title": "Skill load warnings",
   "capability.skillDiagnostics.hint": "pi's loader flagged these skills: when two skills share a name only the first one found is kept, and a skill with invalid frontmatter is not loaded at all.",
   "capability.skillDiagnostics.kept": "Kept: {path}",
+  "capability.skillDiagnostics.expand": "Show skill load warnings",
+  "capability.skillDiagnostics.collapse": "Hide skill load warnings",
   "capability.slashMenu.skillCommandsDisabled": "Skill commands are turned off in pi settings (enableSkillCommands: false), so skills are not listed here; typing /skill:<name> still works.",
 
   /* ---- usage ---- */

@@ -37,6 +37,8 @@ export const zh = {
   "capability.skillDiagnostics.title": "技能加载告警",
   "capability.skillDiagnostics.hint": "pi 的加载器在下面这些技能上打了警告：同名技能只保留先发现的那份（后者会被丢掉），frontmatter 非法的技能根本不会加载。",
   "capability.skillDiagnostics.kept": "实际保留：{path}",
+  "capability.skillDiagnostics.expand": "展开技能加载告警",
+  "capability.skillDiagnostics.collapse": "收起技能加载告警",
   "capability.slashMenu.skillCommandsDisabled": "技能命令已在 pi 设置里关闭（enableSkillCommands: false），所以这里不列技能；直接输入 /skill:<技能名> 仍然可用。",
 
   /* ---- usage（用量面板） ---- */
