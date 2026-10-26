@@ -12,7 +12,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 const root = join(import.meta.dirname, "..");
-import { routeBody, bridgeSource } from "./lib/bridgeSource.ts";
+import { routeBody, hasRoute, handlerFor, bridgeSource } from "./lib/bridgeSource.ts";
 
 const serverSource = bridgeSource();
 const brokerSource = readFileSync(join(root, "server", "modelLogin.mjs"), "utf8");
@@ -56,16 +56,18 @@ test("桥用 pi 的登录实现，而不是自己拼一套：ModelRuntime.login 
 });
 
 test("登录路由按 :id + authType 分派，respond / cancel 是独立口", () => {
-  assert.match(serverSource, /url\.pathname === "\/api\/model-providers\/login\/respond"/);
-  assert.match(serverSource, /url\.pathname === "\/api\/model-providers\/login\/cancel"/);
-  assert.match(serverSource, /url\.pathname\.endsWith\("\/login"\)/);
+  assert.ok(hasRoute("POST", "/api/model-providers/login/respond"), "respond 必须是独立口");
+  assert.ok(hasRoute("POST", "/api/model-providers/login/cancel"), "cancel 必须是独立口");
+  assert.ok(hasRoute("POST", "/login", "suffix"), "登录入口按 :id/login 收");
   // 分支体已抽成处理器函数：按处理器取体（见 tests/lib/bridgeSource.ts#routeBody）。
   const login = routeBody(serverSource, 'url.pathname.endsWith("/login")');
   assert.match(login, /await streamModelLogin\(ctx\.req, ctx\.res, providerId, ctx\.requestId\)/);
-  // respond / cancel 必须排在 /:id/login 之前，否则会被当成某家的登录。
-  const respondAt = serverSource.indexOf('"/api/model-providers/login/respond"');
-  const loginAt = serverSource.indexOf('url.pathname.endsWith("/login")');
-  assert.ok(respondAt > 0 && loginAt > respondAt, "固定路由要排在参数化路由前面");
+  // 固定路由必须排在参数化路由之前，否则 respond 会被当成某家的登录 —— 现在问匹配结果，
+  // 而不是比较两条分支在源码里的先后（顺序已由路由表里的显式 priority 决定）。
+  assert.equal(
+    handlerFor("POST", "/api/model-providers/login/respond"),
+    "handle_post_api_model_providers_login_respond",
+  );
 });
 
 test("供应商行带上 OAuth 元数据，设置页才知道该显示哪几个入口", () => {

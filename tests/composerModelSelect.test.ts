@@ -31,7 +31,7 @@ import {
   validateDraft,
 } from "../src/features/models/customModelForm.ts";
 import * as serverRules from "../server/customModels.mjs";
-import { routeBody, bridgeFiles, bridgeSource as readBridgeSource } from "./lib/bridgeSource.ts";
+import { routeBody, bridgeFiles, hasRoute, bridgeSource as readBridgeSource } from "./lib/bridgeSource.ts";
 import { appSource as readAppSource } from "./lib/appSource.ts";
 
 const customEntry = {
@@ -285,8 +285,7 @@ test("自定义模型的五个端点都注册了", () => {
     ["POST", "/api/custom-models/reload"],
     ["POST", "/api/custom-models/test"],
   ] as const) {
-    const needle = `req.method === "${method}" && url.pathname === "${path}"`;
-    assert.ok(bridgeSource.includes(needle), `缺少路由 ${method} ${path}`);
+    assert.ok(hasRoute(method, path), `缺少路由 ${method} ${path}`);
   }
 });
 
@@ -685,8 +684,7 @@ test("桥暴露 provider 目录与模型发现", () => {
     ["GET", "/api/model-providers"],
     ["POST", "/api/model-providers/discover"],
   ] as const) {
-    const needle = `req.method === "${method}" && url.pathname === "${path}"`;
-    assert.ok(bridgeSource.includes(needle), `缺少路由 ${method} ${path}`);
+    assert.ok(hasRoute(method, path), `缺少路由 ${method} ${path}`);
   }
   // 动态供应商允许联网刷新列表，拉不动时退回本地目录而不是报错。
   assert.match(

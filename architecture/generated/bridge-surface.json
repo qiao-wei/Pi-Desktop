@@ -32,8 +32,7 @@
     },
     "/api/capabilities": {
       "methods": [
-        "GET",
-        "POST"
+        "GET"
       ],
       "transport": "json",
       "bridge": true,
@@ -282,7 +281,6 @@
     },
     "/api/custom-models/reload": {
       "methods": [
-        "GET",
         "POST"
       ],
       "transport": "json",
@@ -313,7 +311,6 @@
     },
     "/api/diagnostic": {
       "methods": [
-        "GET",
         "POST"
       ],
       "transport": "ndjson",
@@ -324,7 +321,6 @@
     },
     "/api/extension-ui/response": {
       "methods": [
-        "GET",
         "POST"
       ],
       "transport": "json",
@@ -335,8 +331,7 @@
     },
     "/api/local-media": {
       "methods": [
-        "GET",
-        "POST"
+        "GET"
       ],
       "transport": "json",
       "bridge": true,
@@ -414,7 +409,6 @@
     },
     "/api/model-providers/discover": {
       "methods": [
-        "GET",
         "POST"
       ],
       "transport": "json",
@@ -534,8 +528,7 @@
     },
     "/api/projects/commands/status": {
       "methods": [
-        "GET",
-        "POST"
+        "GET"
       ],
       "transport": "json",
       "bridge": true,
@@ -645,8 +638,7 @@
     },
     "/api/projects/git/diff": {
       "methods": [
-        "GET",
-        "POST"
+        "GET"
       ],
       "transport": "json",
       "bridge": true,
@@ -844,8 +836,7 @@
     },
     "/api/search": {
       "methods": [
-        "GET",
-        "POST"
+        "GET"
       ],
       "transport": "json",
       "bridge": true,
@@ -855,7 +846,6 @@
     },
     "/api/sessions": {
       "methods": [
-        "GET",
         "POST"
       ],
       "transport": "json",
@@ -926,8 +916,7 @@
     },
     "/api/sessions/worktree": {
       "methods": [
-        "GET",
-        "POST"
+        "GET"
       ],
       "transport": "json",
       "bridge": true,
@@ -1006,7 +995,6 @@
     },
     "/api/tools/settings": {
       "methods": [
-        "GET",
         "POST"
       ],
       "transport": "json",

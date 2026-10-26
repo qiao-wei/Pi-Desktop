@@ -62,14 +62,15 @@ import { renderDocRegions } from "./lib/render.mjs";
 import { checkProcessBoundaries } from "./lib/boundaries.mjs";
 import { matchGlob } from "./lib/glob.mjs";
 import { renderConfig as renderLintConfig } from "./lint-config.mjs";
+import { ROUTES } from "../../server/routeTable.mjs";
 import {
   bridgeAnswers,
-  extractBridgeRoutes,
   extractClientPaths,
   extractDeclaredEndpoints,
   extractInvokeSites,
   extractPreloadWhitelist,
   extractProtocolVersion,
+  routesFromTable,
   stripComments,
   structuralMatch,
 } from "./lib/extractors.mjs";
@@ -80,12 +81,12 @@ export { readRegion, writeRegion };
 export { matchGlob };
 export {
   bridgeAnswers,
-  extractBridgeRoutes,
   extractClientPaths,
   extractDeclaredEndpoints,
   extractInvokeSites,
   extractPreloadWhitelist,
   extractProtocolVersion,
+  routesFromTable,
   structuralMatch,
 };
 import { PROTOCOL_SEAMS } from "../../src/shared/protocol/seams.ts";
@@ -504,8 +505,9 @@ export function runCheck(root = REPO_ROOT, policy = loadPolicy(root)) {
   }
 
   // --- protocol surface -----------------------------------------------------------------
-  const bridgeSource = readFileSync(join(root, "server/index.mjs"), "utf8");
-  const bridgeRoutes = extractBridgeRoutes(bridgeSource);
+  // 路由的真源是表（`server/routeTable.mjs`），不是 `server/index.mjs` 的源码文本：
+  // 正则扒源码时"扒不到"和"没有这条路由"长得一模一样。
+  const bridgeRoutes = routesFromTable(ROUTES);
   const rendererFiles = scanFiles.filter((file) => relativeTo(root, file).startsWith("src/"));
   const clientPaths = extractClientPaths(rendererFiles, root);
   const surfacePath = join(root, "architecture/generated/bridge-surface.json");

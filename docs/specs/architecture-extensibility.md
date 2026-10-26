@@ -118,6 +118,15 @@ reviewers: ["@qiaowei"]
 **A2 — 路由成为数据〔结构〕**
 路由变成表项（method + 匹配种类 + handler + transport），匹配种类至少含 `exact` / `suffix` / `prefix` / `param`（新增的订阅入口带参数，正好用上 `param`）。**今天靠书写顺序实现的「固定路由优先于后缀匹配」必须变成显式优先级字段**。冻结表面改由表生成，落地后跑一次 `architecture:write`，diff 必须只含等价性变化（路由集合逐条相同）。
 
+**已落地（2026-10-26）**：`server/routeTable.mjs` 是唯一真源（103 行，语义注释随行搬过来），匹配按显式 `priority`（`exact` 0 / 参数化 10，与书写顺序无关），`server/index.mjs` 的 269 行 `if` 链换成 3 行查表（792 → 545 行），处理器按名字从组合区取并在启动时核对「名字存在」。检查器不再正则扒源码文本，改读表（`routesFromTable`）；测试里 20 多处「在源码里找 `url.pathname === "…"`」改成问表（`hasRoute` / `handlerFor` / `routeBody` 由标记反查处理器）。
+
+两处与原文的有意偏差：
+
+- **不实现 `param`**：B2 的订阅入口最后是 `POST /api/runs/stream`（请求体寻址，见 B2 落地说明），今天没有任何带路径参数的路由；没有消费者的匹配种类就是死代码，等真有 `:id` 路由再加（匹配器加一种形态是几行的事）。
+- **表里不放 `transport`**：那是 `src/shared/protocol/bridgeEndpoints.ts` 对客户端的声明，搬进表等于同一件事的第二个副本、而且没有检查点；「声明的端点桥都答得出来」已由 `protocol-core` 规则咬着。
+
+另外这次 `architecture:write` 的 diff 里有 12 处**方法被移除**（如 `/api/capabilities` 少了无故的 `POST`）：旧的文本提取器拿 160 字符窗口去正则，会把相邻分支的 `req.method` 算到上一条路径头上。路由集合逐条相同，少掉的都是提取器的假阳性 —— 表面因此更准。
+
 **A3 — `storage` 边界从「未证明」变「已证明」〔结构〕**
 `storage` 的 `seamGap` 自己写着缺一个 `setSqliteFactory()`。补上注入点 + 一条真的 swap 测试（用假驱动跑通会话索引的读写与事务语义），然后清空 `seamGap`、按其它协议的样子登记 `seam` 与 `swapTest`。
 

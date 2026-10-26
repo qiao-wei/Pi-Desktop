@@ -7,39 +7,27 @@ import { readFileSync } from "node:fs";
 import { relativeTo } from "./graph.mjs";
 import { matchSegments } from "./glob.mjs";
 
-const METHOD_WINDOW = 160;
-
-/** Every route the bridge answers, with the methods it answers on. */
-export function extractBridgeRoutes(bridgeSource) {
-  const routes = new Map();
-  const add = (path, method) => {
-    if (!routes.has(path)) routes.set(path, new Set());
-    if (method) routes.get(path).add(method);
-  };
-
-  const exact = [
-    new RegExp(
-      `req\\.method\\s*===\\s*"([A-Z]+)"[\\s\\S]{0,${METHOD_WINDOW}}?url\\.pathname\\s*===\\s*"([^"]+)"`,
-      "g",
-    ),
-    new RegExp(
-      `url\\.pathname\\s*===\\s*"([^"]+)"[\\s\\S]{0,${METHOD_WINDOW}}?req\\.method\\s*===\\s*"([A-Z]+)"`,
-      "g",
-    ),
-  ];
-  for (const [index, regex] of exact.entries()) {
-    for (const match of bridgeSource.matchAll(regex)) {
-      if (index === 0) add(match[2], match[1]);
-      else add(match[1], match[2]);
-    }
+/**
+ * Every route the bridge answers, with the methods it answers on.
+ *
+ * 真源是 `server/routeTable.mjs`（纯数据），不是 `server/index.mjs` 的源码文本。以前这里拿正则
+ * 去 if 链里扒路由：扒不到就是**静默少一条**（冻结表面跟着少一条，谁也不知道）。表之后，
+ * 少一条只可能是有人删了表里的一行。
+ */
+export function routesFromTable(routes) {
+  const byPattern = new Map();
+  for (const route of routes) {
+    const pattern =
+      route.kind === "exact"
+        ? route.path
+        : route.kind === "prefix"
+          ? `${route.path.replace(/\/$/, "")}/**`
+          : `**/${route.path.replace(/^\//, "")}`;
+    if (!byPattern.has(pattern)) byPattern.set(pattern, new Set());
+    // 参数化行只登记模式：它承接的是一族路径，方法写在表里，但没有单一方法可登记。
+    if (route.kind === "exact") byPattern.get(pattern).add(route.method);
   }
-  for (const match of bridgeSource.matchAll(/url\.pathname\.startsWith\("([^"]+)"\)/g)) {
-    add(`${match[1].replace(/\/$/, "")}/**`, null);
-  }
-  for (const match of bridgeSource.matchAll(/url\.pathname\.endsWith\("([^"]+)"\)/g)) {
-    add(`**/${match[1].replace(/^\//, "")}`, null);
-  }
-  return routes;
+  return byPattern;
 }
 
 const CLIENT_CALL =

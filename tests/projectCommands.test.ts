@@ -32,7 +32,7 @@ import {
   type ProjectCommand,
 } from "../src/shared/projectCommands.ts";
 import { functionBody } from "./lib/sourceText.ts";
-import { routeBody, bridgeSource } from "./lib/bridgeSource.ts";
+import { routeBody, hasRoute, bridgeSource } from "./lib/bridgeSource.ts";
 import { appSource as readAppSource } from "./lib/appSource.ts";
 
 const appSourceText = readAppSource();
@@ -302,13 +302,14 @@ test("projects.json 里的命令列表在 loadProjects 里归一化", () => {
 });
 
 test("四个命令端点在 server 上都有实现，运行只跑项目列表里的命令", () => {
-  for (const route of [
-    'url.pathname === "/api/projects/commands"',
-    'url.pathname === "/api/projects/commands/select"',
-    'url.pathname === "/api/projects/commands/detect"',
-    'url.pathname === "/api/projects/commands/run"',
-  ]) {
-    assert.ok(serverSource.includes(route), `server 少了端点 ${route}`);
+  for (const [method, route] of [
+    ["GET", "/api/projects/commands"],
+    ["POST", "/api/projects/commands"],
+    ["POST", "/api/projects/commands/select"],
+    ["POST", "/api/projects/commands/detect"],
+    ["POST", "/api/projects/commands/run"],
+  ] as const) {
+    assert.ok(hasRoute(method, route), `server 少了端点 ${method} ${route}`);
   }
 
   // 分支体已抽成处理器函数（见 tests/lib/bridgeSource.ts#routeBody）。
@@ -455,15 +456,15 @@ test("运行方式：后台静默 / 系统默认终端 / 指定终端 app", () =
   assert.match(runBody, /loadUiPreferences\(\)\.projectCommandTerminal/);
 
   // 桥上有「终端探测」与「查看日志」两个端点
-  assert.ok(serverSource.includes('url.pathname === "/api/projects/commands/terminals"'));
-  assert.ok(serverSource.includes('url.pathname === "/api/projects/commands/reveal-log"'));
+  assert.ok(hasRoute("GET", "/api/projects/commands/terminals"), "桥少了终端探测端点");
+  assert.ok(hasRoute("POST", "/api/projects/commands/reveal-log"), "桥少了查看日志端点");
 });
 
 test("后台命令：进程还活着就一直显示运行中，并且能点「停止」", () => {
   // 桥：运行成功后登记进程，另给「存活状态」与「停止」两个端点
   assert.match(serverSource, /projectCommandRuns\.register\(/);
-  assert.ok(serverSource.includes('url.pathname === "/api/projects/commands/status"'), "桥少了存活状态端点");
-  assert.ok(serverSource.includes('url.pathname === "/api/projects/commands/stop"'), "桥少了停止端点");
+  assert.ok(hasRoute("GET", "/api/projects/commands/status"), "桥少了存活状态端点");
+  assert.ok(hasRoute("POST", "/api/projects/commands/stop"), "桥少了停止端点");
   assert.match(
     routeBody(serverSource, 'url.pathname === "/api/projects/commands/stop"'),
     /projectCommandRuns\.stop\(String\(body\?\.runId/,

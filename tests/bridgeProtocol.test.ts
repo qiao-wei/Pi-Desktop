@@ -32,8 +32,9 @@ import {
 } from "../src/shared/protocol/bridgeEndpoints.ts";
 import { setBridgeTransport } from "../src/lib/bridge/transport.ts";
 import { fetchBootstrap, postJson, probeBridgeProtocol } from "../src/lib/api.ts";
-import { REPO_ROOT, extractBridgeRoutes, loadPolicy } from "../scripts/architecture/check.mjs";
-import { bridgeSource } from "./lib/bridgeSource.ts";
+import { REPO_ROOT, loadPolicy } from "../scripts/architecture/check.mjs";
+import { routesFromTable } from "../scripts/architecture/lib/extractors.mjs";
+import { ROUTES } from "../server/routeTable.mjs";
 
 const policy = loadPolicy(REPO_ROOT);
 
@@ -141,7 +142,7 @@ test("档位分类：认识的 ok；缺声明与不认识的都算不兼容（�
 });
 
 test("手写核心端点都在桥里实现，路径不重复", () => {
-  const routes = extractBridgeRoutes(bridgeSource());
+  const routes = routesFromTable(ROUTES);
   const seen = new Set();
   for (const endpoint of Object.values(BRIDGE_ENDPOINTS)) {
     assert.equal(seen.has(endpoint.path), false, `重复声明: ${endpoint.path}`);
@@ -162,7 +163,7 @@ test("冻结表面覆盖两个方向（客户端调用点 与 桥路由）", () 
   const surface = JSON.parse(
     readFileSync(join(REPO_ROOT, "architecture/generated/bridge-surface.json"), "utf8"),
   ).routes;
-  const routes = extractBridgeRoutes(bridgeSource());
+  const routes = routesFromTable(ROUTES);
 
   const missingClientPaths = Object.keys(surface).filter((path) => !surface[path].callers.length);
   // bridge-only 路由是允许的（attachment/local-media 这类由 <img src> 直接取），但必须标明是桥侧亲口应答的。

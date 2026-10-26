@@ -15,7 +15,7 @@ import { join } from "node:path";
 import {
   REPO_ROOT,
   bridgeAnswers,
-  extractBridgeRoutes,
+  routesFromTable,
   extractDeclaredEndpoints,
   extractInvokeSites,
   extractPreloadWhitelist,
@@ -26,7 +26,7 @@ import {
   runCheck,
   structuralMatch,
 } from "../scripts/architecture/check.mjs";
-import { bridgeSource } from "./lib/bridgeSource.ts";
+import { ROUTES } from "../server/routeTable.mjs";
 
 const policy = loadPolicy(REPO_ROOT);
 const result = runCheck(REPO_ROOT, policy);
@@ -121,9 +121,9 @@ test("路由匹配：前缀/后缀/参数段各自的语义（回归：前导 **
   assert.equal(structuralMatch("/api/sessions/:param", "/api/bootstrap"), false);
 });
 
-test("bridge 路由提取：真的从 server/index.mjs 里读出了方法+路径", () => {
-  const routes = extractBridgeRoutes(bridgeSource());
-  assert.ok(routes.size > 80, `只提取到 ${routes.size} 条路由，提取器很可能坏了`);
+test("bridge 路由提取：从路由表（数据）里读出方法+路径", () => {
+  const routes = routesFromTable(ROUTES);
+  assert.ok(routes.size > 80, `只提取到 ${routes.size} 条路由，表或转换很可能坏了`);
   const bootstrap = routes.get("/api/bootstrap");
   assert.ok(bootstrap, "没有提取到 /api/bootstrap");
   assert.equal([...bootstrap].includes("GET"), true);
