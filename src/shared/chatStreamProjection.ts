@@ -104,8 +104,10 @@ export function projectStreamEvent(view: ChatStreamView, event: PromptStreamEven
       // it here must not count as an unaddressed event.
       return view;
     case "error":
+    case "transport_error":
     case "done":
-      // The hook owns run lifecycle; the stream is over either way.
+      // The hook owns run lifecycle; the stream is over either way. A transport error ends the run
+      // too - the frames will never arrive - it only differs in *why* it ended.
       return view.activeBubbleId === null ? view : { ...view, activeBubbleId: null };
     default:
       return view;

@@ -1,4 +1,5 @@
 import { assistantThinkingBlocks, countTranscriptTurns, createBubbleTracker, messageDisplayText } from "../src/shared/chatBubbles.ts";
+import { domainErrorFrame } from "../src/shared/protocol/bridgeStreamFrames.ts";
 import { appendAttachmentContext, sanitizeAttachmentName } from "./attachmentHelpers.mjs";
 import { normalizeMessageParts } from "./conversationParts.mjs";
 import { corsHeaders } from "./cors.mjs";
@@ -478,7 +479,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
         writeEvent({ type: "snapshot", snapshot: await buildSnapshot(activeRuntime) });
       }
       if (finalAgentError) {
-        writeEvent({ type: "error", message: finalAgentError });
+        writeEvent(domainErrorFrame(finalAgentError));
       }
       // `lifecycle` tells the client whether this stream merely acknowledged a
       // queue insert (the run keeps going) or actually ended the run.
@@ -504,7 +505,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
       ...errorDetails(error),
     });
     if (!closed) {
-      writeEvent({ type: "error", message });
+      writeEvent(domainErrorFrame(message));
       closed = true;
       res.end();
     }

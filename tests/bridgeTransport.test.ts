@@ -143,7 +143,7 @@ test("HTTP transport：非 ok 抛出桥给的原文，不把整串 JSON 丢给�
   assert.equal(await readBridgeErrorMessage({ status: 503, statusText: "Unavailable", text: async () => "" }), "503 Unavailable");
 });
 
-test("HTTP transport：NDJSON 逐行解析，坏行降级成 error 事件而不是丢弃整段", async () => {
+test("HTTP transport：NDJSON 逐行解析，坏行标成 transport_error 而不是冒充业务错误", async () => {
   const transport = createHttpBridgeTransport("http://127.0.0.1:6474");
   const body = '{"type":"a"}\n{"type":"b"}\n{broken\n{"type":"c"}\n{"type":"tail"}';
   const chunks = [body.slice(0, 7), body.slice(7, 20), body.slice(20)];
@@ -170,9 +170,43 @@ test("HTTP transport：NDJSON 逐行解析，坏行降级成 error 事件而不�
     assert.deepEqual(events, [
       { type: "a" },
       { type: "b" },
-      { type: "error", message: "{broken" },
+      // 以前这里是 `{ type: "error", message: "{broken" }`——和「模型失败」长一样。
+      // 分帧坏掉是传输侧的事，必须能与业务错误分开（重试、上报、文案都不同）。
+      { type: "transport_error", code: "malformed_line", message: "{broken" },
       { type: "c" },
+      // 结尾那句没有换行符但能解析：它是最后一条完整帧，不是截断。
       { type: "tail" },
+    ]);
+  });
+});
+
+test("HTTP transport：流尾没解析出来的半条帧算截断，不算业务错误", async () => {
+  const transport = createHttpBridgeTransport("http://127.0.0.1:6474");
+  const body = '{"type":"a"}\n{"type":"half';
+  const streamResponse = {
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    text: async () => body,
+    body: {
+      getReader() {
+        let sent = false;
+        return {
+          async read() {
+            if (sent) return { done: true, value: undefined };
+            sent = true;
+            return { done: false, value: new TextEncoder().encode(body) };
+          },
+        };
+      },
+    },
+  };
+  await withFetch(streamResponse, async () => {
+    const events: unknown[] = [];
+    await transport.stream("/api/prompt", { message: "x" }, (event) => events.push(event));
+    assert.deepEqual(events, [
+      { type: "a" },
+      { type: "transport_error", code: "truncated", message: '{"type":"half' },
     ]);
   });
 });

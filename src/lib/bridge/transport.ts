@@ -14,11 +14,13 @@
  * - `lastEtag(path)` exposes the revalidation tag the server handed out for that path, so a
  *   caller can send `If-None-Match` without keeping its own copy of the cache.
  * - `stream<T>` yields one parsed object per NDJSON line, in order, and never throws for a
- *   malformed line (it surfaces as `{ type: "error", message: <raw line> }` so a bad frame
- *   cannot silently truncate a turn).
+ *   malformed line (it surfaces as a `transport_error` frame, so a bad frame cannot silently
+ *   truncate a turn **and** cannot be mistaken for the model failing).
  * - `fireAndForget` never throws and never rejects: telemetry must not be able to break a turn.
  */
 
+import type { TransportErrorCode } from "../../shared/protocol/bridgeStreamFrames.ts";
+import { transportErrorFrame } from "../../shared/protocol/bridgeStreamFrames.ts";
 import type { PerfPort } from "../../shared/protocol/perf.ts";
 import { activePerfPort } from "../perf-port.ts";
 
@@ -175,11 +177,12 @@ export function createHttpBridgeTransport(apiBase: string): BridgeTransport {
       const decoder = new TextDecoder();
       let buffer = "";
 
-      const emit = (line: string) => {
+      const emit = (line: string, code: TransportErrorCode = "malformed_line") => {
         try {
           onEvent(JSON.parse(line) as T);
         } catch {
-          onEvent({ type: "error", message: line } as T);
+          // 坏行不是业务错误：标成 transport_error，UI 才能和「模型失败」分开处理。
+          onEvent(transportErrorFrame(code, line) as T);
         }
       };
 
@@ -196,8 +199,9 @@ export function createHttpBridgeTransport(apiBase: string): BridgeTransport {
         }
       }
 
+      // 结尾剩余的部分：解析得出来就是最后一条完整帧，解析不出来说明流被截断了。
       const tail = buffer.trim();
-      if (tail) emit(tail);
+      if (tail) emit(tail, "truncated");
     },
 
     fireAndForget(path: string, body: unknown): void {

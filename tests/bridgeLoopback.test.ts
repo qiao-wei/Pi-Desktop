@@ -18,6 +18,7 @@ import test from "node:test";
 
 import { PROTOCOL_VERSION } from "../src/shared/protocol/version.ts";
 import { createLoopbackBridgeTransport, type BridgeRequestMessage } from "../src/lib/bridge/loopback.ts";
+import { createHttpBridgeTransport } from "../src/lib/bridge/transport.ts";
 import { setBridgeTransport } from "../src/lib/bridge/transport.ts";
 import { fetchBootstrap, fetchJson, postJson, reportDiagnostic, streamNdjson } from "../src/lib/api.ts";
 
@@ -141,7 +142,7 @@ test("POST 的 body 由 transport 负责序列化（上层只给对象）", asyn
   });
 });
 
-test("NDJSON 分帧一致：逐行回调，坏行变成 error 事件而不是截断整轮", async () => {
+test("NDJSON 分帧一致：逐行回调，坏行变成 transport_error 而不是截断整轮", async () => {
   const events: unknown[] = [];
   await withLoopback(async () => {
     await streamNdjson("/api/prompt", { text: "hi" }, (event) => events.push(event));
@@ -149,9 +150,61 @@ test("NDJSON 分帧一致：逐行回调，坏行变成 error 事件而不是截
   assert.deepEqual(events, [
     { type: "delta", text: "hel" },
     { type: "delta", text: "lo" },
-    { type: "error", message: "not json at all" },
+    // 传输侧的错误，不是业务错误：两版 transport 都由同一个构造器产出这一帧。
+    { type: "transport_error", code: "malformed_line", message: "not json at all" },
     { type: "done" },
   ]);
+});
+
+test("同一条坏行，两版 transport 给出同一串帧（上层无从分辨用的哪版）", async () => {
+  // 与 `inProcessBridge` 的 `/api/prompt` fixture 逐字节相同的 NDJSON（含结尾那条没有换行的帧），
+  // 这样两边比的才是同一段坏流。
+  const body = [
+    `${JSON.stringify({ type: "delta", text: "hel" })}\n`,
+    `${JSON.stringify({ type: "delta", text: "lo" })}\n`,
+    "not json at all\n",
+    `${JSON.stringify({ type: "done" })}`,
+  ].join("");
+
+  const viaLoopback: unknown[] = [];
+  await withLoopback(async () => {
+    await streamNdjson("/api/prompt", { text: "hi" }, (event) => viaLoopback.push(event));
+  });
+
+  const viaHttp: unknown[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    text: async () => body,
+    body: {
+      getReader() {
+        let sent = false;
+        return {
+          async read() {
+            if (sent) return { done: true, value: undefined };
+            sent = true;
+            return { done: false, value: new TextEncoder().encode(body) };
+          },
+        };
+      },
+    },
+  })) as unknown as typeof fetch;
+  try {
+    const transport = createHttpBridgeTransport("http://127.0.0.1:6474");
+    await transport.stream("/api/prompt", { text: "hi" }, (event) => viaHttp.push(event));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(viaLoopback, [
+    { type: "delta", text: "hel" },
+    { type: "delta", text: "lo" },
+    { type: "transport_error", code: "malformed_line", message: "not json at all" },
+    { type: "done" },
+  ]);
+  assert.deepEqual(viaHttp, viaLoopback, "同一段坏流在两版 transport 上必须给出同一串帧");
 });
 
 test("错误体里的 error 字段被抽成人话抛出来（不是整串 JSON）", async () => {

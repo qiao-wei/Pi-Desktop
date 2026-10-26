@@ -1575,7 +1575,7 @@ export function usePiDesktopApp() {
           }
         }
 
-        if (event.type === "error") {
+        if (event.type === "error" || event.type === "transport_error") {
           outcome.streamError = event.message ?? "Unknown streaming error";
           if (queueSteering && !outcome.accepted) {
             // pi refused the insert (compaction in flight, extension command, ...):
@@ -1835,7 +1835,7 @@ export function usePiDesktopApp() {
         if (event.type === "snapshot" && event.snapshot) {
           replaceBootstrap(event.snapshot, sessionPath);
         }
-        if (event.type === "error") {
+        if (event.type === "error" || event.type === "transport_error") {
           outcome.streamError = event.message ?? "Unknown streaming error";
         }
         if (event.type === "done") {
@@ -2582,7 +2582,7 @@ export function usePiDesktopApp() {
           return;
         }
 
-        if (event.type === "error") {
+        if (event.type === "error" || event.type === "transport_error") {
           failure = event.message ?? "Package operation failed";
         }
       });
@@ -2638,7 +2638,7 @@ export function usePiDesktopApp() {
           return;
         }
 
-        if (event.type === "error") {
+        if (event.type === "error" || event.type === "transport_error") {
           commandError = event.message ?? `/${command} 执行失败`;
         }
       });

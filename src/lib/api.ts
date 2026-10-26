@@ -22,6 +22,7 @@ import {
   getBridgeTransport,
   setBridgeTransport,
 } from "./bridge/transport.ts";
+import type { TransportErrorCode } from "../shared/protocol/bridgeStreamFrames.ts";
 import { protocolMismatch } from "../shared/protocol/version.ts";
 import { getStoragePort } from "./storage.ts";
 import type { BridgeHandshake } from "../shared/protocol/bridgeEndpoints.ts";
@@ -251,6 +252,11 @@ export interface PromptStreamEvent {
     | "snapshot"
     | "notice"
     | "error"
+    /**
+     * 传输/分帧坏了（坏行、截断、单流待发字节超限），不是模型或工具失败。
+     * 与 `error` 分开声明：重试、上报、UI 文案都该走不同的路。
+     */
+    | "transport_error"
     | "done"
     | "compaction_start"
     | "compaction_end"
@@ -260,6 +266,10 @@ export interface PromptStreamEvent {
      * event existed the meter could only move once per run, with the snapshot.
      */
     | "context_usage";
+  /** `transport_error` 的机器可读原因；业务错误（`error`）没有这个字段。 */
+  code?: TransportErrorCode;
+  /** run 内的帧序号：单调递增、不跳号。传输错误没有（那一行没解析出来，无从寻址）。 */
+  streamSeq?: number;
   id?: string;
   method?: "select" | "confirm" | "input" | "editor" | "notify" | "setStatus" | "setWidget" | "setTitle" | "set_editor_text" | "custom" | "web";
   title?: string;

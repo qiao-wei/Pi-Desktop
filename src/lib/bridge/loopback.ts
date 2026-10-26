@@ -5,7 +5,7 @@
  * proven by having two interchangeable implementations of it, and the interesting thing to prove here
  * is on the *upper* side - that `src/lib/api.ts` (and everything above it) never assumed HTTP. So this
  * module is a real `BridgeTransport` that speaks the same semantics as the HTTP one - JSON bodies,
- * `304 → null`, ETag revalidation, NDJSON framing with a malformed line surfacing as an error event -
+ * `304 → null`, ETag revalidation, NDJSON framing with a malformed line surfacing as a transport error -
  * and a test swaps it in and runs the real upper layer against it.
  *
  * The renderer half is here; the "bridge half" is injected as `dispatch`, because *that* is the part a
@@ -27,6 +27,8 @@
  */
 
 import type { BridgeRequestInit, BridgeStreamOptions, BridgeTransport } from "./transport.ts";
+import type { TransportErrorCode } from "../../shared/protocol/bridgeStreamFrames.ts";
+import { transportErrorFrame } from "../../shared/protocol/bridgeStreamFrames.ts";
 
 /** One request as it crosses the channel. Plain JSON by construction (`JSON.parse` round trip). */
 export interface BridgeRequestMessage {
@@ -136,15 +138,16 @@ export function createLoopbackBridgeTransport(options: LoopbackTransportOptions)
         throw new Error(messageFromBody(await readText(response)));
       }
 
-      // Same framing rules as the HTTP transport: newline-delimited, a malformed line becomes an
-      // error event instead of truncating the turn silently, and a trailing partial line counts.
+      // Same framing rules as the HTTP transport: newline-delimited, a malformed line becomes a
+      // **transport** error frame instead of truncating the turn silently, and a trailing partial
+      // line counts. Both adapters call the same constructor, so the layer above cannot tell them apart.
       const decoder = new TextDecoder();
       let buffer = "";
-      const emit = (line: string) => {
+      const emit = (line: string, code: TransportErrorCode = "malformed_line") => {
         try {
           onEvent(JSON.parse(line) as T);
         } catch {
-          onEvent({ type: "error", message: line } as T);
+          onEvent(transportErrorFrame(code, line) as T);
         }
       };
 
@@ -167,7 +170,7 @@ export function createLoopbackBridgeTransport(options: LoopbackTransportOptions)
       }
 
       const tail = buffer.trim();
-      if (tail) emit(tail);
+      if (tail) emit(tail, "truncated");
     },
 
     fireAndForget(path: string, body: unknown): void {
