@@ -3,6 +3,7 @@ import { domainErrorFrame } from "../src/shared/protocol/bridgeStreamFrames.ts";
 import { appendAttachmentContext, sanitizeAttachmentName } from "./attachmentHelpers.mjs";
 import { normalizeMessageParts } from "./conversationParts.mjs";
 import { corsHeaders } from "./cors.mjs";
+import { createFrameWriter } from "./frameWriter.mjs";
 import { sessionDetails } from "./diagnosticsHelpers.mjs";
 import { readJson } from "./httpHelpers.mjs";
 import { usageFields } from "./modelHelpers.mjs";
@@ -123,13 +124,10 @@ async function streamPrompt(req, res, requestId, options = {}) {
   // message interleaves text and tool calls around the thinking.
   const thinkingStreamKeyOf = (contentIndex) =>
     `assistant-${assistantMessageStreamIndex}-thinking-${contentIndex}`;
-  const writeEvent = (payload) => {
-    if (closed || res.destroyed) {
-      return;
-    }
-
-    res.write(`${JSON.stringify(payload)}\n`);
-  };
+  // 帧的序号、背压、待发上限和收尾都在写入器里（见 server/frameWriter.mjs）。
+  // `writeEvent` 不 await：顺序由写入器内部的队列保证，背压只影响它什么时候真的发出去。
+  const frames = createFrameWriter(res);
+  const writeEvent = (payload) => frames.write(payload);
   // 回退后先播一次权威快照：旧轮次从 UI 消失、剩下来的轮次编号与新 stream 一致，
   // 否则新 prompt 的 `t{turn}#...` 事件会和客户端里还没清掉的旧轮次撞号。
   if (options.rewindTurn != null) {
@@ -485,7 +483,8 @@ async function streamPrompt(req, res, requestId, options = {}) {
       // queue insert (the run keeps going) or actually ended the run.
       writeEvent({ type: "done", lifecycle: wasStreaming ? "queued" : "run" });
       closed = true;
-      res.end();
+      // 排空队列再 end：背压期间 `done` 可能还在队列里，直接 end 会把尾帧切掉。
+      await frames.close();
     }
     diagnosticLog("prompt.success", {
       requestId,
@@ -507,7 +506,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
     if (!closed) {
       writeEvent(domainErrorFrame(message));
       closed = true;
-      res.end();
+      await frames.close();
     }
   } finally {
     diagnosticLog("prompt.finally", { requestId, closed, ...sessionDetails(activeRuntime) });
