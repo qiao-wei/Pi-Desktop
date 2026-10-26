@@ -115,6 +115,13 @@ reviewers: ["@qiaowei"]
 这是浅模块的教科书样例：**接口与实现同宽**，`any` 让契约消失，9 份拷贝之间没有任何差别。而它本来就不必如此——`buildSnapshot(targetRuntime, options)` 的第一个参数**已经是 runtime**，只是默认值取自袋子；它真正从袋子里读的只有 `state.apiBase`（3 处）、`state.personalization`、以及 `findProject`（本文件 `:33` 自己也是个转发闭包）。
 所以这一步是**把接口显式化**（「接受依赖，不要创建依赖」）：收到 `{ runtime, apiBase, personalization, findProject }` 或声明这几个 `requires`，调用方不必再从袋子里取。它同时也是容器 `requires` 声明的第一个真实样板。
 
+**状态（2026-10-26）：A1 / A1b 未落地，本轮到此为止，不半建。** 理由是这两项合起来要把组合区（15 个域工厂、`deps` 袋 250+ 处引用）改成声明式装配，做一半只会得到「有仪式、没有牙」的容器 —— 比不做更糟。下面是已经核过的事实与约束，留给下一次，别再重新推一遍：
+
+- `server/domains.mjs` 是 **13 处 `const { … } = <域>` + 若干整包 `Object.assign(deps, <域>)`**（`routesApp` / `routesProjects` 这类直接铺开、没有解构）的混合，所以容器的 `provides` **不能**只抄解构名。两条可行路线：(a) 要求每个域声明**完整**的返回键集合；(b) 创建后核对「返回的键 ⊆ 声明的 provides」并借这条核对把声明补齐（更省人力，也自动防漏声明）——**推荐 (b)**。
+- 常量通道（入口那 **34 键** `scope`）今天是**渐进式** `Object.assign` 进 `deps` 的：每个工厂只看得见「此刻已经在袋里」的名字。容器把常量当全局可见**是放宽**（今天能跑通的读不会变得读不到），但这是一处有意的行为差异，① 步的等价性论证要写明，别声称「逐字节相同」。
+- 全仓**没有** `deps[...]` 动态读取（已 grep），所以「声明的 requires = 模块实际读的名字」可以用静态提取锁死；关键约束：**容器的声明生成与 `domain-deps` 规则的提取器必须是同一个函数**，否则两边各自漂移，而漂移的后果是请求期才抛的名字闸。
+- `buildSnapshot` 的 9 份同款转发闭包**之所以存在**，是因为那些模块的工厂在 `sessionSnapshots` **之前**创建，创建时 `deps.buildSnapshot` 还是 `undefined`（`tests/domainAssembly.test.ts` 已经把「立即解构取到 undefined」钉成断言）。**所以 A1b 不能脱离 A1 单独做**：要么容器按 `requires` 排序（A1 的第 ③ 步），要么手工把工厂顺序调成拓扑序 —— 后者正是「半个容器」，不做。
+
 **A2 — 路由成为数据〔结构〕**
 路由变成表项（method + 匹配种类 + handler + transport），匹配种类至少含 `exact` / `suffix` / `prefix` / `param`（新增的订阅入口带参数，正好用上 `param`）。**今天靠书写顺序实现的「固定路由优先于后缀匹配」必须变成显式优先级字段**。冻结表面改由表生成，落地后跑一次 `architecture:write`，diff 必须只含等价性变化（路由集合逐条相同）。
 
