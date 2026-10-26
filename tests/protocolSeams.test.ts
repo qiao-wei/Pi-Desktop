@@ -84,10 +84,11 @@ test("policy 里没有 seam 的协议必须写明缺口原因（不许含糊地�
       `${protocol.id} 没有 seam，就必须在 policy 里写清 seamGap（为什么还不可替换）`,
     );
   }
-  // 当前只有一个：桥 ↔ SQLite。这条断言让「悄悄多一个未证明协议」变成可见变化。
+  // 2026-10-26：桥 ↔ SQLite 补上了 `setSqliteFactory()`，所以「未证明」清单**现在为空**（以前只有它一条）。
+  // 这条断言仍然有用：任何新的、没有 seam 的协议会从这里冒出来，逼人要么补 seam 要么写 seamGap。
   assert.deepEqual(
     unproven.map((protocol) => protocol.id),
-    ["storage"],
+    [],
     "未证明可替换的协议清单变了：要么补 seam，要么更新这条断言并说明",
   );
 });

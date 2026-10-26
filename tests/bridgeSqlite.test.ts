@@ -10,7 +10,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:f
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
-import { openSqliteDatabase, withSqliteConveniences } from "../server/sqlite.mjs";
+import { openSqliteDatabase, setSqliteFactory, withSqliteConveniences } from "../server/sqlite.mjs";
+import { createSessionStore, sessionsDatabaseFile } from "../server/sessionStoreFactory.mjs";
 import { bridgeSource } from "./lib/bridgeSource.ts";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -134,4 +135,58 @@ test("every module the bridge imports comes from the Node runtime", () => {
   const source = bridgeSource();
   assert.match(source, /import \{ openSqliteDatabase \} from "\.\/sqlite\.mjs"/);
   assert.match(source, /await openSqliteDatabase\(sessionsDatabaseFile\)/);
+});
+
+/**
+ * 边界 `storage` 的**可替换性**：索引背后的驱动可以换，而且桥自己的调用点真的从这扇门走。
+ *
+ * 策略里登记的缺口是「换驱动只能改文件」——因为这个文件以前没有任何注入点。
+ * 这里换上一个假驱动，然后跑**生产路径**（`createSessionStore` 是桥唯一打开索引的入口），
+ * 期望值来自「任何驱动都必须被要求做的事」（打开索引、然后读与写），不来自真驱动会收到的 SQL 文本。
+ */
+function fakeDatabase(statements = []) {
+  const record = (sql) => {
+    statements.push(sql);
+    return { run: () => {}, get: () => null, all: () => [] };
+  };
+  // 故意不给 `query` / `transaction`：补上它们的是真的 `withSqliteConveniences`，不是这个假驱动。
+  return { exec: (sql) => statements.push(sql), prepare: record };
+}
+
+test("a swapped driver serves the bridge's own call site", async () => {
+  const statements = [];
+  const opened = [];
+  setSqliteFactory(async (path) => {
+    opened.push(path);
+    return fakeDatabase(statements);
+  });
+  try {
+    const store = await createSessionStore([]);
+
+    assert.deepEqual(opened, [sessionsDatabaseFile], "索引必须由装上的驱动打开，而不是 node:sqlite");
+
+    store.setPinned("p", "/tmp/p/s.jsonl", true);
+    store.remove("p", "/tmp/p/s.jsonl");
+    assert.equal(store.isArchived("p", "/tmp/p/s.jsonl"), false);
+    assert.equal(store.findCwd("p", "/tmp/p/s.jsonl"), "");
+
+    for (const verb of ["UPDATE session_index", "DELETE FROM session_index", "SELECT"]) {
+      assert.ok(
+        statements.some((sql) => String(sql).includes(verb)),
+        `读写的 ${verb} 没有到达装上的驱动`,
+      );
+    }
+  } finally {
+    setSqliteFactory(null);
+  }
+});
+
+test("setSqliteFactory(null) puts the real driver back", async () => {
+  setSqliteFactory(async () => fakeDatabase());
+  const missing = join(tmpdir(), `pi-desktop-swapped-${Date.now()}-${process.pid}.sqlite`);
+
+  // 假驱动对任何路径都答应，所以这里能过；一旦恢复成真驱动，同一个调用必须报「库不存在」。
+  await openSqliteDatabase(missing, { create: false });
+  setSqliteFactory(null);
+  await assert.rejects(openSqliteDatabase(missing, { create: false }), /database not found/);
 });

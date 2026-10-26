@@ -309,10 +309,9 @@
       "versionSource": null,
       "mirror": null,
       "doc": "protocols-storage",
-      "swap": "openSqliteDatabase() is the only place node:sqlite is named; the conveniences the callers expect are added there.",
+      "swap": "openSqliteDatabase() is the only place node:sqlite is named; the conveniences the callers expect are added there. Put another driver behind it with setSqliteFactory() (null restores the built-in one) - call sites stay put.",
       "conformance": "tests/bridgeSqlite.test.ts",
-      "seam": null,
-      "seamGap": "openSqliteDatabase() 是唯一命名 node:sqlite 的地方，但还没有注入点（缺一个 setSqliteFactory()）；调用方直接拿单例，所以换驱动只能改文件、不能换实现"
+      "seam": "storage"
     },
     {
       "id": "perf",

@@ -108,6 +108,17 @@ export const PROTOCOL_SEAMS: readonly ProtocolSeam[] = [
     swapTest: "tests/kernelAdapter.test.ts",
     why: "内核升级只该撞在这一个文件上；含两个非公共深引，签名漂移必须在这里被抓住",
   },
+  {
+    id: "storage",
+    crosses: "the session index database (node:sqlite) behind the bridge",
+    contract: "server/sqlite.mjs",
+    production: "server/sqlite.mjs",
+    portModule: "server/sqlite.mjs",
+    assemblyPoint: "server/sqlite.mjs",
+    install: "setSqliteFactory",
+    swapTest: "tests/bridgeSqlite.test.ts",
+    why: "换驱动不该动调用点：`node:sqlite` 只在这一个文件被命名，插槽与默认实现同址；测试用假驱动驱动 `createSessionStore` 这个真实调用点",
+  },
 ];
 
 /** Ids in the same order as the document table; used by the docs generator and the checker. */
