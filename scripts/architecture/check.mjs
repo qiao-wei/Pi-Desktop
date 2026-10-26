@@ -40,6 +40,8 @@
  *   protocol-surface    every client call site, every bridge route and the frozen surface
  *                       agree in both directions.
  *   shell-commands      preload whitelist == declared host commands == invoke() call sites.
+ *   route-table         routes are data: one table is the only source of truth, matching is by an
+ *                       explicit priority field, and nothing else in server/ branches on a path.
  *   protocol-seam       every boundary in the seam registry is a real, tested swap point.
  *   no-bypass           globals/raw fetch/raw host invoke stay inside their seam (with reasons).
  *   docs-regions        generated doc regions match the policy.
@@ -60,6 +62,8 @@ import {
 } from "./lib/graph.mjs";
 import { renderDocRegions } from "./lib/render.mjs";
 import { checkProcessBoundaries } from "./lib/boundaries.mjs";
+import { routeTableViolations } from "./lib/routeRules.mjs";
+import { buildSurface } from "./lib/surface.mjs";
 import { matchGlob } from "./lib/glob.mjs";
 import { renderConfig as renderLintConfig } from "./lint-config.mjs";
 import { ROUTES } from "../../server/routeTable.mjs";
@@ -654,6 +658,9 @@ export function runCheck(root = REPO_ROOT, policy = loadPolicy(root)) {
     ...checkProcessBoundaries(policy, { root, violation, matchGlob, listSourceFiles, relativeTo }),
   );
 
+  // --- route-table (why it exists and what it bites: scripts/architecture/lib/routeRules.mjs) ---
+  violations.push(...routeTableViolations(policy.routeTable, { root, violation, listSourceFiles, relativeTo }));
+
   // --- node-typecheck -------------------------------------------------------------------
   // The non-renderer half is checked by a separate tsconfig (not referenced by `tsc -b`, so the
   // build stays fast and green). Enabling `checkJs` over 18k untyped lines produces a pile, so the
@@ -734,29 +741,6 @@ export function runCheck(root = REPO_ROOT, policy = loadPolicy(root)) {
       nodeTypecheck,
     },
   };
-}
-
-function buildSurface(bridgeRoutes, clientPaths, previous) {
-  const routes = {};
-  const allPaths = new Set([...bridgeRoutes.keys(), ...clientPaths.keys()]);
-  for (const path of allPaths) {
-    if (path.includes("*") && !clientPaths.has(path)) continue;
-    const callers = [...(clientPaths.get(path)?.callers ?? [])].sort();
-    const methods = [
-      ...new Set([...(clientPaths.get(path)?.methods ?? []), ...(bridgeRoutes.get(path) ?? [])]),
-    ].sort();
-    const transport = /\/prompt$/.test(path) || /\/diagnostic$/.test(path) ? "ndjson" : "json";
-    routes[path] = {
-      methods,
-      transport,
-      bridge: [...bridgeRoutes.keys()].some((pattern) => structuralMatch(pattern, path)),
-      callers,
-    };
-  }
-  const sorted = {};
-  for (const path of Object.keys(routes).sort()) sorted[path] = routes[path];
-  void previous;
-  return { version: 1, routes: sorted };
 }
 
 // ---------------------------------------------------------------------------------------

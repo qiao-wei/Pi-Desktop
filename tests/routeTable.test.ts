@@ -7,11 +7,15 @@
  * `endsWith("/login")` 那行。现在顺序变成显式优先级字段，这组测试就是它的钉子。
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { ROUTE_KINDS, ROUTE_PRIORITY, ROUTES, matchRoute } from "../server/routeTable.mjs";
+import { listSourceFiles, relativeTo } from "../scripts/architecture/lib/graph.mjs";
 import { bridgeAnswers, routesFromTable } from "../scripts/architecture/lib/extractors.mjs";
+import { checkRouteTable } from "../scripts/architecture/lib/routeRules.mjs";
+import { loadPolicy, runCheck } from "../scripts/architecture/check.mjs";
 
 const REPO_ROOT = join(import.meta.dirname, "..");
 
@@ -105,4 +109,100 @@ test("表与冻结表面说的是同一件事：表面说接得住的，表接�
     (pattern) => !pattern.includes("*") && !surface.routes[pattern],
   );
   assert.deepEqual(unlisted, [], "表里有一行没进冻结表面（跑 `npm run architecture:write`）");
+});
+// ---------------------------------------------------------------------------------------
+// 治理钩子：表是数据这件事本身要被咬住（A4 的 route-table 规则）
+// ---------------------------------------------------------------------------------------
+
+const policy = loadPolicy(REPO_ROOT);
+
+/** 造一棵最小的假仓库：`server/` 下一个表、一个入口、一个想偷偷自己分流的文件。 */
+function fakeRepo({ entry = 'import { matchRoute } from "./routeTable.mjs";\nmatchRoute("GET", "/");', stray = "" } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "route-table-"));
+  mkdirSync(join(root, "server"));
+  writeFileSync(join(root, "server", "routeTable.mjs"), "export const ROUTES = [];\n");
+  writeFileSync(join(root, "server", "index.mjs"), `${entry}\n`);
+  if (stray) writeFileSync(join(root, "server", "sneaky.mjs"), `${stray}\n`);
+  return root;
+}
+
+const ruleViolations = (root, routes: any[]) =>
+  checkRouteTable(policy.routeTable, {
+    root,
+    violation: (rule, message, extra = {}) => ({ rule, message, ...extra }),
+    listSourceFiles,
+    relativeTo,
+    routes,
+  });
+
+test("规则咬住：别的文件再长出「方法 + 路径」分流 → 报违规", () => {
+  const stray = fakeRepo({
+    stray: 'if (req.method === "GET" && url.pathname.startsWith("/api/other/")) return sendJson(res, 200, {});',
+  });
+  const violations = ruleViolations(stray, [
+    { method: "GET", kind: "exact", priority: 0, path: "/api/x", handler: "handle_get_api_x" },
+  ]);
+  assert.equal(violations.length, 1, JSON.stringify(violations));
+  assert.match(violations[0].message, /sneaky\.mjs/);
+  assert.equal(violations[0].rule, "route-table");
+});
+
+test("规则不冤枉人：处理器按路径取参数、注释里提到老分支，都不算第二份分发", () => {
+  const innocent = fakeRepo({
+    stray: [
+      '/** 路由处理器：req.method === "GET" && url.pathname === "/api/x"（老写法，现在在表里） */',
+      'export async function handle_get_api_x({ url }) {',
+      '  return sendJson(res, 200, { id: url.pathname.slice("/api/x/".length) });',
+      '}',
+    ].join("\n"),
+  });
+  assert.deepEqual(
+    ruleViolations(innocent, [
+      { method: "GET", kind: "exact", priority: 0, path: "/api/x", handler: "handle_get_api_x" },
+    ]),
+    [],
+  );
+});
+
+test("规则咬住：入口不查表 → 报违规（表存在但没人读也是死数据）", () => {
+  const root = fakeRepo({ entry: '// 谁还记得这张表\nsendJson(res, 404, {});' });
+  const violations = ruleViolations(root, [
+    { method: "GET", kind: "exact", priority: 0, path: "/api/x", handler: "handle_get_api_x" },
+  ]);
+  assert.deepEqual(
+    violations.map((item: any) => item.message),
+    [`${policy.routeTable.dispatch} 没有用 matchRoute 查表：表存在但没人读`],
+  );
+});
+
+test("规则咬住：优先级 / 形状 / 重复行各有各的违规", () => {
+  const root = fakeRepo();
+  const rows = [
+    { method: "GET", kind: "exact", priority: 0, path: "/api/x", handler: "handle_get_api_x" },
+    { method: "GET", kind: "suffix", priority: 0, path: "/login", handler: "handle_login" },
+    { method: "GET", kind: "exact", priority: 0, path: "/api/x", handler: "handle_get_api_x" },
+    { method: "GET", kind: "exact", priority: 0, path: "", handler: "handle_get_api_x" },
+    { method: "GET", kind: "nope", priority: 0, path: "/api/y", handler: "handle_get_api_y" },
+  ];
+  const messages = ruleViolations(root, rows).map((item: any) => item.message);
+  assert.deepEqual(
+    messages.filter((message: string) => message.includes("priority 是")),
+    ["GET suffix /login 的 priority 是 0，policy 声明 suffix 应为 10"],
+    "参数化路由不能排到固定路径前面：优先级必须是声明值",
+  );
+  assert.deepEqual(
+    messages.filter((message: string) => message.includes("重复")),
+    ["重复的路由行：GET exact /api/x"],
+  );
+  assert.equal(messages.filter((message) => message.includes("缺少 path")).length, 1);
+  assert.deepEqual(
+    messages.filter((message) => message.includes("匹配种类")),
+    ["GET nope /api/y 的匹配种类不认识：nope"],
+  );
+});
+
+test("真仓库：route-table 规则零违规，且优先级下界就是 exact 声明的值", () => {
+  const violations = runCheck(REPO_ROOT).violations.filter((item: any) => item.rule === "route-table");
+  assert.deepEqual(violations.map((item: any) => item.message), []);
+  assert.equal(policy.routeTable.priorities.exact, Math.min(...Object.values(policy.routeTable.priorities)));
 });

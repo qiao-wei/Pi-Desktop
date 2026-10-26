@@ -536,5 +536,21 @@
       ],
       "why": "调用点自己直接调 invoke 会绕过命令白名单类型，也会让宿主的可替换性失效"
     }
-  ]
+  ],
+  "routeTable": {
+    "id": "route-table",
+    "why": "路由是数据（见 docs/specs/architecture-extensibility.md 的 A2）：一张表是唯一真源，匹配靠显式优先级。检查器咬住『别长出第二份分发』『优先级必须是声明的值』，否则表会在某个下午被一句 if 悄悄旁路。",
+    "source": "server/routeTable.mjs",
+    "dispatch": "server/index.mjs",
+    "kinds": [
+      "exact",
+      "prefix",
+      "suffix"
+    ],
+    "priorities": {
+      "exact": 0,
+      "prefix": 10,
+      "suffix": 10
+    }
+  }
 }
