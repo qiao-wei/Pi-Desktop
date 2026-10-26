@@ -14,7 +14,7 @@ React、npm 这类通用词。
 **bridge（桥）**
 - 是什么：渲染进程之外的 Node 侧进程，持有 pi 内核、会话文件、项目登记与工具开关。渲染进程只通过 HTTP + NDJSON 与它说话。
 - _避免_：说成「后端」「server」。它没有多租户、没有数据库（除 SQLite 存会话索引），生命周期跟着一个本地 app 走。
-- 代码：`server/index.mjs`（路由与运行时）、`server/` 其余模块、边界契约 `src/shared/protocol/bridgeEndpoints.ts`、渲染侧 `src/lib/bridge/transport.ts`。
+- 代码：`server/index.mjs`（入口与运行时）、**路由表 `server/routeTable.mjs`**（有哪些路由、哪条先匹配、谁处理）、`server/` 其余模块、边界契约 `src/shared/protocol/bridgeEndpoints.ts`、渲染侧 `src/lib/bridge/transport.ts`。
 - 相关：`npm run bridge:sync` 把 `server/` + `src/shared/` 拷进 sidecar。
 
 **sidecar（旁车 / 打包内的运行时）**
@@ -78,8 +78,48 @@ React、npm 这类通用词。
 - _避免_：说成「白名单」。白名单是永久的，这里会过期并失败。
 
 **冻结表面（frozen surface）**
-- 是什么：`architecture/generated/bridge-surface.json` 里 96 条路由；桥实际应答的路由与渲染进程命名的路径必须与它**双向**一致。
-- 代码：规则 `protocol-surface`。
+- 是什么：`architecture/generated/bridge-surface.json` 里 101 条路由；桥实际应答的路由与渲染进程命名的路径必须与它**双向**一致。它**由路由表生成**（不是手抄的），所以差异只有两种：有人改了表没跑 `architecture:write`，或有人绕过了表。
+- 代码：生成器 `scripts/architecture/lib/surface.mjs`；规则 `protocol-surface`。
+
+---
+
+## 流式与运行身份
+
+**run（一次运行）**
+- 是什么：一次流式回答在桥侧的完整过程，从 `POST /api/prompt` 被接受到最后一帧写完。它有**自己的** `runId`（随机、不可猜），与「哪个请求发起的」不是一回事 —— 同一个 run 可以被后来的请求**订阅**（`POST /api/runs/stream`）。
+- _避免_：说成「请求」。请求是入口，run 是被观察的对象；多端时一个 run 会有多个订阅者。
+- 代码：`server/promptStream.mjs`（run 的生命周期）、`server/runStreams.mjs`（帧日志与多订阅者扇出）。
+
+**run owner（run 的持有者）**
+- 是什么：**有权中止这轮**的身份。今天隐含为「启动这轮的那个请求」（它断开即中止，见 `DELIVERY_POLICY.onOwnerDisconnect`）；订阅者断开只摘掉自己那条 sink，不动别人的 run。
+- _避免_：与下面的 stream holder 混用。owner 是权限，holder 是当下谁在看。
+- 代码：`server/promptStream.mjs` 的 `onClientClose`（`!wasStreaming` 那道门就是「谁有权中止」的边界）、`src/shared/protocol/version.ts` 的 `DELIVERY_POLICY`。
+
+**stream holder（当前持有流的窗口）**
+- 是什么：当下真正接着 SSE/NDJSON 那条流的渲染窗口（`pollMode.ts` 的 `ownsStream` 就是它）。
+- _避免_：说成「owner」。切换窗口不改 owner，只换 holder。
+- 代码：`src/features/chat/pollMode.ts`。
+
+**streamSeq（流帧序号）**
+- 是什么：**一条 run 内**单调递增、不跳号的帧序号（从 1 开始），由桥的帧写入器盖上去（载荷覆盖不了）。`(runId, streamSeq)` 就是「接着发」的地址。
+- _避免_：与 `queueSeq` 混用 —— 后者是 pi 队列里那一轮的位置，跟流帧无关。
+- 代码：`server/frameWriter.mjs`、`server/runStreams.mjs`；契约字段在 `src/lib/api.ts` 的 `PromptStreamEvent`。
+
+**delivery profile（投递档位）**
+- 是什么：桥在握手（`GET /api/protocol`）里声明的「我怎么投递帧」：今天只有 `local-live`（帧只发给在线者，断开即中止那轮）。**认不出的档位 = 不兼容**，不许静默按旧假设继续。
+- _避免_：说成「协议版本」。版本是「形状变没变」，档位是「投递语义是什么」。
+- 代码：`src/shared/protocol/version.ts`（`DELIVERY_PROFILE` / `DELIVERY_POLICIES`）、镜像 `server/protocolVersion.mjs`。
+
+**重连（reconnect）vs 恢复（recovery）**
+- 重连：**同一个客户端重新接到同一条 run** 的流，靠「我收到第 N 帧了」续订（`fromSeq`）。今天只是**留了形状**，没有实现。
+- 恢复：新客户端或重启后拿到**完整会话状态**（快照 + 历史）。与「续订同一条流」是两件事。
+- _避免_：互相混用；也避免把「跨设备恢复」说成「重连」——前者没有**中继**不可实现。
+- 代码：重连的落点是 `server/runStreams.mjs` 的 `plan(fromSeq)` 与 `POST /api/runs/stream`。
+
+**中继（relay）**
+- 是什么：跨机器的传输路径。它引入**有损传输**，因此是 ack / 重传唯一说得通的场景；也是**信任模型必须先补上**的地方（今天桥零鉴权 + CORS `*`，只绑 127.0.0.1）。
+- _避免_：说成「远程功能」。中继是传输路径，不是一组功能。
+- 状态：**推迟**（不是不做），前置条件见 ADR-004 与 `docs/specs/architecture-extensibility.md`。
 
 ---
 

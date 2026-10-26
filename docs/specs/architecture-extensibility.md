@@ -129,11 +129,16 @@ reviewers: ["@qiaowei"]
 
 **A3 — `storage` 边界从「未证明」变「已证明」〔结构〕**
 `storage` 的 `seamGap` 自己写着缺一个 `setSqliteFactory()`。补上注入点 + 一条真的 swap 测试（用假驱动跑通会话索引的读写与事务语义），然后清空 `seamGap`、按其它协议的样子登记 `seam` 与 `swapTest`。
+**已落地**（提交 `0a8b2b0`）：`setSqliteFactory()` + `seams.ts` 的 `storage` 登记 + 假驱动跑真调用点（`tests/bridgeSqlite.test.ts`）；`protocols` 里最后一行「未证明」消失。
 
 **A4 — 治理钩子〔结构〕**
 `policy.json` 新增两条规则：`domain-deps`（每个域必须声明 `provides` / `requires`；`requires ⊆ ⋃provides`；`provides` 无重复）、`route-table`（路由表是唯一真源、匹配语义与显式优先级）。**两条都必须带负例证明会咬**（沿用 `protocol-seam` / `no-bypass` 的既有做法）。注意：这是 **bridge 内部**约束，**不**登记进 `src/shared/protocol/seams.ts`。
+**`route-table` 已落地**（提交 `4a531fa`）：`policy.routeTable` + `scripts/architecture/lib/routeRules.mjs`，咬三件事：①别的文件再长出「方法 + 路径字面量」分流；②入口不查表；③优先级不是 policy 声明的值 / 行形状不全 / 重复行。三条都有负例，另有一条**反负例**（处理器按路径取参数、注释提到老分支 → 不报）——狼来了的规则等于没有规则。
+**`domain-deps` 依赖 A1**（要先有容器里的 `provides` / `requires` 声明才有东西可查），随 A1 一起落。
 
-### 群 B：流式层的可扩展性（只留 affordance，不实现重连）
+### 群 B：流式层的可扩展性（只留 affordance，不实现重连）（**B1–B7 全部已落地，2026-10-26**）
+
+落地清单（按提交）：B3 帧信封与错误分类 `b00470d`（新 `src/shared/protocol/bridgeStreamFrames.ts`，两条传输共用构造器）；B1+B4 序号与背压 `af2954f`（新 `server/frameWriter.mjs`）；B2 前半 `df4601e`（`runId` 落帧）；B2 后半 `947b913`（新 `server/runStreams.mjs` + `POST /api/runs/stream`）；B6+B5 `7d549bf`（`deliveryProfile` + `DELIVERY_POLICY` 驱动断开分支）。B7 是硬约束，由既有寻址测试（`chatBubbleId` / `mergeChatBubbles` / 丢弃计数）继续咬着，本轮没有新增代码。
 
 **B1 — 帧序号〔结构〕**
 同一 run 内每一帧带单调递增、**不跳号**的序号。命名用 **`streamSeq`**：客户端已有 `queueSeq`（pi 的队列序号），叫 `seq` 会撞车。这是**唯一不能后加**的一项——没有它，已经发生过的帧永久不可寻址，将来只能全量重发或丢段。
@@ -164,19 +169,20 @@ reviewers: ["@qiaowei"]
 **B7 — 既有资产不许漂移〔硬约束〕**
 流帧与快照的寻址**继续共享**（`chatBubbleId(turn, role)` 仍是唯一来源）；无法寻址的事件仍是「丢弃并计数、绝不错位」，仍能由 `mergeChatBubbles` 在下一次快照补回。序号的加入**不改变**已有寻址语义。
 
-### 群 C：登记与词汇
+### 群 C：登记与词汇（**已落地，2026-10-26**）
 
 **C1 — 新增 ADR（桥的传输不换、也不引入第二套 RPC）〔文档〕**
+**已落地**：`docs/adr/ADR-004-bridge-transport-surface.md`（含 C2 的 Consequences、C3 的措辞、C5 的拒绝清单）。
 内容：桥保持 HTTP + NDJSON；**换实现始终允许**（`setBridgeTransport()` 就是那扇门，`loopback` + `bridgeLoopback.test.ts` 已是第二实现），**换表面不允许**；为将来的重连只保留 affordance（序号 / 订阅形状 / 档位声明），本次不实现重连、中继与鉴权。满足 ADR 三条件：难逆转、无上下文会困惑、真取舍。
 **必须记录的理由**：①桥边界**已经是「通道形状」**——`BridgeDispatch` 收的是可序列化消息、注释里就写着 MessagePort host 的用法，所以「不取 RPC」不挡 WS 中继；②Ada 的 rpc 六层栈是在这条边界之上再叠一层，属重复建设；③ack 只在**有损传输**上有价值，loopback 的失败形态是「连接断开」而非「帧丢失」，此时 ack 是每帧白送一个 RTT；④**拒绝的替代项要写下来**（Ada 六层栈 / `VSBuffer` 二进制 / `ProxyChannel` / owner-lease），否则半年后会被重新提一遍。
 
-**C2 — 信任模型缺口登记（只登记，不实现）〔文档〕**
+**C2 — 信任模型缺口登记（只登记，不实现）〔文档〕**（**已落地**：ADR-004 的 Consequences；未新增 policy 机制）
 桥今天**零鉴权**且 CORS 放行任何 origin（`Access-Control-Allow-Origin: *`，连响应都可读），只有「绑 127.0.0.1」这一层。这在单机单用户下是可接受的权衡，但中继/多端一旦落地，暴露面从「本机网页」变成「凡能连到中继者」，且还需要**每客户端身份**。写进 ADR 的 Consequences + 本 spec；**不新增 policy 机制**（不为一条未实现的功能加治理字段）。后加成本可控：`http-fetch` 守卫只放行 transport 一处，加 token 只动 transport + 桥的 accept 层。
 
-**C3 — 措辞：中继 / 跨设备是「推迟 + 前置条件」，不是「不取」〔文档〕**
+**C3 — 措辞：中继 / 跨设备是「推迟 + 前置条件」，不是「不取」〔文档〕**（**已落地**：ADR-004 的 Consequences 与本文件的 Out of Scope）
 跨设备恢复没有中继不可实现，所以不能一边说「需要跨设备恢复」一边把中继列为「不取」。正确写法是推迟，并写明前置条件 = B1+B2+B4+B5+（C2）。
 
-**C4 — `CONTEXT.md` 新增词条〔文档〕**
+**C4 — `CONTEXT.md` 新增词条〔文档〕**（**已落地**：`CONTEXT.md` 新增「流式与运行身份」一节，六个词条 + run owner/stream holder 的区分；顺手纠正「冻结表面 96 条」这个陈旧数字）
 按词表规则「引入新词或改变既有词的含义时，先改这里再改代码」：
 
 | 词 | 定义 | _避免_ |
@@ -188,7 +194,7 @@ reviewers: ["@qiaowei"]
 | **stream holder** | 当前持有 SSE 流的渲染窗口（`pollMode.ts` 的 `ownsStream` 就是它） | 说成「owner」 |
 | **streamSeq** | run 内单调递增的流帧序号（新增），与寻址用的 `bubbleId` 正交 | 与已有的 `queueSeq` 混用 |
 
-**C5 — 明确不取（写进 ADR，不在本次实现）**
+**C5 — 明确不取（写进 ADR，不在本次实现）**（**已落地**：ADR-004 的「明确不取」表）
 `packages/rpc` 式六层栈、`VSBuffer` 二进制序列化（ETag 建立在 JSON 字符串的 md5 上，304 语义会一起被换掉）、持久化协议的 ack 重传、`ProxyChannel` 跨进程代理、`IServiceAccessor`、以及 **owner/lease 的实现**（它是 B2 的后续项，不是无关概念）。也不**替换**传输表面（100 条冻结路由 / ETag 语义 / NDJSON 分帧 / 三条 bypass 守卫）。
 
 **D— 实施顺序**（每步独立可绿；刻意把「越晚越贵」的排前面）
@@ -242,8 +248,9 @@ reviewers: ["@qiaowei"]
 
 ## Out of Scope
 
-- **实现** `replayable` 档位、重连、跨设备恢复、中继服务、设备配对、QR 握手——本次只声明轴与留结构。
-- **鉴权 / origin 检查**（C2 只登记缺口）。
+- **实现** `replayable` 档位、重连、跨设备恢复、设备配对、QR 握手——本次只声明轴与留结构。
+- **中继服务是「推迟 + 前置条件」，不是「不取」**：跨设备恢复没有中继不可实现。前置条件 = B1 序号 + B2 订阅入口 + B4 上限 + B5 断开策略 + C2 的信任模型（见 ADR-004）。
+- **鉴权 / origin 检查**（C2 只登记缺口，不实现）。
 - **owner/lease 的实现**（登记为 B2 的后续项）。
 - Ada 侧被拒的各项：六层 rpc 栈、`VSBuffer`、ack 重传、`ProxyChannel`、`IServiceAccessor`。
 - **替换传输表面**：冻结路由集合、ETag/304 语义、NDJSON 分帧、三条 bypass 守卫都不动。
