@@ -12,7 +12,7 @@
  * 2. 拿到结果后先检查 `stopReason`，把真实错误抛出来（`oneShotModelError`）。
  */
 
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels } from "./piKernel.mjs";
 
 /**
  * 一次性调用应使用的思考档位：

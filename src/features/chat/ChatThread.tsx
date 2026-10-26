@@ -4,32 +4,33 @@ import {
   type ExternalStoreAdapter,
   type ThreadMessageLike,
   type ThreadAssistantMessagePart,
-  useAuiState,
   useExternalStoreRuntime,
   useThreadViewport,
   useThreadViewportStore,
 } from "@assistant-ui/react";
 import { ArrowDownIcon } from "lucide-react";
 import {
-  AssistantMessage,
-  UserMessage,
   UserMessageActionsProvider,
   UserMessageInlineAttachmentProvider,
 } from "../../components/assistant-ui/elements/thread.aui";
 import {
   Profiler,
-  createContext,
   memo,
   useCallback,
-  useContext,
   useLayoutEffect,
   useMemo,
   useRef,
   type RefObject,
 } from "react";
 import { perfCount, perfEnabled, perfMark, perfSpan } from "../../lib/perf";
-import type { ToolCallLike } from "../../shared/turnChangedFiles";
-import { TurnChangedFiles } from "./TurnChangedFiles";
+import {
+  AssistantMessageSlot,
+  ChatThreadChangedFilesContext,
+  ChatThreadEditContext,
+  UserMessageSlot,
+  useChangedFileActions,
+  type EditController,
+} from "./ChatThreadSlots";
 import { chatJumpBus } from "../../shared/chatJumpBus";
 import { chatScrollToBottomBus } from "../../shared/chatScrollBus";
 import { useThreadSearch, type ThreadViewportController } from "./useThreadSearch";
@@ -43,12 +44,11 @@ import {
   pickAnchorBlock,
   resolveFollowing,
 } from "../../shared/chatScrollPolicy";
-import { MessageEditBox, type MessageEditPayload } from "./MessageEditBox";
+import { type MessageEditPayload } from "./MessageEditBox";
 import type {
   CapabilitiesState,
   ChatAttachment,
   ChatMessage,
-  ChatMessagePart,
   MessageLiveBlock,
   MessageProcessBlock,
 } from "../../types";
@@ -113,45 +113,6 @@ function viewportRootCount(viewport: HTMLElement): number {
  * App renders/s while typing in the composer); a stable `components` object lets
  * the library bail out instead.
  */
-/**
- * 「这一轮改了哪些文件」那三个动作走 context 而不是 props：`MESSAGE_COMPONENTS` 必须是
- * 模块级常量（见上面的注释），行组件拿不到 props。
- */
-const ChatThreadChangedFilesContext = createContext<{
-  workspaceRoot: string;
-  onOpenDiff: (path: string) => void;
-  onOpenContent: (path: string) => void;
-  onOpenInIde: (path: string) => void;
-} | null>(null);
-
-/**
- * 助手气泡 + 底下的「N 个文件已更改」。
- *
- * 面板只在**这一轮结束后**渲染：流式途中工具还在跑，列表会一行行往外蹦（滚动位置跟着跳），
- * 而且那时的 diff 也不完整。判断用状态而不是「有没有正在跑的工具卡」——后者在两次工具调用
- * 之间会短暂为假，面板就会闪。
- */
-function AssistantMessageSlot() {
-  const actions = useContext(ChatThreadChangedFilesContext);
-  const parts = useAuiState((s) => s.message.parts);
-  const isRunning = useAuiState((s) => s.message.status?.type === "running");
-
-  return (
-    <>
-      <AssistantMessage />
-      {actions && !isRunning ? (
-        <TurnChangedFiles
-          parts={parts as readonly ToolCallLike[]}
-          workspaceRoot={actions.workspaceRoot}
-          onOpenDiff={actions.onOpenDiff}
-          onOpenContent={actions.onOpenContent}
-          onOpenInIde={actions.onOpenInIde}
-        />
-      ) : null}
-    </>
-  );
-}
-
 const MESSAGE_COMPONENTS = { UserMessage: UserMessageSlot, AssistantMessage: AssistantMessageSlot };
 
 /**
@@ -159,51 +120,6 @@ const MESSAGE_COMPONENTS = { UserMessage: UserMessageSlot, AssistantMessage: Ass
  * is the one being edited. Kept at module scope so `ThreadPrimitive.Messages`
  * can keep bailing out on a stable `components` object.
  */
-type EditController = {
-  editingMessageId: string | null;
-  capabilities: Pick<CapabilitiesState, "skills" | "packages">;
-  canSubmit: boolean;
-  /** Text to seed a reopened editor with, after a failed send. */
-  draftText?: string;
-  onCancel: () => void;
-  onSubmit: (messageId: string, payload: MessageEditPayload) => Promise<boolean>;
-};
-
-const ChatThreadEditContext = createContext<EditController | null>(null);
-
-function UserMessageSlot() {
-  const edit = useContext(ChatThreadEditContext);
-  const messageId = useAuiState((s) => s.message.id);
-  const custom = useAuiState((s) => s.message.metadata.custom);
-
-  if (!edit || edit.editingMessageId !== messageId) {
-    return <UserMessage />;
-  }
-
-  const parts = Array.isArray(custom?.piDesktopInlineParts)
-    ? (custom.piDesktopInlineParts as ChatMessagePart[])
-    : [];
-  const attachments = Array.isArray(custom?.piDesktopInlineAttachments)
-    ? (custom.piDesktopInlineAttachments as ChatAttachment[])
-    : [];
-  const fallbackText = typeof custom?.piDesktopInlineText === "string" ? custom.piDesktopInlineText : "";
-
-  return (
-    <MessageEditBox
-      key={messageId}
-      messageId={messageId}
-      parts={parts}
-      attachments={attachments}
-      fallbackText={fallbackText}
-      capabilities={edit.capabilities}
-      canSubmit={edit.canSubmit}
-      draftText={edit.draftText}
-      onCancel={edit.onCancel}
-      onSubmit={edit.onSubmit}
-    />
-  );
-}
-
 export const ChatThread = memo(function ChatThread({
   messages,
   isStreaming,
@@ -320,37 +236,12 @@ export const ChatThread = memo(function ChatThread({
     };
   }, [capabilities, editDraftText, editingMessageId, isStreaming, onCancelEditMessage, onSubmitEditMessage]);
 
-  // 三个回调每次 App render 都是新函数（宿主里是内联箭头）。直接把它们放进 context 的
-  // value 会让**每一行助手气泡**在每次 App render 时重渲染（记过：一次 App render 已经
-  // 牵动 9 个气泡）。所以 value 的恒定性靠自己保证：三个包装函数建一次就不变，
-  // 真正的实现塞在 ref 里（render 期间写入是有意的 —— 用 effect 写会让首帧的点击落空）。
-  const changedFileActionsRef = useRef<{
-    onOpenDiff: (path: string) => void;
-    onOpenContent: (path: string) => void;
-    onOpenInIde: (path: string) => void;
-  } | null>(null);
-  const hasChangedFileActions = Boolean(onChangedFileDiff && onChangedFileContent && onChangedFileInIde);
-  changedFileActionsRef.current = hasChangedFileActions
-    ? {
-        onOpenDiff: onChangedFileDiff as (path: string) => void,
-        onOpenContent: onChangedFileContent as (path: string) => void,
-        onOpenInIde: onChangedFileInIde as (path: string) => void,
-      }
-    : null;
-
-  const changedFileActions = useMemo(
-    () =>
-      hasChangedFileActions
-        ? {
-            // 项目根是字符串（只在切项目时变），可以直接进 value；三个回调走 ref 保持恒定。
-            workspaceRoot,
-            onOpenDiff: (path: string) => changedFileActionsRef.current?.onOpenDiff(path),
-            onOpenContent: (path: string) => changedFileActionsRef.current?.onOpenContent(path),
-            onOpenInIde: (path: string) => changedFileActionsRef.current?.onOpenInIde(path),
-          }
-        : null,
-    [hasChangedFileActions, workspaceRoot],
-  );
+  const changedFileActions = useChangedFileActions({
+    onChangedFileDiff,
+    onChangedFileContent,
+    onChangedFileInIde,
+    workspaceRoot,
+  });
 
   const tree = (
     <AssistantRuntimeProvider runtime={runtime}>

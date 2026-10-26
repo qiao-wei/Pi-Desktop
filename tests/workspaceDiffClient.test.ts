@@ -8,9 +8,9 @@
  *   否则用户看到的来源是「另一个来源」的措辞。
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { bridgeSource, routeBody } from "./lib/bridgeSource.ts";
 import { diffSourceMessageId } from "../server/workspaceDiff.mjs";
 import { en } from "../src/i18n/en.ts";
 import { zh } from "../src/i18n/zh.ts";
@@ -151,13 +151,12 @@ test("同一个「文件 + 来源 + base」的判定：决定重拉时要不要�
 });
 
 test("客户端拼的接口与服务端路由逐字对得上（拼错就是静默 404）", () => {
-  const indexSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
-  const route = indexSource.indexOf('url.pathname === "/api/projects/git/diff"');
-  assert.notEqual(route, -1, "服务端没有这条路由了");
   assert.equal(buildWorkspaceDiffQuery({ projectId: "p", path: "a" }).split("?")[0], "/api/projects/git/diff");
 
+  // 路由处理器在 routes*.mjs 里，用 bridgeSource 按「行为」而不是「在哪个文件」收口。
+  const source = bridgeSource();
   // worktree 会话要读自己那份工作区，否则右面板显示的是主检出的改动。
-  const handler = indexSource.slice(route, route + 700);
+  const handler = routeBody(source, 'url.pathname === "/api/projects/git/diff"');
   assert.match(handler, /requestWorkspaceCwd\(project, \{ sessionPath \}\)/);
   assert.match(handler, /readFileDiff\(\{/);
 });

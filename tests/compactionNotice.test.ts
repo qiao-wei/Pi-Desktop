@@ -15,6 +15,8 @@ import {
 } from "../src/shared/compactionNotice.ts";
 import { t } from "../src/i18n/index.ts";
 import { displayTranscript, isDisplayMessage } from "../server/sessionTranscript.mjs";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource } from "./lib/appSource.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Fixtures: one session, seen before and after a compaction folded turns 1-2  */
@@ -251,7 +253,7 @@ test("an in-flight compaction outranks the streaming hint", () => {
 test("the popover is told about streaming, like the thinking select beside it", () => {
   // Both sit in the same toolbar and both touch session state; compact was the
   // one left clickable.
-  const source = readFileSync(join(import.meta.dirname, "../src/app/App.tsx"), "utf8");
+  const source = appSource();
   // 2026-09-17：思考/模型控件不再手写 isStreaming||isCompacting，改用与桥
   // `isSessionBusy()` 对齐的 composerSessionBusy（含 isStopping 与 pi 队列）。
   assert.match(source, /<ThinkingLevelSelect[\s\S]{0,300}disabled=\{composerSessionBusy\}/);
@@ -259,9 +261,9 @@ test("the popover is told about streaming, like the thinking select beside it", 
 });
 
 test("button, caller and bridge all refuse a compaction while streaming", () => {
-  const app = readFileSync(join(import.meta.dirname, "../src/app/App.tsx"), "utf8");
+  const app = appSource();
   const hook = readFileSync(join(import.meta.dirname, "../src/features/chat/usePiDesktopApp.ts"), "utf8");
-  const server = readFileSync(join(import.meta.dirname, "../server/index.mjs"), "utf8");
+  const server = bridgeSource();
 
   // UI: actually disabled, not just restyled.
   assert.match(app, /const compactAction = compactActionState\(\{ isStreaming, isCompacting \}\)/);
@@ -279,7 +281,7 @@ test("button, caller and bridge all refuse a compaction while streaming", () => 
 /* -------------------------------------------------------------------------- */
 
 test("the server reads the transcript from the branch, not from the model's context", () => {
-  const source = readFileSync(join(import.meta.dirname, "../server/index.mjs"), "utf8");
+  const source = bridgeSource();
   // `state.messages` is still right for diagnostics; the places that draw or
   // number conversation must not use it.
   assert.equal(source.includes("buildChatBubbles(displayTranscript("), true);
@@ -289,7 +291,7 @@ test("the server reads the transcript from the branch, not from the model's cont
 });
 
 test("compaction_end carries the fields the strip needs", () => {
-  const source = readFileSync(join(import.meta.dirname, "../server/index.mjs"), "utf8");
+  const source = bridgeSource();
   assert.match(source, /type: "compaction_end"[\s\S]{0,240}aborted: event\.aborted === true/);
   assert.match(source, /type: "compaction_end"[\s\S]{0,360}errorMessage/);
 });

@@ -4,7 +4,6 @@ import { fetchJson } from "../../lib/api";
 import {
   buildWorkspaceDirQuery,
   normalizeDirectoryListing,
-  parentDirectory,
   type WorkspaceFileEntry,
 } from "../../shared/workspaceFiles";
 

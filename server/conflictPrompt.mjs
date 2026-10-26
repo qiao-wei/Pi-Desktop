@@ -5,14 +5,28 @@
  * 单独放一个文件是为了可测：`node --test` 直接盖提示词的组装，不碰会话、不碰模型。
  * 前端点击「自动解决冲突」时，服务端返回这条文案，App 新建一个会话并把它填进 composer，
  * 用户看完再点提交（不是替用户自动发消息）。
- */
-
-/** 单个文件在提示词里最多展示多少字符（和 `readConflictContext` 的读取上限一致）。 */
+ *
+ *单个文件在提示词里最多展示多少字符（和 `readConflictContext` 的读取上限一致）。 */
 export const MAX_PROMPT_FILE_CHARS = 6000;
 
 /**
  * 冲突上下文 → 提示词。`context` 就是 `readConflictContext` 的返回值（可再补一个
  * `projectCwd`：冲突所在的工作区与会话的工作目录不是一个地方时要显式告诉 agent 用绝对路径）。
+ *
+ * 参数在 JSDoc 里写清形状（而不是空 `{}`）：`server/*.mjs` 现在受 `checkJs` 检查
+ * （规则 `node-typecheck`），空形状会让每个 `context.files` 都报 TS2339，而这里本来就
+ * 是这份上下文唯一的文档。
+ *
+ * @param {{
+ *   locale?: "zh" | "en",
+ *   context?: {
+ *     files?: { path: string, truncated?: boolean, text?: string }[],
+ *     branch?: string,
+ *     skipped?: number,
+ *     cwd?: string,
+ *     projectCwd?: string,
+ *   },
+ * }} [options]
  */
 export function buildConflictPrompt({ locale = "en", context = {} } = {}) {
   const language = locale === "zh" ? "zh" : "en";

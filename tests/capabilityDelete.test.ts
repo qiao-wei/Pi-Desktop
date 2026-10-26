@@ -9,12 +9,13 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 
 import { canDeleteCapability } from "../src/shared/capabilityScope.ts";
 import { en } from "../src/i18n/en.ts";
 import { zh } from "../src/i18n/zh.ts";
 import { setLocale, t } from "../src/i18n/index.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
 /* ------------------------------ eligibility ------------------------------ */
 
@@ -48,12 +49,43 @@ test("kinds without a removal path are never deletable", () => {
 
 /* -------------------------------- wiring --------------------------------- */
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
+// 桥已按领域拆成多个模块 —— 「这段代码在桥里」一律读整棵树（见 tests/lib/bridgeSource.ts）。
+const serverSource = bridgeSource();
+
+/* ------------------------------- what gets removed ------------------------------- */
+
+// 技能有两种落盘形态，能力页都列：目录技能（<root>/<name>/SKILL.md）和独立 markdown 技能
+// （pi 的 loadSkillsFromDir 会把技能根目录下直接放的 *.md 也收成技能）。删除目标必须按形态算，
+// 不能统一取 dirname(filePath) —— 独立 md 技能那样算出来是整个 skills 根目录。
+test("删除技能删的是技能本体，不是整个 skills 目录", () => {
+  const body = functionBody(serverSource, "function deleteSkillFromCapabilityPage(");
+  assert.match(
+    body,
+    /const skillRoot = skillPathTarget\(skill\.filePath\)/,
+    "删除目标要由 skillPathTarget 按技能形态算（目录技能→目录，独立 md 技能→那个文件）",
+  );
+  assert.doesNotMatch(
+    body,
+    /dirname\(skill\.filePath\)/,
+    "dirname(SKILL.md) 对独立 md 技能会退化成 skills 根目录，等于 rm -rf 所有技能",
+  );
+  // 独立 md 技能的目标是文件，存在性守卫不能再要求必须是目录。
+  assert.match(body, /assertExistingSkillTarget\(skillRoot\)/);
+});
+
+test("写入 / 版本回滚仍然只针对技能目录", () => {
+  assert.match(
+    functionBody(serverSource, "function assertWritableSkillRoot("),
+    /directoryOnly: true/,
+    "write_skill_file / restore_skill_version 是按技能目录操作的，继续要求目录",
+  );
+});
 
 test("the card list, the detail sheet and the context panel share one eligibility rule", () => {
-  const card = functionBody(appSource, "function CapabilityMarketCard");
-  const actions = functionBody(appSource, "function CapabilityActions");
-  const panel = functionBody(appSource, "function ProjectCapabilitiesPanel");
+  const card = functionBody(appSourceText, "function CapabilityMarketCard");
+  const actions = functionBody(appSourceText, "function CapabilityActions");
+  const panel = functionBody(appSourceText, "function ProjectCapabilitiesPanel");
 
   assert.match(card, /\{canDeleteCapability\(item\) \? \(/);
   assert.match(card, /onClick=\{\(\) => onDelete\(item\)\}/);
@@ -65,7 +97,7 @@ test("the card list, the detail sheet and the context panel share one eligibilit
 });
 
 test("the page only requests a delete; the call runs on confirm", () => {
-  const page = functionBody(appSource, "function CapabilitiesPage");
+  const page = functionBody(appSourceText, "function CapabilitiesPage");
 
   // Both surfaces are wired to the request handler, never straight to the bridge.
   assert.match(page, /onDelete=\{requestDelete\}/);
@@ -81,7 +113,7 @@ test("the page only requests a delete; the call runs on confirm", () => {
 });
 
 test("the context panel follows the same request/confirm split", () => {
-  const panel = functionBody(appSource, "function ProjectCapabilitiesPanel");
+  const panel = functionBody(appSourceText, "function ProjectCapabilitiesPanel");
 
   const request = functionBody(panel, "function ProjectCapabilitiesPanel");
   assert.match(request, /onClick=\{\(\) => setPendingDelete\(item\)\}/);
@@ -95,21 +127,27 @@ test("the context panel follows the same request/confirm split", () => {
 
 test("App hands the panel and the page one shared removal handler", () => {
   // Two call sites (page + panel) must use the single dispatcher, not each other's callbacks.
-  assert.equal((appSource.match(/onDelete=\{deleteCapabilityItem\}/g) ?? []).length, 2);
+  assert.equal((appSourceText.match(/onDelete=\{deleteCapabilityItem\}/g) ?? []).length, 2);
 
-  const handlerStart = appSource.indexOf("const deleteCapabilityItem = useCallback(");
+  const handlerStart = appSourceText.indexOf("const deleteCapabilityItem = useCallback(");
   assert.notEqual(handlerStart, -1, "App must define one shared removal dispatcher");
-  const handler = appSource.slice(handlerStart, appSource.indexOf("[deleteSkill, removePackage]", handlerStart));
+  const handler = appSourceText.slice(
+    handlerStart,
+    appSourceText.indexOf("[deleteSkill, removePackage]", handlerStart),
+  );
   assert.match(handler, /deleteSkill\(item\.id\)/);
   assert.match(handler, /removePackage\(item\.source, item\.scope\)/);
   assert.match(handler, /removeMcpServer\(item\.id\)/);
 });
 
 test("one shared prompt confirms every destructive removal", () => {
-  const prompt = functionBody(appSource, "function CapabilityDeleteDialog");
+  const prompt = functionBody(appSourceText, "function CapabilityDeleteDialog");
 
   assert.match(prompt, /<AlertDialog[\s\S]*?open=\{Boolean\(item\)\}/);
-  assert.match(prompt, /<AlertDialogCancel disabled=\{busy\}>\{t\("common\.cancel"\)\}<\/AlertDialogCancel>/);
+  assert.match(
+    prompt,
+    /<AlertDialogCancel disabled=\{busy\}>\{t\("common\.cancel"\)\}<\/AlertDialogCancel>/,
+  );
   assert.match(
     prompt,
     /<AlertDialogAction variant="destructive"[\s\S]*?onClick=\{onConfirm\}>[\s\S]*?capability\.delete\.confirm/,
@@ -117,11 +155,11 @@ test("one shared prompt confirms every destructive removal", () => {
   assert.match(prompt, /capability\.delete\.description[\s\S]*?name: item\?\.name \?\? ""/);
 
   // Both surfaces render that one prompt.
-  assert.equal((appSource.match(/<CapabilityDeleteDialog/g) ?? []).length, 2);
+  assert.equal((appSourceText.match(/<CapabilityDeleteDialog/g) ?? []).length, 2);
 });
 
 test("the prompt shows a deleting state and cannot be dismissed while the call runs", () => {
-  const prompt = functionBody(appSource, "function CapabilityDeleteDialog");
+  const prompt = functionBody(appSourceText, "function CapabilityDeleteDialog");
 
   // npm uninstall can take tens of seconds, and the remove endpoint streams no progress:
   // the prompt itself is the only place that can say "still working".
@@ -133,18 +171,18 @@ test("the prompt shows a deleting state and cannot be dismissed while the call r
   assert.match(prompt, /disabled=\{busy\} onClick=\{onConfirm\}/);
 
   // Both surfaces hand the in-flight flag to that one prompt.
-  assert.equal((appSource.match(/busy=\{busy === "delete"\}/g) ?? []).length, 2);
+  assert.equal((appSourceText.match(/busy=\{busy === "delete"\}/g) ?? []).length, 2);
 
   // The delete is awaited *before* the item is cleared. Clearing first would unmount the
   // prompt immediately, which is exactly the silent gap this guards against.
-  const page = functionBody(appSource, "function CapabilitiesPage");
+  const page = functionBody(appSourceText, "function CapabilitiesPage");
   const pageConfirm = functionBody(page, "function confirmDelete");
   assert.ok(
     pageConfirm.indexOf("await onDelete(item)") < pageConfirm.indexOf("setPendingDelete(null)"),
     "page: the prompt must outlive the delete call",
   );
 
-  const panel = functionBody(appSource, "function ProjectCapabilitiesPanel");
+  const panel = functionBody(appSourceText, "function ProjectCapabilitiesPanel");
   const panelConfirm = functionBody(panel, "async function confirmDelete");
   assert.ok(
     panelConfirm.indexOf("await onDelete(item)") < panelConfirm.indexOf("setPendingDelete(null)"),
@@ -158,10 +196,13 @@ test("the prompt shows a deleting state and cannot be dismissed while the call r
 // four separate islands. 28px buttons in a 4px row keep them one cluster.
 
 test("capability action clusters stay compact", () => {
-  const card = functionBody(appSource, "function CapabilityMarketCard");
-  const panel = functionBody(appSource, "function ProjectCapabilitiesPanel");
+  const card = functionBody(appSourceText, "function CapabilityMarketCard");
+  const panel = functionBody(appSourceText, "function ProjectCapabilitiesPanel");
 
-  assert.match(card, /className="flex items-center gap-1" onClick=\{\(event\) => event\.stopPropagation\(\)\}/);
+  assert.match(
+    card,
+    /className="flex items-center gap-1" onClick=\{\(event\) => event\.stopPropagation\(\)\}/,
+  );
   // 2026-09-20: the row's action cluster is now top-aligned (the chips made the left column
   // taller than one line) and opts out of the row's own click (which opens the detail sheet),
   // while keeping the same compact 28px controls.
@@ -195,11 +236,15 @@ test("delete copy exists in both packs and names the capability", () => {
   setLocale("en");
   assert.equal(t("capability.delete.deleting"), "Deleting…");
   setLocale("zh");
-  assert.equal(t("capability.delete.description", { name: "bailian-cli" }),
-    "确定删除「bailian-cli」吗？这会从磁盘移除它的文件，无法撤销。");
+  assert.equal(
+    t("capability.delete.description", { name: "bailian-cli" }),
+    "确定删除「bailian-cli」吗？这会从磁盘移除它的文件，无法撤销。",
+  );
   setLocale("en");
-  assert.equal(t("capability.delete.description", { name: "bailian-cli" }),
-    "Delete “bailian-cli”? This removes its files from disk and cannot be undone.");
+  assert.equal(
+    t("capability.delete.description", { name: "bailian-cli" }),
+    "Delete “bailian-cli”? This removes its files from disk and cannot be undone.",
+  );
   setLocale("zh");
 });
 

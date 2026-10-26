@@ -120,7 +120,9 @@ function freePort() {
     server.unref();
     server.on("error", fail);
     server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address();
+      const address = server.address();
+      // listen(0) 一定是 AddressInfo（不是 unix socket 的字符串）；取端口给调用方。
+      const port = typeof address === "object" && address ? address.port : 0;
       server.close(() => done(port));
     });
   });

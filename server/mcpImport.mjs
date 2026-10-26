@@ -236,6 +236,12 @@ function resolveTransport(value) {
 /**
  * 归一化一个条目，产出 pi 的 `mcpServers` 条目（`entry`）+ 给 UI 看的字段（`server`）。
  * `entry` 会带上别家不认识但 pi 认识的额外字段（`oauth` / `auth` ...）。
+ *
+ * 形状写在 JSDoc 上，`checkJs`（规则 `node-typecheck`）才能把「从别家配置里读到的字段」
+ * 与这里真正翻译的字段对上，而不是每个 `raw.xxx` 报一条 TS2339。
+ *
+ * @param {string} name
+ * @param {Record<string, any>} raw
  */
 function normalizeImportedEntry(name, raw) {
   const warnings = [];
@@ -347,6 +353,7 @@ function normalizeImportedEntry(name, raw) {
       extras[key] = value;
     }
   }
+  /** @type {Record<string, any>} */
   const entry = { ...extras };
   if (resolved.transport === "stdio") {
     entry.command = command;
@@ -462,7 +469,7 @@ export function parseMcpImportText(text, options = {}) {
       continue;
     }
     servers.push({ name, entry: normalized.entry, extras: normalized.extras, server: normalized.server, warnings: normalized.warnings });
-    warnings.push(...normalized.warnings);
+    warnings.push(...(normalized.warnings ?? []));
   }
 
   return { ok: true, format: shape.format, servers, errors, warnings };

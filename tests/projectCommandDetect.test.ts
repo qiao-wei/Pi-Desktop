@@ -11,7 +11,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createProjectProbe, detectPackageManager, detectProjectCommands, pyprojectScriptNames } from "../server/projectCommandDetect.mjs";
+import {
+  createProjectProbe,
+  detectPackageManager,
+  detectProjectCommands,
+  pyprojectScriptNames,
+} from "../server/projectCommandDetect.mjs";
 
 /**
  * 假文件系统。`entries` 里以 `/` 结尾的是目录；父目录自动成为目录。
@@ -84,7 +89,11 @@ test("package.json 的脚本全部列出（按偏好排序），lockfile 决定�
     ["bun.lockb", "bun"],
   ] as const) {
     const detected = commandsOf(["package.json", lockfile], files);
-    assert.equal(detected[0]?.command, `${manager} run dev`, `lockfile ${lockfile} 应选 ${manager}`);
+    assert.equal(
+      detected[0]?.command,
+      `${manager} run dev`,
+      `lockfile ${lockfile} 应选 ${manager}`,
+    );
   }
 
   assert.equal(detectPackageManager(fakeProbe(["pnpm-workspace.yaml"])), "pnpm");
@@ -92,14 +101,11 @@ test("package.json 的脚本全部列出（按偏好排序），lockfile 决定�
 });
 
 test("显式运行声明排在包管理器脚本之前", () => {
-  const detected = commandsOf(
-    ["Procfile", "Makefile", "package.json"],
-    {
-      Procfile: "worker: node worker.js\nweb: node server.js\n",
-      Makefile: "build:\n\techo build\n\ndev:\n\tnpm run dev\n",
-      "package.json": packageJson({ dev: "vite" }),
-    },
-  );
+  const detected = commandsOf(["Procfile", "Makefile", "package.json"], {
+    Procfile: "worker: node worker.js\nweb: node server.js\n",
+    Makefile: "build:\n\techo build\n\ndev:\n\tnpm run dev\n",
+    "package.json": packageJson({ dev: "vite" }),
+  });
 
   assert.equal(detected[0]?.command, "node server.js", "Procfile 的 web 进程最靠前");
   assert.equal(detected[0]?.label, "Procfile · web");
@@ -133,11 +139,22 @@ test("Makefile 忽略 .PHONY 和片段，优先 dev/run/start/serve", () => {
 test("docker compose / justfile / Taskfile 各出一条候选", () => {
   assert.equal(commandsOf(["compose.yaml"])[0]?.command, "docker compose up");
 
-  const just = commandsOf(["justfile"], { justfile: "set shell := [\"sh\"]\n\ndefault:\n  echo hi\ndev:\n  npm run dev\n" });
-  assert.deepEqual(just.map((command) => command.command), ["just dev", "just default"]);
+  const just = commandsOf(["justfile"], {
+    justfile: 'set shell := ["sh"]\n\ndefault:\n  echo hi\ndev:\n  npm run dev\n',
+  });
+  assert.deepEqual(
+    just.map((command) => command.command),
+    ["just dev", "just default"],
+  );
 
-  const task = commandsOf(["Taskfile.yml"], { "Taskfile.yml": "version: '3'\ntasks:\n  default:\n    cmds:\n      - echo hi\n  serve:\n    cmds:\n      - npm start\n" });
-  assert.deepEqual(task.map((command) => command.command), ["task serve", "task default"]);
+  const task = commandsOf(["Taskfile.yml"], {
+    "Taskfile.yml":
+      "version: '3'\ntasks:\n  default:\n    cmds:\n      - echo hi\n  serve:\n    cmds:\n      - npm start\n",
+  });
+  assert.deepEqual(
+    task.map((command) => command.command),
+    ["task serve", "task default"],
+  );
 });
 
 test("带前缀/后缀的启动命令（start:dev / dev:renderer）排在普通脚本前面", () => {
@@ -155,13 +172,27 @@ test("带前缀/后缀的启动命令（start:dev / dev:renderer）排在普通�
   // 里的原始顺序 —— 作者放前面的更可能是主命令。
   assert.deepEqual(
     detected.map((command) => command.command),
-    ["npm run start", "npm run dev:browser", "npm run start:dev", "npm run vendor:pandoc", "npm run build"],
+    [
+      "npm run start",
+      "npm run dev:browser",
+      "npm run start:dev",
+      "npm run vendor:pandoc",
+      "npm run build",
+    ],
   );
 });
 
 test("monorepo：声明过的子包带相对 cwd；没声明但布局常见也认，排在声明项后面", () => {
   const detected = commandsOf(
-    ["package.json", "packages/", "packages/web/", "packages/web/package.json", "apps/", "apps/api/", "apps/api/package.json"],
+    [
+      "package.json",
+      "packages/",
+      "packages/web/",
+      "packages/web/package.json",
+      "apps/",
+      "apps/api/",
+      "apps/api/package.json",
+    ],
     {
       "package.json": packageJson({}, { workspaces: ["packages/*"] }),
       "packages/web/package.json": packageJson({ dev: "vite" }),
@@ -175,7 +206,11 @@ test("monorepo：声明过的子包带相对 cwd；没声明但布局常见也�
 
   const api = detected.find((command) => command.cwd === "apps/api");
   assert.equal(api?.command, "npm run start");
-  assert.equal(api?.source, "package", "没声明 workspaces 也认（NextClaw 就是有 packages/ 却根本没写 workspaces）");
+  assert.equal(
+    api?.source,
+    "package",
+    "没声明 workspaces 也认（NextClaw 就是有 packages/ 却根本没写 workspaces）",
+  );
   assert.ok(detected.indexOf(web!) < detected.indexOf(api!), "声明过的排在顺带发现的前面");
 });
 
@@ -196,7 +231,11 @@ test("没声明 workspaces 时也扫 packages/*，且不扫 node_modules / dist"
       "frontend/package.json",
     ],
     {
-      "package.json": packageJson({ start: "node .", "start:dev": "node dev.js", "vendor:pandoc": "node v.js" }),
+      "package.json": packageJson({
+        start: "node .",
+        "start:dev": "node dev.js",
+        "vendor:pandoc": "node v.js",
+      }),
       "packages/plugin-sdk/package.json": packageJson({ build: "tsc -p tsconfig.json" }),
       "node_modules/evil/package.json": packageJson({ dev: "curl evil.example" }),
       "dist/old/package.json": packageJson({ dev: "curl evil.example" }),
@@ -214,7 +253,10 @@ test("没声明 workspaces 时也扫 packages/*，且不扫 node_modules / dist"
       "packages/plugin-sdk:npm run build",
     ],
   );
-  assert.ok(!detected.some((command) => command.command.includes("evil")), "node_modules / dist 不能进候选");
+  assert.ok(
+    !detected.some((command) => command.command.includes("evil")),
+    "node_modules / dist 不能进候选",
+  );
 });
 
 test("语言入口约定：Go / Rust / Python / PHP / Elixir / JVM / .NET", () => {
@@ -222,14 +264,30 @@ test("语言入口约定：Go / Rust / Python / PHP / Elixir / JVM / .NET", () =
     commandsOf(["go.mod", "cmd/", "cmd/api/", "cmd/api/main.go"]).map((command) => command.command),
     ["go run ./cmd/api"],
   );
-  assert.deepEqual(commandsOf(["go.mod", "main.go"]).map((command) => command.command), ["go run ."]);
-  assert.deepEqual(commandsOf(["Cargo.toml", "src/", "src/main.rs"]).map((command) => command.command), ["cargo run"]);
+  assert.deepEqual(
+    commandsOf(["go.mod", "main.go"]).map((command) => command.command),
+    ["go run ."],
+  );
+  assert.deepEqual(
+    commandsOf(["Cargo.toml", "src/", "src/main.rs"]).map((command) => command.command),
+    ["cargo run"],
+  );
   assert.equal(commandsOf(["Trunk.toml", "Cargo.toml", "src/main.rs"])[0]?.command, "trunk serve");
   assert.equal(commandsOf(["manage.py"])[0]?.command, "python manage.py runserver");
   assert.equal(commandsOf(["artisan"])[0]?.command, "php artisan serve");
-  assert.equal(commandsOf(["mix.exs"], { "mix.exs": 'defp deps, do: [{:phoenix, "~> 1.7"}]' })[0]?.command, "mix phx.server");
-  assert.equal(commandsOf(["pom.xml"], { "pom.xml": "<artifactId>spring-boot-starter-web</artifactId>" })[0]?.command, "mvn spring-boot:run");
-  assert.equal(commandsOf(["app.csproj"]).map((command) => command.command)[0], "dotnet run --project app.csproj");
+  assert.equal(
+    commandsOf(["mix.exs"], { "mix.exs": 'defp deps, do: [{:phoenix, "~> 1.7"}]' })[0]?.command,
+    "mix phx.server",
+  );
+  assert.equal(
+    commandsOf(["pom.xml"], { "pom.xml": "<artifactId>spring-boot-starter-web</artifactId>" })[0]
+      ?.command,
+    "mvn spring-boot:run",
+  );
+  assert.equal(
+    commandsOf(["app.csproj"]).map((command) => command.command)[0],
+    "dotnet run --project app.csproj",
+  );
 });
 
 test("Python：FastAPI / uv / poetry 的探测", () => {
@@ -240,20 +298,30 @@ test("Python：FastAPI / uv / poetry 的探测", () => {
   assert.equal(fastapi[0]?.command, "uvicorn app:app --reload");
 
   const uv = commandsOf(["pyproject.toml", "uv.lock"], {
-    "pyproject.toml": "[project.scripts]\nserve = \"demo.__main__:main\"\n",
+    "pyproject.toml": '[project.scripts]\nserve = "demo.__main__:main"\n',
   });
   assert.equal(uv[0]?.command, "uv run serve");
 
-  const plain = commandsOf(["main.py"], { "main.py": 'if __name__ == "__main__":\n    print("hi")\n' });
+  const plain = commandsOf(["main.py"], {
+    "main.py": 'if __name__ == "__main__":\n    print("hi")\n',
+  });
   assert.equal(plain[0]?.command, "python main.py");
 
-  assert.deepEqual(pyprojectScriptNames("[project.scripts]\na = \"x:y\"\n\n[tool.other]\nb = 1\n"), ["a"]);
+  assert.deepEqual(pyprojectScriptNames('[project.scripts]\na = "x:y"\n\n[tool.other]\nb = 1\n'), [
+    "a",
+  ]);
 });
 
 test("一条规则都没命中、根目录有 index.html 时兜底静态服务器", () => {
-  assert.deepEqual(commandsOf(["index.html"]).map((command) => command.command), ["python3 -m http.server 8000"]);
+  assert.deepEqual(
+    commandsOf(["index.html"]).map((command) => command.command),
+    ["python3 -m http.server 8000"],
+  );
   // 有 package.json（哪怕没脚本）就不算静态站
-  assert.deepEqual(commandsOf(["index.html", "package.json"], { "package.json": packageJson({}) }), []);
+  assert.deepEqual(
+    commandsOf(["index.html", "package.json"], { "package.json": packageJson({}) }),
+    [],
+  );
 });
 
 test("package.json 里脚本很多时也全给出来（候选上限很高）", () => {
@@ -263,13 +331,17 @@ test("package.json 里脚本很多时也全给出来（候选上限很高）", (
   }
   const detected = commandsOf(["package.json"], { "package.json": packageJson(scripts) });
   assert.equal(detected.length, 60);
-  assert.equal(detected.at(-1)?.command, "npm run task:59", "包管理器脚本保持 package.json 里的原始顺序");
+  assert.equal(
+    detected.at(-1)?.command,
+    "npm run task:59",
+    "包管理器脚本保持 package.json 里的原始顺序",
+  );
 });
 
 test("真实文件系统探针能读到文件（冒烟）", () => {
   const probe = createProjectProbe(new URL("..", import.meta.url).pathname);
   assert.equal(probe.has("package.json"), true);
-  assert.equal(probe.readText("package.json").includes("\"name\": \"pi-desktop\""), true);
+  assert.equal(probe.readText("package.json").includes('"name": "pi-desktop"'), true);
   assert.equal(probe.isDir("src"), true);
   assert.equal(probe.isDir("does-not-exist"), false);
 });

@@ -14,6 +14,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
 import { en } from "../src/i18n/en.ts";
 import { zh } from "../src/i18n/zh.ts";
@@ -26,7 +27,7 @@ const previewPaneSource = readFileSync(
   new URL("../src/features/workspace/PreviewPane.tsx", import.meta.url),
   "utf8",
 );
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 const diffViewerSource = readFileSync(
   new URL("../src/features/workspace/DiffViewer.tsx", import.meta.url),
   "utf8",
@@ -78,7 +79,7 @@ test("预览面板用 CodeViewer 渲染正文，不再自己画行号", () => {
   // DiffViewer 那份套了 cn(...)，只钉宽度这条。
   assert.match(diffViewerSource, /w-max min-w-full/);
   // 明暗档从应用主题来（App 里传的 `theme`）。
-  assert.match(appSource, /themeMode=\{theme\}/);
+  assert.match(appSourceText, /themeMode=\{theme\}/);
   assert.match(previewPaneSource, /themeMode: "light" \| "dark"/);
 });
 

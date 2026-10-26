@@ -11,6 +11,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 import test from "node:test";
 
 import { en } from "../src/i18n/en.ts";
@@ -27,7 +28,7 @@ const read = (relative: string) => readFileSync(new URL(`../${relative}`, import
 
 const gitPaneSource = read("src/features/workspace/GitPane.tsx");
 const changeCardSource = read("src/features/workspace/ChangeCard.tsx");
-const appSource = read("src/app/App.tsx");
+const appSourceText = readAppSource();
 
 test("改动行单击就地展开：一次只开一张，收起由同一个按钮负责", () => {
   assert.match(gitPaneSource, /const \[expandedPath, setExpandedPath\] = useState\(""\)/);
@@ -57,10 +58,10 @@ test("分支来源展开时要把 base 原样交回去（否则服务端解不�
   assert.match(gitPaneSource, /if \(source === "branch" && !branchBase\) \{\s*return;/);
   // 右键菜单里「在标签页打开」那一档也要带上同一个 base。
   assert.match(gitPaneSource, /onOpenDiff\(path, source, branchBaseForTab\)/);
-  assert.match(appSource, /onOpenDiff=\{\(path, source, base\) => openWorkspacePreview\(path, source, base\)\}/);
-  assert.match(appSource, /panelTabs\.openDiff\(\{ path, source, base \}\)/);
+  assert.match(appSourceText, /onOpenDiff=\{\(path, source, base\) => openWorkspacePreview\(path, source, base\)\}/);
+  assert.match(appSourceText, /panelTabs\.openDiff\(\{ path, source, base \}\)/);
   // 就地展开也要语法高亮，明暗档跟着应用主题走。
-  assert.match(appSource, /themeMode=\{theme\}\s+onRefresh=\{\(\) => void projectGit\.refresh\(\)\}/);
+  assert.match(appSourceText, /themeMode=\{theme\}\s+onRefresh=\{\(\) => void projectGit\.refresh\(\)\}/);
 });
 
 test("行上折叠态就显示状态字母与 +N −M，统计为 0 时不留一个空位", () => {

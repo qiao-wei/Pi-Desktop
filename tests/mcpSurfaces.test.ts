@@ -18,20 +18,35 @@ import { join } from "node:path";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { en } from "../src/i18n/en.ts";
 import { zh } from "../src/i18n/zh.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
-const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
-const hookSource = readFileSync(new URL("../src/features/chat/usePiDesktopApp.ts", import.meta.url), "utf8");
+const appSourceText = readAppSource();
+const serverSource = bridgeSource();
+const hookSource = readFileSync(
+  new URL("../src/features/chat/usePiDesktopApp.ts", import.meta.url),
+  "utf8",
+);
 
 /* ------------------------------- 服务端接入 ------------------------------- */
 
 test("the three built-in extensions from pi 0.99 are registered", () => {
+  // 正向断言看整棵桥树：这些工厂现在住在 server/runtimeDomain.mjs（按域拆文件后入口里没有了）。
   assert.match(serverSource, /createCodemodeExtension\(\)/);
   assert.match(serverSource, /createToolSearchExtension\(\)/);
   assert.match(serverSource, /createMcpExtension\(\)/);
   // All of them must land in the same extensionFactories list as the Desktop runtime extension.
-  const factoryStart = serverSource.indexOf("extensionFactories: [");
-  const factories = serverSource.slice(factoryStart, factoryStart + 1200);
+  // 取**那个函数体**而不是「第一个 extensionFactories: [」：桥里不止一处这样的列表
+  // （`createRuntime` 里那个是空的），按字面量找会命中错的那个。
+  // 取**注册这三个内置扩展的那一处** `extensionFactories`：桥里还有别的同名列表（其中一个是空的），
+  // 所以锚在 `createCodemodeExtension()` 上往下取一段，而不是「第一个 extensionFactories: [」。
+  const at = serverSource.indexOf("createCodemodeExtension()");
+  const factories = serverSource.slice(Math.max(0, at - 900), at + 900);
+  assert.match(
+    factories,
+    /extensionFactories: \[/,
+    "三个内置扩展要和 Desktop runtime 扩展落在同一个列表里",
+  );
   assert.match(factories, /createCodemodeExtension\(\)/);
   assert.match(factories, /createMcpExtension\(\)/);
 });
@@ -40,7 +55,7 @@ test("桌面端不再替用户默认打开 codemode：这块设置完全交给 p
   // 行为契约：桥里没有硬编码的 `+codemode`，也不 applyOverrides defaultTools。
   // 开关走「设置 → 个性化」和「编辑项目」，写的是 pi 自己的 settings 文件，
   // 默认值和合并规则由 pi 说了算（逐例对照见 tests/toolSettings.test.ts）。
-  assert.doesNotMatch(serverSource, /"\+codemode"/);
+  assert.doesNotMatch(serverSource, /"\+codemode"/); // 负向断言看整棵树：哪一层都不许硬编码
   assert.doesNotMatch(serverSource, /defaultTools: \[/);
   assert.match(serverSource, /readToolSettingsSnapshot\(/);
   assert.match(serverSource, /applyToolToggle\(/);
@@ -60,7 +75,13 @@ function freshDefaultTools(settings: Record<string, unknown>): string[] | undefi
 
 test("新装的 agent 目录里 codemode 是关的（不写 defaultTools = 内建四件套）", () => {
   assert.equal(freshDefaultTools({ theme: "dark" }), undefined);
-  assert.deepEqual(freshDefaultTools({ defaultTools: ["+codemode"] }), ["read", "bash", "edit", "write", "codemode"]);
+  assert.deepEqual(freshDefaultTools({ defaultTools: ["+codemode"] }), [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "codemode",
+  ]);
   assert.deepEqual(freshDefaultTools({ defaultTools: ["read", "bash"] }), ["read", "bash"]);
 });
 
@@ -90,31 +111,31 @@ test("the tool inventory comes from the live session, not a second connection", 
 /* -------------------------------- 全局页 --------------------------------- */
 
 test("the global page gained an MCP tab wired to its own cards", () => {
-  assert.match(appSource, /mcp: \{ label: "MCP", Icon: Plug \}/);
-  assert.match(appSource, /capabilities\.mcpServers \?\? \[\]/);
-  assert.match(appSource, /function CapabilityMcpCard\(/);
-  assert.match(appSource, /<CapabilityMcpCard/);
+  assert.match(appSourceText, /mcp: \{ label: "MCP", Icon: Plug \}/);
+  assert.match(appSourceText, /capabilities\.mcpServers \?\? \[\]/);
+  assert.match(appSourceText, /function CapabilityMcpCard\(/);
+  assert.match(appSourceText, /<CapabilityMcpCard/);
   // MCP 卡片自成一系：连接状态 / transport / exposure 都是它自己的徽章。
-  assert.match(appSource, /capability\.mcp\.connected/);
-  assert.match(appSource, /capability\.mcp\.overridesGlobal/);
+  assert.match(appSourceText, /capability\.mcp\.connected/);
+  assert.match(appSourceText, /capability\.mcp\.overridesGlobal/);
 });
 
 test("MCP editing is a first-class dialog with transport-specific fields", () => {
-  assert.match(appSource, /function McpServerDialog\(/);
-  assert.match(appSource, /function McpServerEditor\(/);
-  assert.match(appSource, /function KeyValueEditor\(/);
+  assert.match(appSourceText, /function McpServerDialog\(/);
+  assert.match(appSourceText, /function McpServerEditor\(/);
+  assert.match(appSourceText, /function KeyValueEditor\(/);
   // stdio 与 http 各自只显示自己能用的字段。
-  assert.match(appSource, /transport === "stdio" \?/);
-  assert.match(appSource, /capability\.mcp\.headers/);
-  assert.match(appSource, /capability\.mcp\.env/);
+  assert.match(appSourceText, /transport === "stdio" \?/);
+  assert.match(appSourceText, /capability\.mcp\.headers/);
+  assert.match(appSourceText, /capability\.mcp\.env/);
   // 单工具 exposure 覆盖也在这里配。
-  assert.match(appSource, /capability\.mcp\.toolExposureAria/);
+  assert.match(appSourceText, /capability\.mcp\.toolExposureAria/);
 });
 
 /* ------------------------------ 右侧项目面板 ------------------------------ */
 
 test("the context panel lists project-scoped MCP servers too", () => {
-  const panel = appSource.slice(appSource.indexOf("function ProjectCapabilitiesPanel"));
+  const panel = appSourceText.slice(appSourceText.indexOf("function ProjectCapabilitiesPanel"));
   assert.match(panel, /capabilities\.mcpServers \?\? \[\]/);
   assert.match(panel, /server\.scope === "project"/);
   assert.match(panel, /renderSection\("mcp", t\("capability\.section\.mcp"\)/);
@@ -125,9 +146,9 @@ test("the context panel lists project-scoped MCP servers too", () => {
 
 test("both surfaces share one removal path and one confirm dialog", () => {
   // 项目面板的详情弹层也要能编辑 / 测试连接，所以三个回调两处都传。
-  assert.equal((appSource.match(/onSaveMcpServer=\{saveMcpServer\}/g) ?? []).length, 2);
-  assert.equal((appSource.match(/onReadMcpServer=\{readMcpServerDetail\}/g) ?? []).length, 2);
-  assert.match(appSource, /capability\.delete\.mcpTitle/);
+  assert.equal((appSourceText.match(/onSaveMcpServer=\{saveMcpServer\}/g) ?? []).length, 2);
+  assert.equal((appSourceText.match(/onReadMcpServer=\{readMcpServerDetail\}/g) ?? []).length, 2);
+  assert.match(appSourceText, /capability\.delete\.mcpTitle/);
 });
 
 /* ------------------------------ 前端 action ------------------------------- */
@@ -142,7 +163,13 @@ test("the chat hook exposes MCP actions against the five endpoints", () => {
   ]) {
     assert.ok(hookSource.includes(endpoint), `hook 没打到 ${endpoint}`);
   }
-  for (const name of ["saveMcpServer", "removeMcpServer", "inspectMcpServer", "readMcpServerDetail", "parseMcpImport"]) {
+  for (const name of [
+    "saveMcpServer",
+    "removeMcpServer",
+    "inspectMcpServer",
+    "readMcpServerDetail",
+    "parseMcpImport",
+  ]) {
     assert.match(hookSource, new RegExp(`\\b${name},`), `hook 没导出 ${name}`);
   }
 });
@@ -160,22 +187,22 @@ test("the server exposes a parse-only import endpoint", () => {
 
 test("import lives inside the add-server editor and fills the form", () => {
   // 不再是独立弹窗。
-  assert.doesNotMatch(appSource, /function McpImportDialog\(/);
-  assert.match(appSource, /function McpServerEditor\(/);
+  assert.doesNotMatch(appSourceText, /function McpImportDialog\(/);
+  assert.match(appSourceText, /function McpServerEditor\(/);
   // 导入区只在新增（无 server）时出现，且解析回调是从 McpServerDialog 透传的。
-  assert.match(appSource, /!editing && onParseImport/);
-  assert.match(appSource, /onParseImport\?: \(text: string, defaultName\?: string\)/);
-  assert.match(appSource, /<McpServerDialog[\s\S]*?onParseImport=/);
+  assert.match(appSourceText, /!editing && onParseImport/);
+  assert.match(appSourceText, /onParseImport\?: \(text: string, defaultName\?: string\)/);
+  assert.match(appSourceText, /<McpServerDialog[\s\S]*?onParseImport=/);
   // 文件 + 粘贴两种输入，自动识别后点条目回填。
-  assert.match(appSource, /capability\.mcp\.importChooseFile/);
-  assert.match(appSource, /capability\.mcp\.importPasteLabel/);
-  assert.match(appSource, /accept="\.json,application\/json"/);
-  assert.match(appSource, /function applyImported\(imported: CapabilityMcpImportServer\)/);
-  assert.match(appSource, /capability\.mcp\.importPick/);
-  assert.match(appSource, /mcpImportFormatKey/);
+  assert.match(appSourceText, /capability\.mcp\.importChooseFile/);
+  assert.match(appSourceText, /capability\.mcp\.importPasteLabel/);
+  assert.match(appSourceText, /accept="\.json,application\/json"/);
+  assert.match(appSourceText, /function applyImported\(imported: CapabilityMcpImportServer\)/);
+  assert.match(appSourceText, /capability\.mcp\.importPick/);
+  assert.match(appSourceText, /mcpImportFormatKey/);
   // 导入的 oauth 等字段随表单保存（extras），不能丢。
-  assert.match(appSource, /extras,/);
-  assert.match(appSource, /onParseMcpImport/);
+  assert.match(appSourceText, /extras,/);
+  assert.match(appSourceText, /onParseMcpImport/);
 });
 
 test("every detected import format has copy in both packs", () => {
@@ -203,7 +230,11 @@ test("both language packs carry the MCP copy", () => {
   for (const key of keys) {
     assert.ok(key in en, `英文包缺 key: ${key}`);
   }
-  for (const key of ["capability.section.mcp", "capability.context.noMcp", "capability.delete.mcpTitle"]) {
+  for (const key of [
+    "capability.section.mcp",
+    "capability.context.noMcp",
+    "capability.delete.mcpTitle",
+  ]) {
     assert.ok(key in zh, `中文包缺 key: ${key}`);
     assert.ok(key in en, `英文包缺 key: ${key}`);
   }

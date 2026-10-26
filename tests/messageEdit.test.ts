@@ -10,12 +10,15 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { bridgeSource, routeBody as sharedRouteBody } from "./lib/bridgeSource.ts";
+import { appSource } from "./lib/appSource.ts";
+import { sourceDir } from "./lib/sourceDir.ts";
 
-const server = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const server = bridgeSource();
 const chatThread = readFileSync(new URL("../src/features/chat/ChatThread.tsx", import.meta.url), "utf8");
-const editBox = readFileSync(new URL("../src/features/chat/MessageEditBox.tsx", import.meta.url), "utf8");
+const editBox = sourceDir("src/features/chat");
 const thread = readFileSync(new URL("../src/components/assistant-ui/elements/thread.aui.tsx", import.meta.url), "utf8");
-const app = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const app = appSource();
 const useApp = readFileSync(new URL("../src/features/chat/usePiDesktopApp.ts", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");
 const zh = readFileSync(new URL("../src/i18n/zh.ts", import.meta.url), "utf8");
@@ -72,18 +75,18 @@ function callbackBody(source: string, name: string): string {
   assert.fail(`callback ${name} body never closes`);
 }
 
-/** Body of one `url.pathname === "<path>"` route, up to the shared 404 tail. */
-function routeBody(path: string): string {
-  const marker = `url.pathname === "${path}"`;
-  const start = server.indexOf(marker);
-  assert.notEqual(start, -1, `route ${path} not found`);
-  const end = server.indexOf("sendJson(res, 404", start);
-  assert.notEqual(end, -1, `route ${path} tail not found`);
-  return server.slice(start, end);
+/**
+ * Body of one `url.pathname === "<path>"` route.
+ *
+ * 分支体已抽成 `handle_xxx(ctx)` 顶层处理器函数（见 `.scratch/branch-to-handlers.mjs`），
+ * 所以按处理器取体，而不是「按标记切到 404 兜底」—— 后者在路由被拆分后必然假红。
+ */
+function routeBodyOf(path: string): string {
+  return sharedRouteBody(server, `url.pathname === "${path}"`);
 }
 
 test("edit route rewinds the branch before prompting", () => {
-  const route = routeBody("/api/messages/edit");
+  const route = routeBodyOf("/api/messages/edit");
   assert.match(route, /parseChatBubbleId/);
   assert.match(route, /ref\.role !== "user"/);
   assert.match(route, /rewindTurn: ref\.turn/);
@@ -154,8 +157,10 @@ test("client submitEdit posts to the edit endpoint", () => {
 });
 
 test("ChatThread swaps the user bubble for the editor only while editing", () => {
-  assert.match(chatThread, /<MessageEditBox/);
-  assert.match(chatThread, /edit\.editingMessageId !== messageId/);
+  // 两条消息槽（含用户气泡 ↔ 编辑框的切换）搬到了同目录的 `ChatThreadSlots.tsx`：ChatThread.tsx
+  // 被 max-lines 棘轮冻着，往外搬一簇是合法拆分，所以这里读整个目录而不是单个文件。
+  assert.match(editBox, /<MessageEditBox/);
+  assert.match(editBox, /edit\.editingMessageId !== messageId/);
   assert.match(chatThread, /UserMessageActionsProvider/);
   assert.match(chatThread, /onStartEditMessage/);
   assert.match(chatThread, /ChatThreadEditContext\.Provider/);
@@ -287,7 +292,8 @@ test("编辑重发在发请求前就把该轮换成乐观占位，失败则回�
 
 test("发送失败后重新打开的编辑框保留用户打的字", () => {
   assert.match(app, /failedEditText\?\.messageId === editingMessageId \? failedEditText\.text : null/);
-  assert.match(chatThread, /draftText=\{edit\.draftText\}/);
+  // 槽在 ChatThreadSlots.tsx（见上一条用例的说明），所以按目录读。
+  assert.match(editBox, /draftText=\{edit\.draftText\}/);
   const body = functionBody(editBox, "MessageEditBox");
   assert.match(body, /draftText/);
   assert.match(editBox, /draftText == null/);

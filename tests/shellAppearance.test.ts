@@ -16,13 +16,14 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { syncShellAppearance } from "../src/lib/shell-appearance.ts";
+import { appSource } from "./lib/appSource.ts";
 
 const COMMAND = "set_window_appearance";
 
 const preloadSource = readFileSync(new URL("../src-electron/preload.js", import.meta.url), "utf8");
 const hostCommandsSource = readFileSync(new URL("../src-electron/host-commands.js", import.meta.url), "utf8");
 const tauriSource = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
-const appTsx = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appTsx = appSource();
 const indexHtml = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const shellAppearanceSource = readFileSync(new URL("../src/lib/shell-appearance.ts", import.meta.url), "utf8");
 

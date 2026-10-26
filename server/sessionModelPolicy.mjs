@@ -16,9 +16,8 @@
  * （见下面的 `normalizeComposerDefaults` / `isFreshSession`），pi 的全局 settings 只当没记过
  * 时的兜底。所以桥现在**只**用 session-open（一律挡全局写入），`user-switch` 这条语义仍
  * 保留在本模块给别处用，但桥里不再有「记全局」的入口。
- */
-
-/** pi 的思考档位顺序（与 pi-ai 的 EXTENDED_THINKING_LEVELS 同序）。 */
+ *
+ *pi 的思考档位顺序（与 pi-ai 的 EXTENDED_THINKING_LEVELS 同序）。 */
 export const THINKING_LEVELS = Object.freeze(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 /**

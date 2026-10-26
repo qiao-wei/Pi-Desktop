@@ -22,6 +22,7 @@ import {
   isPathInsideCanonical,
   isReadOnlySkillSource,
   isSkillPathUnderRoots,
+  skillPathTarget,
   skillSourceForPath,
 } from "../server/capabilityPathIdentity.mjs";
 
@@ -62,10 +63,17 @@ test("isPathInside 保持 resolve 语义（不解析软链），isPathInsideCano
     const viaLink = join(worktree, ".pi", "extensions", "x.ts");
     writeFileSync(viaLink, "export default () => {}\n");
 
-    assert.equal(isPathInside(real, viaLink), false, "resolve 版看不见软链归属（这正是原来的 bug）");
+    assert.equal(
+      isPathInside(real, viaLink),
+      false,
+      "resolve 版看不见软链归属（这正是原来的 bug）",
+    );
     assert.equal(isPathInsideCanonical(real, viaLink), true, "realpath 版看见同一份文件");
     assert.equal(isPathInsideCanonical(real, join(real, "nested", "x.ts")), true);
-    assert.equal(isPathInsideCanonical(real, join(root, "project", ".pi", "skills", "x.ts")), false);
+    assert.equal(
+      isPathInsideCanonical(real, join(root, "project", ".pi", "skills", "x.ts")),
+      false,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -83,7 +91,10 @@ test("extensionCapabilityId：同一条软链路径与真实路径得到同一�
 
     const viaLink = join(worktree, ".pi", "extensions", "demo.ts");
     assert.equal(extensionCapabilityId(viaLink), extensionCapabilityId(real));
-    assert.equal(extensionCapabilityId("/definitely/not/here.ts"), resolve("/definitely/not/here.ts"));
+    assert.equal(
+      extensionCapabilityId("/definitely/not/here.ts"),
+      resolve("/definitely/not/here.ts"),
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -101,7 +112,11 @@ test("isSkillPathUnderRoots：技能目录自己就是软链（用户技能常�
     writeFileSync(join(realSkills, "lark-im", "SKILL.md"), "---\nname: lark-im\n---\n");
     symlinkSync(join(realSkills, "lark-im"), join(agentSkills, "lark-im"), "dir");
 
-    assert.equal(isSkillPathUnderRoots(join(agentSkills, "lark-im", "SKILL.md"), [agentSkills]), true, "软链那侧算受管");
+    assert.equal(
+      isSkillPathUnderRoots(join(agentSkills, "lark-im", "SKILL.md"), [agentSkills]),
+      true,
+      "软链那侧算受管",
+    );
     assert.equal(
       isSkillPathUnderRoots(join(realSkills, "lark-im", "SKILL.md"), [agentSkills]),
       false,
@@ -163,7 +178,10 @@ test("skillSourceForPath：字面路径优先（软链归入口那侧），realp
       "报的是软链那侧就归 piAgent；删它删掉的也只是那条软链",
     );
     // 项目根不在入参里：能力清单只含受管技能，落不到上面的路径一律回到旧的 project 行为。
-    assert.equal(skillSourceForPath(join(root, "proj", ".pi", "skills", "jev", "SKILL.md"), roots), "project");
+    assert.equal(
+      skillSourceForPath(join(root, "proj", ".pi", "skills", "jev", "SKILL.md"), roots),
+      "project",
+    );
     assert.equal(skillSourceForPath("", roots), "project");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -175,4 +193,21 @@ test("isReadOnlySkillSource：内置与跨客户端只读，piAgent / project �
   assert.equal(isReadOnlySkillSource("agents"), true);
   assert.equal(isReadOnlySkillSource("piAgent"), false);
   assert.equal(isReadOnlySkillSource("project"), false);
+});
+
+test("skillPathTarget：目录技能删目录，独立 markdown 技能只删那个文件", () => {
+  const userSkills = resolve("proj", ".pi", "skills");
+  assert.equal(
+    skillPathTarget(join(userSkills, "grilling", "SKILL.md")),
+    join(userSkills, "grilling"),
+    "目录技能的目标是技能目录（SKILL.md 的父目录）",
+  );
+  // 独立 md 技能：pi 的 loadSkillsFromDir 会把技能根目录下直接放的 *.md 也收成技能
+  // （includeRootFiles）。目标是那个文件。
+  const flat = join(userSkills, "flat.md");
+  assert.equal(skillPathTarget(flat), flat);
+  // 回归钉子：以前统一 `dirname(filePath)`，独立 md 技能算出来的目标是整个 skills 根目录，
+  // 删一个技能 = 把用户所有技能一起 rm -rf（~/.pi/agent/skills 下还全是指向别处的软链）。
+  assert.notEqual(skillPathTarget(flat), userSkills);
+  assert.equal(skillPathTarget(""), resolve("."));
 });

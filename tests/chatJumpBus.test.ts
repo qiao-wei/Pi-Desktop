@@ -10,12 +10,13 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { createChatJumpBus, type ChatJumpRequest } from "../src/shared/chatJumpBus.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
 const chatThreadSource = readFileSync(
   new URL("../src/features/chat/ChatThread.tsx", import.meta.url),
   "utf8",
 );
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 
 test("已挂载的 owner 立即收到请求", () => {
   const bus = createChatJumpBus();
@@ -63,6 +64,6 @@ test("ChatThread 订阅了 jump bus，并把它交给视口 owner", () => {
 });
 
 test("App 的结果点击切会话后发起跳转请求", () => {
-  assert.match(appSource, /chatJumpBus\.request\(/);
-  assert.match(appSource, /"global-search"/);
+  assert.match(appSourceText, /chatJumpBus\.request\(/);
+  assert.match(appSourceText, /"global-search"/);
 });

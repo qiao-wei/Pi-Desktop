@@ -85,7 +85,8 @@ preparePip(layout);
 
 // Repair pass (the override path needs it; the archive path finds nothing to repair) and the
 // gate that has to hold for both. Nothing below executes Python unless the target is native.
-const hostPaths = [sourceOverride, outputDir].filter(Boolean);
+// `sourceOverride` 可能没给：用 typeof 把 undefined 滤掉（`filter(Boolean)` 不会让类型收窄）。
+const hostPaths = [sourceOverride, outputDir].filter((value) => typeof value === "string");
 const prunedMetadata = pruneHostReferenceMetadata(outputDir, { forbidden: hostPaths });
 const stripped = stripBytecodeCache(outputDir);
 const relocated = relocateRuntime(outputDir, {
@@ -260,6 +261,22 @@ function verifyStandalonePython(layout) {
   runPython(layout, ["-c", validation], "verify standalone Python and pip");
 }
 
+/**
+ * 写出 `pi-desktop-runtime.json`：Python 载荷的来源、指纹与搬迁记录。
+ *
+ * `layout` 是解包后的目录布局（`home`=安装前缀、`bin`=解释器）；`relocated` / `pruned` /
+ * `stripped` 记录被改写、裁掉、strip 过的文件，都要按 `outputDir` 相对化才好随包发布。
+ *
+ * @param {{ home: string, bin: string }} layout
+ * @param {string} target
+ * @param {{
+ *   relocated?: { symlinks?: string[], scripts?: string[], wrappers?: string[] },
+ *   pruned?: string[],
+ *   stripped?: string[],
+ *   sha256?: string,
+ *   url?: string,
+ * }} [options]
+ */
 function writeRuntimeMetadata(layout, target, { relocated, pruned, stripped, sha256, url } = {}) {
   writeFileSync(join(outputDir, "pi-desktop-runtime.json"), `${JSON.stringify({
     kind: "python",

@@ -1,6 +1,6 @@
 import { useT } from "@/i18n/react";
 
-import { PanelTabIcon } from "./RightPanel";
+import { PanelTabIcon } from "./PanelTabIcon";
 import { RIGHT_PANEL_TOOL_TABS, toolTab, type RightPanelToolTabId } from "./rightPanelTabs";
 
 /**

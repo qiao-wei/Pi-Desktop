@@ -9,7 +9,16 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -105,7 +114,12 @@ async function startBridge(env, agentDir) {
 function assertRefreshed(stderr) {
   assert.ok(
     !stderr.includes("could not refresh"),
-    `启动时 launcher 刷新失败：${stderr.split("\n").filter((line) => line.includes("pi-desktop")).join(" / ") || stderr}`,
+    `启动时 launcher 刷新失败：${
+      stderr
+        .split("\n")
+        .filter((line) => line.includes("pi-desktop"))
+        .join(" / ") || stderr
+    }`,
   );
 }
 
@@ -151,109 +165,155 @@ test("机器上没有 node/python 时，bundled 启动会把整套 launcher 写�
     "应该有 pi + node/nodejs/npm/npx + python/pip 那套",
   );
   for (const name of ["node", "npm", "python3", "pip3"]) {
-    assert.ok(readFileSync(join(bin, name), "utf8").includes("PI_DESKTOP_BUNDLED_"), `${name} 应指向内置运行时`);
+    assert.ok(
+      readFileSync(join(bin, name), "utf8").includes("PI_DESKTOP_BUNDLED_"),
+      `${name} 应指向内置运行时`,
+    );
   }
-  assert.ok(readFileSync(join(bin, "pi"), "utf8").includes("--pi-cli"), "pi launcher 应带 --pi-cli");
+  assert.ok(
+    readFileSync(join(bin, "pi"), "utf8").includes("--pi-cli"),
+    "pi launcher 应带 --pi-cli",
+  );
 });
 
-test("机器上已有 node/python 时不再写它们，并清掉上一次留下的 launcher", { skip: process.platform === "win32" }, async (t) => {
-  const agentDir = tempDir("pi-agent-system-first-");
-  const runtimes = fakeRuntimes();
-  t.after(async () => {
-    rmSync(agentDir, { recursive: true, force: true });
-    rmSync(runtimes.root, { recursive: true, force: true });
-  });
+test(
+  "机器上已有 node/python 时不再写它们，并清掉上一次留下的 launcher",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const agentDir = tempDir("pi-agent-system-first-");
+    const runtimes = fakeRuntimes();
+    t.after(async () => {
+      rmSync(agentDir, { recursive: true, force: true });
+      rmSync(runtimes.root, { recursive: true, force: true });
+    });
 
-  // 上一次启动（那时机器上还没有解释器）留下的 launcher。
-  const bin = join(agentDir, "bin");
-  mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, "node"), "#!/bin/sh\nexport PI_DESKTOP_BUNDLED_NODE_BIN=/gone\n", "utf8");
-  writeFileSync(join(bin, "python3"), "#!/bin/sh\nexport PI_DESKTOP_BUNDLED_PYTHON_BIN=/gone\n", "utf8");
+    // 上一次启动（那时机器上还没有解释器）留下的 launcher。
+    const bin = join(agentDir, "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(
+      join(bin, "node"),
+      "#!/bin/sh\nexport PI_DESKTOP_BUNDLED_NODE_BIN=/gone\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(bin, "python3"),
+      "#!/bin/sh\nexport PI_DESKTOP_BUNDLED_PYTHON_BIN=/gone\n",
+      "utf8",
+    );
 
-  // 用户自己的解释器：一个能通过探测（`node -v` / `python3 -V` 要成功）的最小实现。
-  const userBin = join(runtimes.root, "user-bin");
-  mkdirSync(userBin, { recursive: true });
-  for (const [name, output] of [["node", "v22.0.0"], ["python3", "Python 3.12.0"]]) {
-    const file = join(userBin, name);
-    writeFileSync(file, `#!/bin/sh
+    // 用户自己的解释器：一个能通过探测（`node -v` / `python3 -V` 要成功）的最小实现。
+    const userBin = join(runtimes.root, "user-bin");
+    mkdirSync(userBin, { recursive: true });
+    for (const [name, output] of [
+      ["node", "v22.0.0"],
+      ["python3", "Python 3.12.0"],
+    ]) {
+      const file = join(userBin, name);
+      writeFileSync(
+        file,
+        `#!/bin/sh
 echo ${output}
-`, "utf8");
-    chmodSync(file, 0o755);
-  }
+`,
+        "utf8",
+      );
+      chmodSync(file, 0o755);
+    }
 
-  const bridge = await startBridge(
-    {
-      PI_DESKTOP_RUNTIME_MODE: "",
-      PATH: `${userBin}:${HOST_WITHOUT_RUNTIMES}`,
-      PI_DESKTOP_BUNDLED_NODE_BIN: runtimes.node,
-      PI_DESKTOP_BUNDLED_NPM_CLI: runtimes.npmCli,
-      PI_DESKTOP_BUNDLED_PYTHON_BIN: runtimes.python,
-    },
-    agentDir,
-  );
-  await bridge.stop();
-  assertRefreshed(bridge.stderr());
+    const bridge = await startBridge(
+      {
+        PI_DESKTOP_RUNTIME_MODE: "",
+        PATH: `${userBin}:${HOST_WITHOUT_RUNTIMES}`,
+        PI_DESKTOP_BUNDLED_NODE_BIN: runtimes.node,
+        PI_DESKTOP_BUNDLED_NPM_CLI: runtimes.npmCli,
+        PI_DESKTOP_BUNDLED_PYTHON_BIN: runtimes.python,
+      },
+      agentDir,
+    );
+    await bridge.stop();
+    assertRefreshed(bridge.stderr());
 
-  assert.deepEqual(
-    readdirSync(bin).sort(),
-    ["pi"],
-    "node/python 用机器自己的，指向内置运行时的那两个 launcher 必须删掉",
-  );
-});
+    assert.deepEqual(
+      readdirSync(bin).sort(),
+      ["pi"],
+      "node/python 用机器自己的，指向内置运行时的那两个 launcher 必须删掉",
+    );
+  },
+);
 
-test("只缺 python 时只补 python：node 还是机器自己的", { skip: process.platform === "win32" }, async (t) => {
-  const agentDir = tempDir("pi-agent-python-only-");
-  const runtimes = fakeRuntimes();
-  t.after(async () => {
-    rmSync(agentDir, { recursive: true, force: true });
-    rmSync(runtimes.root, { recursive: true, force: true });
-  });
+test(
+  "只缺 python 时只补 python：node 还是机器自己的",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const agentDir = tempDir("pi-agent-python-only-");
+    const runtimes = fakeRuntimes();
+    t.after(async () => {
+      rmSync(agentDir, { recursive: true, force: true });
+      rmSync(runtimes.root, { recursive: true, force: true });
+    });
 
-  const userBin = join(runtimes.root, "user-bin");
-  mkdirSync(userBin, { recursive: true });
-  const userNode = join(userBin, "node");
-  writeFileSync(userNode, "#!/bin/sh\necho v22.0.0\n", "utf8");
-  chmodSync(userNode, 0o755);
+    const userBin = join(runtimes.root, "user-bin");
+    mkdirSync(userBin, { recursive: true });
+    const userNode = join(userBin, "node");
+    writeFileSync(userNode, "#!/bin/sh\necho v22.0.0\n", "utf8");
+    chmodSync(userNode, 0o755);
 
-  const bridge = await startBridge(
-    {
-      PI_DESKTOP_RUNTIME_MODE: "",
-      PATH: `${userBin}:${HOST_WITHOUT_RUNTIMES}`,
-      PI_DESKTOP_BUNDLED_NODE_BIN: runtimes.node,
-      PI_DESKTOP_BUNDLED_NPM_CLI: runtimes.npmCli,
-      PI_DESKTOP_BUNDLED_PYTHON_BIN: runtimes.python,
-    },
-    agentDir,
-  );
-  await bridge.stop();
-  assertRefreshed(bridge.stderr());
+    const bridge = await startBridge(
+      {
+        PI_DESKTOP_RUNTIME_MODE: "",
+        PATH: `${userBin}:${HOST_WITHOUT_RUNTIMES}`,
+        PI_DESKTOP_BUNDLED_NODE_BIN: runtimes.node,
+        PI_DESKTOP_BUNDLED_NPM_CLI: runtimes.npmCli,
+        PI_DESKTOP_BUNDLED_PYTHON_BIN: runtimes.python,
+      },
+      agentDir,
+    );
+    await bridge.stop();
+    assertRefreshed(bridge.stderr());
 
-  const bin = join(agentDir, "bin");
-  const names = readdirSync(bin).sort();
-  assert.ok(!names.includes("node"), "node 用机器自己的");
-  assert.ok(names.includes("python3"), "python 用内置的");
-  assert.ok(readFileSync(join(bin, "python3"), "utf8").includes("PI_DESKTOP_BUNDLED_"));
-});
+    const bin = join(agentDir, "bin");
+    const names = readdirSync(bin).sort();
+    assert.ok(!names.includes("node"), "node 用机器自己的");
+    assert.ok(names.includes("python3"), "python 用内置的");
+    assert.ok(readFileSync(join(bin, "python3"), "utf8").includes("PI_DESKTOP_BUNDLED_"));
+  },
+);
 
-test("system 启动会清掉 bundled 留下的 launcher，同时重写 pi、不碰用户自己的文件", { skip: process.platform === "win32" }, async (t) => {
-  const agentDir = tempDir("pi-agent-system-");
-  t.after(() => rmSync(agentDir, { recursive: true, force: true }));
+test(
+  "system 启动会清掉 bundled 留下的 launcher，同时重写 pi、不碰用户自己的文件",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const agentDir = tempDir("pi-agent-system-");
+    t.after(() => rmSync(agentDir, { recursive: true, force: true }));
 
-  const bin = join(agentDir, "bin");
-  mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, "node"), "#!/bin/sh\nexport PI_DESKTOP_BUNDLED_NODE_BIN=/gone\n", "utf8");
-  writeFileSync(join(bin, "python3"), '#!/bin/sh\nexec /usr/bin/python3 "$@"\n', "utf8");
-  symlinkSync("/gone/node-runtime/bin/node", join(bin, "npm"));
+    const bin = join(agentDir, "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(
+      join(bin, "node"),
+      "#!/bin/sh\nexport PI_DESKTOP_BUNDLED_NODE_BIN=/gone\n",
+      "utf8",
+    );
+    writeFileSync(join(bin, "python3"), '#!/bin/sh\nexec /usr/bin/python3 "$@"\n', "utf8");
+    symlinkSync("/gone/node-runtime/bin/node", join(bin, "npm"));
 
-  const bridge = await startBridge({ PI_DESKTOP_RUNTIME_MODE: "system", PATH: HOST_WITHOUT_RUNTIMES }, agentDir);
-  await bridge.stop();
-  assertRefreshed(bridge.stderr());
+    const bridge = await startBridge(
+      { PI_DESKTOP_RUNTIME_MODE: "system", PATH: HOST_WITHOUT_RUNTIMES },
+      agentDir,
+    );
+    await bridge.stop();
+    assertRefreshed(bridge.stderr());
 
-  assert.deepEqual(
-    readdirSync(bin).sort(),
-    ["pi", "python3"],
-    "node/npm（我们的）该删，python3（用户的）该留",
-  );
-  assert.ok(readFileSync(join(bin, "python3"), "utf8").includes('exec /usr/bin/python3'), "用户自己的文件不能被改");
-  assert.ok(!readFileSync(join(bin, "pi"), "utf8").includes("PI_DESKTOP_BUNDLED_"), "pi launcher 不该再指向内置运行时");
-});
+    assert.deepEqual(
+      readdirSync(bin).sort(),
+      ["pi", "python3"],
+      "node/npm（我们的）该删，python3（用户的）该留",
+    );
+    assert.ok(
+      readFileSync(join(bin, "python3"), "utf8").includes("exec /usr/bin/python3"),
+      "用户自己的文件不能被改",
+    );
+    assert.ok(
+      !readFileSync(join(bin, "pi"), "utf8").includes("PI_DESKTOP_BUNDLED_"),
+      "pi launcher 不该再指向内置运行时",
+    );
+  },
+);

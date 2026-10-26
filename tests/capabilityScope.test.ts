@@ -13,12 +13,14 @@ import {
   CAPABILITY_TABS,
   SKILL_SOURCE_CATEGORIES,
   SKILL_SOURCE_CATEGORY_LABEL_KEYS,
+  canDeleteCapability,
   capabilitySourceLabel,
   isProjectScopedCapability,
   matchesCapabilityQuery,
   matchesSkillCategory,
   scopedCapabilityItems,
 } from "../src/shared/capabilityScope.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
 const builtinSkill = (name: string, extra: Record<string, unknown> = {}) => ({
   id: name,
@@ -46,6 +48,15 @@ const projectSkill = (name: string, extra: Record<string, unknown> = {}) => ({
   kind: "skill" as const,
   name,
   source: "project",
+  ...extra,
+});
+/** `<dir>/.agents/skills`：项目带来的，但和 `~/.agents/skills` 一样是跨客户端共享目录（只读）。 */
+const projectAgentsSkill = (name: string, extra: Record<string, unknown> = {}) => ({
+  id: name,
+  kind: "skill" as const,
+  name,
+  source: "projectAgents",
+  readonly: true,
   ...extra,
 });
 const userPackage = (name: string, extra: Record<string, unknown> = {}) => ({
@@ -82,17 +93,48 @@ test("skills are split by source, packages by scope", () => {
   const skills = [builtinSkill("a"), agentSkill("b"), projectSkill("c")];
   const packages = [userPackage("d"), projectPackage("e")];
 
-  assert.deepEqual(scopedCapabilityItems(skills, "global").map((i) => i.name), ["a", "b"]);
-  assert.deepEqual(scopedCapabilityItems(skills, "project").map((i) => i.name), ["c"]);
-  assert.deepEqual(scopedCapabilityItems(packages, "global").map((i) => i.name), ["d"]);
-  assert.deepEqual(scopedCapabilityItems(packages, "project").map((i) => i.name), ["e"]);
+  assert.deepEqual(
+    scopedCapabilityItems(skills, "global").map((i) => i.name),
+    ["a", "b"],
+  );
+  assert.deepEqual(
+    scopedCapabilityItems(skills, "project").map((i) => i.name),
+    ["c"],
+  );
+  assert.deepEqual(
+    scopedCapabilityItems(packages, "global").map((i) => i.name),
+    ["d"],
+  );
+  assert.deepEqual(
+    scopedCapabilityItems(packages, "project").map((i) => i.name),
+    ["e"],
+  );
+});
+
+test("项目 .agents/skills 归项目视图，但来源标签与只读状态跟着「跨客户端」走", () => {
+  const skill = projectAgentsSkill("x");
+  assert.equal(isProjectScopedCapability(skill), true, "它只在这个项目里有，归项目面板");
+  assert.deepEqual(
+    scopedCapabilityItems([skill], "project").map((i) => i.name),
+    ["x"],
+  );
+  assert.equal(scopedCapabilityItems([skill], "global").length, 0);
+  assert.equal(capabilitySourceLabel(skill), "项目 agent");
+  // 只读由服务端给的 readonly 决定（跨客户端目录不允许从这里删，和 ~/.agents 一致）。
+  assert.equal(canDeleteCapability(skill), false);
 });
 
 test("MCP servers split by scope, exactly like packages", () => {
   const servers = [mcpServer("global-one", "user"), mcpServer("project-one", "project")];
 
-  assert.deepEqual(scopedCapabilityItems(servers, "global").map((i) => i.name), ["global-one"]);
-  assert.deepEqual(scopedCapabilityItems(servers, "project").map((i) => i.name), ["project-one"]);
+  assert.deepEqual(
+    scopedCapabilityItems(servers, "global").map((i) => i.name),
+    ["global-one"],
+  );
+  assert.deepEqual(
+    scopedCapabilityItems(servers, "project").map((i) => i.name),
+    ["project-one"],
+  );
   assert.equal(isProjectScopedCapability(mcpServer("project-one", "project")), true);
   assert.equal(isProjectScopedCapability(mcpServer("global-one", "user")), false);
 });
@@ -113,8 +155,14 @@ test("the two views are disjoint and together cover the snapshot", () => {
   const globalView = scopedCapabilityItems(items, "global");
   const projectView = scopedCapabilityItems(items, "project");
 
-  assert.deepEqual(globalView.map((i) => i.name), ["a", "b", "d", "f", "h"]);
-  assert.deepEqual(projectView.map((i) => i.name), ["c", "e", "g"]);
+  assert.deepEqual(
+    globalView.map((i) => i.name),
+    ["a", "b", "d", "f", "h"],
+  );
+  assert.deepEqual(
+    projectView.map((i) => i.name),
+    ["c", "e", "g"],
+  );
   assert.equal(globalView.filter((g) => projectView.includes(g)).length, 0);
   assert.equal(globalView.length + projectView.length, items.length);
 });
@@ -174,7 +222,7 @@ test("cards label a skill by where it came from", () => {
 
 /* ------------------------------ App.tsx wiring --------------------------- */
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 const zhSource = readFileSync(new URL("../src/i18n/zh.ts", import.meta.url), "utf8");
 const enSource = readFileSync(new URL("../src/i18n/en.ts", import.meta.url), "utf8");
 
@@ -187,39 +235,39 @@ test("every source category has a label in both packs", () => {
 });
 
 test("the page renders the global view and the context panel the project view", () => {
-  assert.match(appSource, /scopedCapabilityItems\(rawItems,\s*"global"\)/);
-  assert.match(appSource, /scopedCapabilityItems\(capabilities\.skills,\s*"project"\)/);
-  assert.match(appSource, /scopedCapabilityItems\(capabilities\.packages,\s*"project"\)/);
+  assert.match(appSourceText, /scopedCapabilityItems\(rawItems,\s*"global"\)/);
+  assert.match(appSourceText, /scopedCapabilityItems\(capabilities\.skills,\s*"project"\)/);
+  assert.match(appSourceText, /scopedCapabilityItems\(capabilities\.packages,\s*"project"\)/);
 });
 
 test("the entry point is titled Global skills & packages", () => {
-  assert.match(appSource, /Global skills &amp; packages/);
-  assert.doesNotMatch(appSource, /专家[·、]技能/);
+  assert.match(appSourceText, /Global skills &amp; packages/);
+  assert.doesNotMatch(appSourceText, /专家[·、]技能/);
 });
 
 test("the page has no Extensions tab left", () => {
-  assert.doesNotMatch(appSource, /\["extension",\s*"Extensions"/);
-  assert.match(appSource, /CAPABILITY_TABS\.map/);
+  assert.doesNotMatch(appSourceText, /\["extension",\s*"Extensions"/);
+  assert.match(appSourceText, /CAPABILITY_TABS\.map/);
 });
 
 test("the pinned section is gated on there being pinned items", () => {
-  assert.match(appSource, /\{pinnedItems\.length \? \(/);
-  assert.doesNotMatch(appSource, /暂无置顶项/);
+  assert.match(appSourceText, /\{pinnedItems\.length \? \(/);
+  assert.doesNotMatch(appSourceText, /暂无置顶项/);
 });
 
 test("the context panel is dropped from the capabilities view", () => {
-  assert.match(appSource, /const showContextPanel = activeMainView === "chat"/);
-  assert.match(appSource, /"--right-panel-width": rightPanelCollapsed \|\| !showContextPanel/);
-  assert.match(appSource, /\{showContextPanel \? \(/);
+  assert.match(appSourceText, /const showContextPanel = activeMainView === "chat"/);
+  assert.match(appSourceText, /"--right-panel-width": rightPanelCollapsed \|\| !showContextPanel/);
+  assert.match(appSourceText, /\{showContextPanel \? \(/);
 });
 
 test("context panel switches reuse the page's default toggle handler", () => {
   assert.match(
-    appSource,
+    appSourceText,
     /<ProjectCapabilitiesPanel[\s\S]*?onSetDefault=\{setCapabilityDefault\}[\s\S]*?\/>/,
   );
   // Reused toggle: same endpoint as the cards, no session-scoped call.
-  assert.match(appSource, /await onSetDefault\(item\.kind, item\.id, enabled\)/);
+  assert.match(appSourceText, /await onSetDefault\(item\.kind, item\.id, enabled\)/);
 });
 
 /* ------------------------- package command panel -------------------------- */
@@ -228,7 +276,7 @@ test("context panel switches reuse the page's default toggle handler", () => {
 // one button per command inline on the card, which does not scale.
 
 test("package `/` commands render through the shared panel, not an expanded row", () => {
-  const menu = functionBody(appSource, "function CapabilityCommandMenu");
+  const menu = functionBody(appSourceText, "function CapabilityCommandMenu");
 
   // 2026-09-22：原来是 Radix DropdownMenu（一列到底，高处被视口截掉、macOS 又不画滚动条，
   // 用户实测「action 较多的时候显示不全」）。现在换成 Popover + 可滚动列表 + 搜索框，
@@ -254,12 +302,15 @@ test("package `/` commands render through the shared panel, not an expanded row"
   assert.match(menu, /onRun\(name\)/);
 
   // Both surfaces hand their commands to the same menu component.
-  assert.match(appSource, /<CapabilityCommandMenu\n\s+commands=\{item\.commands\}/);
-  assert.doesNotMatch(appSource, /aria-label="Package commands" onClick=\{\(event\) => event\.stopPropagation\(\)\}>\s*\{item\.commands\.map/);
+  assert.match(appSourceText, /<CapabilityCommandMenu\n\s+commands=\{item\.commands\}/);
+  assert.doesNotMatch(
+    appSourceText,
+    /aria-label="Package commands" onClick=\{\(event\) => event\.stopPropagation\(\)\}>\s*\{item\.commands\.map/,
+  );
 });
 
 test("the Packages tab card fills the composer instead of running the command", () => {
-  const card = functionBody(appSource, "function CapabilityMarketCard");
+  const card = functionBody(appSourceText, "function CapabilityMarketCard");
 
   assert.doesNotMatch(card, /void onRunPackageCommand\(item\.id, command\.name\)/);
   // 2026-09-28 用户要求：能力卡右下角 action 点击只把命令填进 composer，执行留给回车提交。
@@ -270,23 +321,29 @@ test("the Packages tab card fills the composer instead of running the command", 
 /* --------------------------- context panel search ------------------------- */
 
 test("the context panel has a search box filtering both Skills and Packages", () => {
-  const panel = functionBody(appSource, "function ProjectCapabilitiesPanel");
+  const panel = functionBody(appSourceText, "function ProjectCapabilitiesPanel");
 
   // 2026-09-20: the panel got more compact (search 32px, sections fold) — assert the search box
   // exists and is still the filtered source, not its old pixel class list.
-  assert.match(panel, /<Input\n\s+className="mb-3 h-8 bg-background text-\[13px\]"\n\s+value=\{query\}/);
+  assert.match(
+    panel,
+    /<Input\n\s+className="mb-3 h-8 bg-background text-\[13px\]"\n\s+value=\{query\}/,
+  );
   assert.match(panel, /placeholder=\{t\("capability\.context\.searchPlaceholder"\)\}/);
   // Both sections filter through the shared pure matcher, not ad-hoc inline rules.
   assert.match(panel, /projectSkills\.filter\(\(item\) => matchesCapabilityQuery\(item, query\)\)/);
-  assert.match(panel, /projectPackages\.filter\(\(item\) => matchesCapabilityQuery\(item, query\)\)/);
+  assert.match(
+    panel,
+    /projectPackages\.filter\(\(item\) => matchesCapabilityQuery\(item, query\)\)/,
+  );
 });
 
 test("the context panel packages expose the same `/` command menu as the page", () => {
-  const panel = functionBody(appSource, "function ProjectCapabilitiesPanel");
+  const panel = functionBody(appSourceText, "function ProjectCapabilitiesPanel");
 
   assert.match(panel, /onInsertPackageCommand: \(packageId: string, command: string\) => void/);
   assert.match(
-    appSource,
+    appSourceText,
     /<ProjectCapabilitiesPanel[\s\S]*?onInsertPackageCommand=\{insertPackageCommandIntoComposer\}[\s\S]*?\/>/,
   );
   assert.match(panel, /<CapabilityCommandMenu\n\s+commands=\{item\.commands\}/);
@@ -302,55 +359,80 @@ test("the context panel packages expose the same `/` command menu as the page", 
 
 test("both capability surfaces hand package actions to the composer filler", () => {
   assert.match(
-    appSource,
+    appSourceText,
     /<CapabilitiesPage[\s\S]*?onInsertPackageCommand=\{insertPackageCommandIntoComposer\}[\s\S]*?customUiCancelVersion/,
     "全局 Packages 页的 action 要接 composer 填充器",
   );
   assert.match(
-    appSource,
+    appSourceText,
     /<ProjectCapabilitiesPanel[\s\S]*?onInsertPackageCommand=\{insertPackageCommandIntoComposer\}[\s\S]*?\/>/,
     "项目级能力面板的 action 也要接 composer 填充器",
   );
 });
 
 test("insertPackageCommandIntoComposer lands `/name ` in the composer, never executes", () => {
-  const fill = functionBody(appSource, "function insertPackageCommandIntoComposer");
+  const fill = functionBody(appSourceText, "function insertPackageCommandIntoComposer");
 
   assert.match(fill, /kind: "command"/);
-  assert.match(fill, /hasArgumentCompletions: Boolean\(command\.hasArgumentCompletions\)/, "带上参数补全标记，填完才会自动弹参数列表");
-  assert.match(fill, /insertCommandAtCursor\([\s\S]*?\{ atEnd: true, trailingSpace: false \}/, "从卡片点进来一律追加到末尾，且先不加尾随空格");
+  assert.match(
+    fill,
+    /hasArgumentCompletions: Boolean\(command\.hasArgumentCompletions\)/,
+    "带上参数补全标记，填完才会自动弹参数列表",
+  );
+  assert.match(
+    fill,
+    /insertCommandAtCursor\([\s\S]*?\{ atEnd: true, trailingSpace: false \}/,
+    "从卡片点进来一律追加到末尾，且先不加尾随空格",
+  );
   assert.match(fill, /setActiveMainView\("chat"\)/, "在能力页点时先切回对话，composer 才可见");
   assert.doesNotMatch(fill, /runPackageCommand/, "绝不直接执行命令");
   // 用户要求：填进 composer 后光标要真的在 composer 里。
-  assert.match(fill, /requestAnimationFrame\(\(\) => \{[\s\S]*?editor\.contains\(document\.activeElement\)[\s\S]*?editor\.focus\(\{ preventScroll: true \}\)/, "下一帧确保光标回到 composer");
+  assert.match(
+    fill,
+    /requestAnimationFrame\(\(\) => \{[\s\S]*?editor\.contains\(document\.activeElement\)[\s\S]*?editor\.focus\(\{ preventScroll: true \}\)/,
+    "下一帧确保光标回到 composer",
+  );
 });
 
 test("a command inserted from the card waits for the user's space before listing arguments", () => {
-  const body = functionBody(appSource, "insertCommandAtCursor");
+  const body = functionBody(appSourceText, "insertCommandAtCursor");
 
   // trailingSpace=false 这条分支：不进参数模式，也不拉候选。
-  assert.match(body, /\} else if \(!trailingSpace\) \{\n\s+setSlashCommandContext\(null\);\n\s+setSlashArgumentArmed\(false\);\n\s+setShowCapabilityPicker\(false\);/);
+  assert.match(
+    body,
+    /\} else if \(!trailingSpace\) \{\n\s+setSlashCommandContext\(null\);\n\s+setSlashArgumentArmed\(false\);\n\s+setShowCapabilityPicker\(false\);/,
+  );
   // 用户自己敲下空格后，handleComposerInput 扫到 `/name ` 才会把实例列表拉出来。
-  const input = functionBody(appSource, "handleComposerInput");
+  const input = functionBody(appSourceText, "handleComposerInput");
   assert.match(input, /matchSlashCommandArgs\(triggerText\)/);
 });
 
 test("closing the command panel does not yank focus back to the trigger button", () => {
-  const menu = functionBody(appSource, "function CapabilityCommandMenu");
+  const menu = functionBody(appSourceText, "function CapabilityCommandMenu");
 
   assert.match(menu, /const keepComposerFocus = useRef\(false\)/);
   assert.match(menu, /function run\(name: string\) \{\n\s+keepComposerFocus\.current = true;/);
-  assert.match(menu, /onCloseAutoFocus=\{\(event\) => \{[\s\S]*?keepComposerFocus\.current[\s\S]*?event\.preventDefault\(\)/, "Radix 默认 onCloseAutoFocus 会把焦点还给按钮，必须拦掉");
+  assert.match(
+    menu,
+    /onCloseAutoFocus=\{\(event\) => \{[\s\S]*?keepComposerFocus\.current[\s\S]*?event\.preventDefault\(\)/,
+    "Radix 默认 onCloseAutoFocus 会把焦点还给按钮，必须拦掉",
+  );
 });
 
 test("insertCommandAtCursor appends at the end when asked and keeps a separating space", () => {
-  const insert = functionBody(appSource, "function insertCommandAtCursor");
+  const insert = functionBody(appSourceText, "function insertCommandAtCursor");
 
   // 从卡片进来时按钮持有焦点，composer 缓存的选区可能过时 —— 不能再读它。
   assert.match(insert, /if \(!options\?\.atEnd\) \{\n\s+rememberComposerSelection\(\);/);
-  assert.match(insert, /let range = options\?\.atEnd \? null : composerSelectionRef\.current\?\.cloneRange\(\)/);
+  assert.match(
+    insert,
+    /let range = options\?\.atEnd \? null : composerSelectionRef\.current\?\.cloneRange\(\)/,
+  );
   // 已有文本时补一个空格，避免接成 `note/mcp`。
-  assert.match(insert, /const separator = beforeText\.length > 0 && !\/\\s\$\/u\.test\(beforeText\) \? " " : ""/);
+  assert.match(
+    insert,
+    /const separator = beforeText\.length > 0 && !\/\\s\$\/u\.test\(beforeText\) \? " " : ""/,
+  );
   assert.match(insert, /`\$\{separator\}\//);
 });
 
@@ -360,7 +442,7 @@ test("insertCommandAtCursor appends at the end when asked and keeps a separating
 // 2026-09-21 用户反馈：「skills 和 packages 要有办法让用户知道这是项目级的」。
 
 test("the context panel labels its scope above the search box", () => {
-  const panel = functionBody(appSource, "function ProjectCapabilitiesPanel");
+  const panel = functionBody(appSourceText, "function ProjectCapabilitiesPanel");
 
   // 一行常驻的「项目级」徽标 + 项目名，紧跟一句来源提示，然后才是搜索框。
   assert.match(
@@ -374,7 +456,7 @@ test("the context panel labels its scope above the search box", () => {
 test("the panel's scope line names the project it belongs to", () => {
   // 2026-10-12：项目条目上的「技能/包」图标把它从右面板的 tab 变成了弹窗，弹窗里必须写出
   // 是**哪个项目**的技能/包（入口在项目行上，用户可能同时开着好几个项目）。
-  const callSite = appSource.slice(appSource.indexOf("<ProjectCapabilitiesPanel"));
+  const callSite = appSourceText.slice(appSourceText.indexOf("<ProjectCapabilitiesPanel"));
   assert.match(callSite.slice(0, 600), /capabilities=\{capabilities\}/);
   assert.match(
     callSite.slice(0, 600),
@@ -391,7 +473,11 @@ test("both language packs carry the scope copy and name the .pi source", () => {
     for (const key of ["scopeBadge", "scopeHint", "scopeHintTitle"]) {
       assert.match(source, new RegExp(`"capability\\.context\\.${key}"`), `${pack} 缺 ${key}`);
     }
-    assert.match(source, /"capability\.context\.scopeHint": "[^"]*\.pi[^"]*"/, `${pack} 的提示要写清来源是 .pi`);
+    assert.match(
+      source,
+      /"capability\.context\.scopeHint": "[^"]*\.pi[^"]*"/,
+      `${pack} 的提示要写清来源是 .pi`,
+    );
   }
 });
 
@@ -418,7 +504,11 @@ test("matchesCapabilityQuery is case-insensitive and an empty query matches ever
   assert.equal(matchesCapabilityQuery({ name: "x" }, ""), true);
 });
 
-function functionBody(source: string, marker: string): string {
+function functionBody(source: string, declaration: string): string {
+  // 只给函数名时补上 `function `：`src/app/` 现在是整目录拼接，而 `AppShell` 里有一大段
+  // `const { handleComposerInput, … } = view;` 解构表 —— 裸名字会先命中那张表，再往后找
+  // `{` 就切到隔壁 JSX 里去了（切出一段莫名其妙的“函数体”）。
+  const marker = declaration.startsWith("function ") ? declaration : `function ${declaration}`;
   const start = source.indexOf(marker);
   assert.notEqual(start, -1, `${marker} not found`);
   // Skip the parameter list first: `function f({ a = 1 }: X) {` would otherwise

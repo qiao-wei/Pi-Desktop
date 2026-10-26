@@ -129,7 +129,7 @@ function bridgeEnv(shellPaths) {
       PI_DESKTOP_RUNTIME_MODE: runtimeMode,
       // Only ever set in `bundled` mode: their absence is what makes the bridge leave the
       // `~/.pi/agent/bin` launchers alone and let every skill use the host's own interpreters.
-      ...(runtimeMode === "bundled"
+      ...(runtimeMode === "bundled" && python
         ? {
             PI_DESKTOP_BUNDLED_PYTHON_BIN: python.bin,
             PI_DESKTOP_BUNDLED_PYTHON_HOME: python.home,

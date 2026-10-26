@@ -15,10 +15,12 @@ import { join } from "node:path";
 
 import { normalizeCommandArgumentItems } from "../server/commandArguments.mjs";
 import { functionBody } from "./lib/sourceText.ts";
+import { routeBody, bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource } from "./lib/appSource.ts";
 
-const server = readFileSync(join(import.meta.dirname, "../server/index.mjs"), "utf8");
+const server = bridgeSource();
 const hook = readFileSync(join(import.meta.dirname, "../src/features/chat/usePiDesktopApp.ts"), "utf8");
-const app = readFileSync(join(import.meta.dirname, "../src/app/App.tsx"), "utf8");
+const app = appSource();
 
 /* ------------------------------------------------ normalizeCommandArgumentItems */
 
@@ -66,10 +68,11 @@ test("snapshot exposes hasArgumentCompletions from the command's getArgumentComp
 });
 
 test("the arguments endpoint is registered and reads the command's own completions", () => {
+  // 分支体已抽成处理器函数；「必须先于 /package/command 匹配」仍然靠分发顺序保证（路由表在入口里）。
   assert.match(
-    server,
-    /url\.pathname === "\/api\/capabilities\/package\/command\/arguments"[\s\S]{0,120}readCapabilityCommandArguments\(req, res\)/,
-    "路由必须先于 /package/command 匹配，且指向 readCapabilityCommandArguments",
+    routeBody(server, 'url.pathname === "/api/capabilities/package/command/arguments"'),
+    /readCapabilityCommandArguments\(ctx\.req, ctx\.res\)/,
+    "路由要指向 readCapabilityCommandArguments",
   );
 
   const handler = functionBody(server, "readCapabilityCommandArguments");

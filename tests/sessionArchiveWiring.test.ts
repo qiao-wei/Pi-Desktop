@@ -9,12 +9,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { bridgeSource } from "./lib/bridgeSource.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
 const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.url), "utf8");
 
-const server = read("server/index.mjs");
+const server = bridgeSource();
 const hook = read("src/features/chat/usePiDesktopApp.ts");
-const app = read("src/app/App.tsx");
+const app = readAppSource();
 const component = read("src/features/settings/ArchivedChatsSettings.tsx");
 
 /** Source of a top-level `function name(...) { ... }`, delimited at the next flush-left brace. */

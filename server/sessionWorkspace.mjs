@@ -19,6 +19,12 @@ import { existsSync } from "node:fs";
 import { isManagedWorktreePath } from "./gitWorktree.mjs";
 
 /**
+ * @param {{
+ *   projectCwd?: string,
+ *   worktreeRoot?: string,
+ *   sessionCwd?: string,
+ *   pathExists?: (path: string) => boolean,
+ * }} [options]
  * @returns {{ cwd: string, reason: "project" | "worktree" | "missing" }}
  *   `reason` 只用于诊断：`missing` 表示会话本来在 worktree 里、但目录已经没了。
  */

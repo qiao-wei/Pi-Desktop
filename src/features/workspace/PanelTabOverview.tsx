@@ -6,7 +6,7 @@ import { useT } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import { relativeTimeLabel } from "@/shared/relativeTime";
 
-import { PanelTabIcon } from "./RightPanel";
+import { PanelTabIcon } from "./PanelTabIcon";
 import type { RecentClosedPanelTab, RightPanelTab } from "./rightPanelTabs";
 
 /**

@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "why": "串行池：真实 spawn 解释器/桥进程、并靠内部超时判定的测试。它们在 160 个文件并行时抢不到 CPU，表现为超时或晚到 9 秒才失败（两条都是实测）。串行池里它们照跑，只是不与其他文件抢机器。",
+  "rules": [
+    "只有**实测过**抢 CPU 的文件才进串行池：怀疑不构成理由（过度隔离会让 npm test 从 25s 变 50s）",
+    "判据：①真的 spawn 解释器/桥进程且靠内部 timeout 判定；②在并行池里出现过超时或异常耗时的记录",
+    "不要用调大超时的办法掩盖（那会让真正的回归也变成『偶尔红』）",
+    "不靠 CPU 的慢测试不要放进来：例如 tests/bridgeEndpoint.test.ts 的 20s 是假桥脚本里的 `sleep 20`，在并行池里是免费重叠的"
+  ],
+  "serial": [
+    {
+      "file": "tests/bundledRuntimeSelection.test.ts",
+      "reason": "spawn 真实 node/python 探测版本；实测并行池里 5007ms 超时、单独跑 909ms 通过"
+    },
+    {
+      "file": "tests/launcherRefresh.test.ts",
+      "reason": "spawn 真桥 server/index.mjs（8 处 startBridge），桥启动要探测解释器；实测并行池里 9237ms 才失败"
+    },
+    {
+      "file": "tests/agentRuntimeEnv.test.ts",
+      "reason": "与上一条同类：起真桥 + 真解释器探测（实测单独跑 5.4s，全在等子进程与探测超时）"
+    }
+  ]
+}

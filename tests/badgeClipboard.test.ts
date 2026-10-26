@@ -20,9 +20,11 @@ import {
 } from "../src/features/chat/badgeClipboard.ts";
 import { htmlToSanitizedMarkup, type SanitizeNode } from "../src/features/chat/pasteSanitize.ts";
 import type { ChatAttachment, ChatMessagePart } from "../src/types/domain.ts";
+import { appSource } from "./lib/appSource.ts";
+import { sourceDir } from "./lib/sourceDir.ts";
 
-const app = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
-const editBox = readFileSync(new URL("../src/features/chat/MessageEditBox.tsx", import.meta.url), "utf8");
+const app = appSource();
+const editBox = sourceDir("src/features/chat");
 const thread = readFileSync(
   new URL("../src/components/assistant-ui/elements/thread.aui.tsx", import.meta.url),
   "utf8",

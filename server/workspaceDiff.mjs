@@ -96,6 +96,9 @@ export function unavailableDiff(path, source, summary) {
  *
  * 分支来源用 `<base>...HEAD`（三个点）：这是"从共同祖先到 HEAD"，也就是这个分支自己带来的
  * 改动。两个点会把它人在 base 上的新提交算成我们的反向改动，历史一乱就不可读。
+ *
+ * @param {{ source?: string, path?: string, base?: string }} [request]
+ * @returns {string[]}
  */
 export function buildDiffArgs({ source, path, base = "" } = {}) {
   const target = String(path ?? "").trim();
@@ -171,8 +174,10 @@ export function splitUntrackedText(text) {
  *
  * 故意**不**用 `git diff --no-index /dev/null <file>`：那份输出在 Windows 上会带平台相关的
  * 文件头，而且某些 `diff --git` 头部格式会让 diff 渲染器直接抛异常。这里的 unified 形态只保留
- * 单文件预览真正需要的 `---/+++ / @@`，是两端都能稳定吃下的最小集合（ZCode 的
+ * 单文件预览真正需要的三样：`---` / `+++` / 一个 hunk 头，是两端都能稳定吃下的最小集合（ZCode 的
  * `buildUntrackedTextDiffResult` 出于同样的理由也这么做）。
+ *
+ * @param {{ path?: string, content?: unknown }} [request]
  */
 export function buildUntrackedPatch({ path, content } = {}) {
   const { lines, hasTrailingNewline } = splitUntrackedText(content);
@@ -398,6 +403,8 @@ export function parseNameStatusZ(output) {
  * 是看不到的，这个才是真缺的那块。
  *
  * 返回 `{ source, base, files, summary }`；`summary` 非空表示这个来源现在列不出来。
+ *
+ * @param {{ cwd?: string, source?: string, base?: string, execImpl?: typeof execFile, timeoutMs?: number }} [options]
  */
 export async function listSourceFiles({
   cwd,
@@ -446,6 +453,8 @@ export async function listSourceFiles({
  * 返回 `{ path, source, availability, patch, beforeContent, afterContent, added, removed, summary }`。
  * `availability` 四态：`patch`（有正文）/ `binary` / `truncated` / `unavailable`。
  * 后三态 `patch` 一律为 `null`，渲染层只显示 `summary`。
+ *
+ * @param {{ cwd?: string, path?: string, source?: string, base?: string, execImpl?: typeof execFile, timeoutMs?: number, maxPatchBytes?: number, maxSideBytes?: number }} [request]
  */
 export async function readFileDiff({
   cwd,

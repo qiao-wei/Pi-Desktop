@@ -83,6 +83,8 @@ function unavailableEntry(message) {
  *
  * 返回 `{ ok: true, dir, entries, truncated }` 或 `{ ok: false, status }`。
  * 只列一层也是安全考量：递归会跟着软链跑出项目根。
+ *
+ * @param {{ cwd?: string, dir?: string, limit?: number, fs?: { readdir?: typeof readdirSync, lstat?: typeof lstatSync } }} [options]
  */
 export function listWorkspaceDirectory({ cwd, dir = "", limit = MAX_DIRECTORY_ENTRIES, fs = {} } = {}) {
   const root = resolve(String(cwd ?? ""));
@@ -155,6 +157,8 @@ function textOrUnavailable(path, availability, summary, extra = {}) {
  *
  * `availability`：`text` / `binary` / `too-large` / `unavailable`。
  * 判成 `unavailable` 的原因（不存在 / 是目录 / 越界 / 软链跑出去）走 `summary`，渲染层直接显示。
+ *
+ * @param {{ cwd?: string, path?: string, maxBytes?: number, fs?: { lstat?: typeof lstatSync, stat?: typeof statSync, readFile?: typeof readFileSync, realpath?: typeof realpathSync } }} [options]
  */
 export function readWorkspaceFile({ cwd, path, maxBytes = MAX_FILE_TEXT_BYTES, fs = {} } = {}) {
   const root = resolve(String(cwd ?? ""));

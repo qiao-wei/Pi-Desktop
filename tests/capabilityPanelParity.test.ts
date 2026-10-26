@@ -10,16 +10,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 
 /** Source of a top-level `function name(...) { ... }`, delimited at the next flush-left brace. */
 function topLevelFunctionSource(name: string): string {
-  const start = appSource.indexOf(`function ${name}(`);
+  const start = appSourceText.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} is gone from App.tsx`);
-  const end = appSource.indexOf("\n}\n", start);
+  const end = appSourceText.indexOf("\n}\n", start);
   assert.notEqual(end, -1, `${name} body could not be delimited`);
-  return appSource.slice(start, end);
+  return appSourceText.slice(start, end);
 }
 
 function countOccurrences(haystack: string, needle: string): number {
@@ -31,7 +32,7 @@ function countOccurrences(haystack: string, needle: string): number {
 test("each shared dialog is defined exactly once", () => {
   for (const name of ["SkillImportDialog", "PackageInstallDialog", "PackageResourcesDialog", "CapabilityDetailDialog"]) {
     assert.equal(
-      countOccurrences(appSource, `function ${name}(`),
+      countOccurrences(appSourceText, `function ${name}(`),
       1,
       `${name} must exist once, not be re-implemented per surface`,
     );
@@ -39,10 +40,10 @@ test("each shared dialog is defined exactly once", () => {
 });
 
 test("both surfaces render the shared dialogs instead of their own", () => {
-  assert.equal(countOccurrences(appSource, "<SkillImportDialog"), 2, "Global page + project panel");
-  assert.equal(countOccurrences(appSource, "<PackageInstallDialog"), 2, "Global page + project panel");
-  assert.equal(countOccurrences(appSource, "<PackageResourcesDialog"), 2, "Global page + project panel");
-  assert.equal(countOccurrences(appSource, "<CapabilityDetailDialog"), 2, "Global page + project panel");
+  assert.equal(countOccurrences(appSourceText, "<SkillImportDialog"), 2, "Global page + project panel");
+  assert.equal(countOccurrences(appSourceText, "<PackageInstallDialog"), 2, "Global page + project panel");
+  assert.equal(countOccurrences(appSourceText, "<PackageResourcesDialog"), 2, "Global page + project panel");
+  assert.equal(countOccurrences(appSourceText, "<CapabilityDetailDialog"), 2, "Global page + project panel");
 });
 
 test("the two Dialog wrappers for installing/importing are gone from the page body", () => {
@@ -66,7 +67,7 @@ test("the project panel receives the same skill/package entry points as the page
   assert.match(panel, /<SkillImportDialog path=\{skillImportPath\} onClose=\{[^}]*\} onImport=\{onImportSkill\} \/>/);
   assert.match(panel, /<PackageInstallDialog[\s\S]*?onInstall=\{onInstallPackage\}/);
 
-  const callSite = appSource.slice(appSource.indexOf("<ProjectCapabilitiesPanel"));
+  const callSite = appSourceText.slice(appSourceText.indexOf("<ProjectCapabilitiesPanel"));
   assert.match(callSite.slice(0, 600), /onImportSkill=\{importSkill\}/, "wired to the real hook action");
   assert.match(callSite.slice(0, 600), /onInstallPackage=\{installPackage\}/, "wired to the real hook action");
 });
@@ -167,7 +168,7 @@ test("a panel row opens the same detail sheet as a card click", () => {
   const page = topLevelFunctionSource("CapabilitiesPage");
   assert.match(page, /<CapabilityDetailDialog\s+item=\{selected\}/);
   // One sheet, one definition: a project skill cannot drift from the Global one.
-  assert.equal(countOccurrences(appSource, "<CapabilityDetailDialog"), 2);
+  assert.equal(countOccurrences(appSourceText, "<CapabilityDetailDialog"), 2);
 });
 
 test("the sheet reads the skill body itself, so both surfaces get it for free", () => {
@@ -187,7 +188,7 @@ test("the panel can run every action the sheet offers", () => {
     assert.match(panel, new RegExp(`${prop}=\\{`), `${prop} must be handed to the sheet`);
   }
 
-  const callSite = appSource.slice(appSource.indexOf("<ProjectCapabilitiesPanel"));
+  const callSite = appSourceText.slice(appSourceText.indexOf("<ProjectCapabilitiesPanel"));
   const props = callSite.slice(0, 700);
   assert.match(props, /onSetPinned=\{setCapabilityPinned\}/, "pin is wired to the shared handler");
   assert.match(props, /onUpdatePackage=\{updatePackage\}/, "update is wired to the shared handler");

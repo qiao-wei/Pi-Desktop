@@ -11,6 +11,7 @@ const { startBridge, stopBridge, waitForBridge } = require("./sidecar");
 
 // Window geometry / chrome matches `app.windows` in src-tauri/tauri.conf.json:
 // borderless, transparent, 1180x780 with a 360x640 floor.
+/** @type {import("electron").BrowserWindowConstructorOptions} */
 const WINDOW_OPTIONS = {
   width: 1180,
   height: 780,
@@ -74,6 +75,7 @@ function linuxTransparentVisuals() {
 function buildMenu() {
   // The window is borderless, so the menu is the only home for Cmd+Q /
   // copy-paste roles; the app UI itself never renders it.
+  /** @type {import("electron").MenuItemConstructorOptions[]} */
   const template = [
     {
       label: app.name,
@@ -140,11 +142,12 @@ function windowOptions() {
     return WINDOW_OPTIONS;
   }
 
+  const webPreferences = WINDOW_OPTIONS.webPreferences ?? {};
   return {
     ...WINDOW_OPTIONS,
     webPreferences: {
-      ...WINDOW_OPTIONS.webPreferences,
-      additionalArguments: [...(WINDOW_OPTIONS.webPreferences.additionalArguments ?? []), `--pi-desktop-api-base=${bridgeApiBase}`],
+      ...webPreferences,
+      additionalArguments: [...(webPreferences.additionalArguments ?? []), `--pi-desktop-api-base=${bridgeApiBase}`],
     },
   };
 }

@@ -273,7 +273,11 @@ function isProvenanceOnly(relPath) {
 /**
  * Everything in `runtimeDir` that would break on another machine.
  * @param {string} runtimeDir
- * @param {{platform?: string, forbidden?: string[]}} [options]
+ * @param {{
+ *   platform?: NodeJS.Platform,
+ *   forbidden?: string[],
+ *   interpreterDirs?: string[],
+ * }} [options]
  * @returns {{kind: string, path: string, detail: string, severity: "fatal"|"provenance"}[]}
  */
 export function findUnrelocatable(runtimeDir, options = {}) {
@@ -388,6 +392,7 @@ export function relocateRuntime(runtimeDir, options = {}) {
   const platform = options.platform ?? process.platform;
   const pythonName = options.pythonName ?? "python3.13";
   const pythonExeName = options.pythonExeName ?? "python.exe";
+  /** @type {{ symlinks: string[], scripts: string[], wrappers: string[], removed: string[] }} */
   const changed = { symlinks: [], scripts: [], wrappers: [], removed: [] };
 
   for (const path of walkTree(runtimeDir)) {

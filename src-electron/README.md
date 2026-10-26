@@ -5,17 +5,17 @@
 
 ## 文件
 
-| 文件 | 对应 src-tauri | 作用 |
-| --- | --- | --- |
-| `main.js` | `lib.rs::run` | 窗口配置、生命周期、生产模式启停 sidecar |
-| `preload.js` | Tauri IPC 层 | 用 `contextBridge` 暴露 `window.__TAURI_INTERNALS__.invoke` |
-| `host-commands.js` | `#[tauri::command]` × 7 | `ipcMain.handle` 实现同名命令 |
-| `host-policy.js` | `is_openable_target` / `dialog_starting_directory` | 纯函数策略（有单测，不依赖 electron） |
-| `sidecar.js` | `start_bridge` / `stop_bridge` | 复刻同一套环境变量与内置 runtime 定位 |
-| `paths.js` | `BaseDirectory::Resource` 解析 | dev / 打包两种资源布局 |
-| `static-server.js` | Tauri 的自定义协议 | 生产模式用自定义协议把 `dist/` 伺服到固定源 `app://pi-desktop/` |
-| `../scripts/dev-electron.mjs` | `build.beforeDevCommand` + `devUrl` | 起 dev 服务（bridge + vite）并挂上外壳 |
-| `electron-builder.json` + `electron-builder.config.cjs` | `tauri.conf.json` 的 `bundle` | 打包配置；`.cjs` 在 `.json` 之上派生 bundled/slim 差异，并按档位（`PI_DESKTOP_SIGN`）注入签名参数，是签名的唯一入口 |
+| 文件                                                    | 对应 src-tauri                                     | 作用                                                                                                                |
+| ------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `main.js`                                               | `lib.rs::run`                                      | 窗口配置、生命周期、生产模式启停 sidecar                                                                            |
+| `preload.js`                                            | Tauri IPC 层                                       | 用 `contextBridge` 暴露 `window.__TAURI_INTERNALS__.invoke`                                                         |
+| `host-commands.js`                                      | `#[tauri::command]` × 7                            | `ipcMain.handle` 实现同名命令                                                                                       |
+| `host-policy.js`                                        | `is_openable_target` / `dialog_starting_directory` | 纯函数策略（有单测，不依赖 electron）                                                                               |
+| `sidecar.js`                                            | `start_bridge` / `stop_bridge`                     | 复刻同一套环境变量与内置 runtime 定位                                                                               |
+| `paths.js`                                              | `BaseDirectory::Resource` 解析                     | dev / 打包两种资源布局                                                                                              |
+| `static-server.js`                                      | Tauri 的自定义协议                                 | 生产模式用自定义协议把 `dist/` 伺服到固定源 `app://pi-desktop/`                                                     |
+| `../scripts/dev-electron.mjs`                           | `build.beforeDevCommand` + `devUrl`                | 起 dev 服务（bridge + vite）并挂上外壳                                                                              |
+| `electron-builder.json` + `electron-builder.config.cjs` | `tauri.conf.json` 的 `bundle`                      | 打包配置；`.cjs` 在 `.json` 之上派生 bundled/slim 差异，并按档位（`PI_DESKTOP_SIGN`）注入签名参数，是签名的唯一入口 |
 
 ## 运行
 

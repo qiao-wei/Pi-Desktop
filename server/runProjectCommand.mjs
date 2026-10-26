@@ -39,6 +39,11 @@ export function shellQuote(value) {
  *
  * 环境变量写成 `export KEY='value'`（值用单引号包裹），而不是塞进命令前面：脚本从文件读，
  * 不用操心调用方那边的引号 / 空格。
+ *
+  * @param {string} command
+ * @param {string} cwd
+ * @param {{ env?: (string | { key: string, value: string })[] }} [options]
+ * @returns {string}
  */
 export function runScriptText(command, cwd, { env = [] } = {}) {
   const exports = normalizeCommandEnv(env).map(({ key, value }) => `export ${key}=${shellQuote(value)}`);
@@ -87,8 +92,18 @@ export function normalizeTerminalApp(value) {
  *
  * `terminalApp`（或 `PI_DESKTOP_TERMINAL`）可以指定 macOS 上优先用的终端 app 名（默认
  * `Terminal`）。Windows / Linux 目前仍按固定候选链，忽略这个值。
+ *
+ * @param {{
+ *   platform?: string,
+ *   scriptPath?: string,
+ *   command?: string,
+ *   cwd?: string,
+ *   env?: Record<string, string | undefined>,
+ *   terminalApp?: string,
+ *   commandEnv?: { key: string, value: string }[],
+ * }} [options]
  */
-export function terminalLauncherPlans({ platform = process.platform, scriptPath, command, cwd, env = process.env, terminalApp = "", commandEnv = [] } = {}) {
+export function terminalLauncherPlans({ platform = process.platform, scriptPath = "", command, cwd, env = process.env, terminalApp = "", commandEnv = [] } = {}) {
   if (platform === "darwin") {
     const app = normalizeTerminalApp(terminalApp) || String(env?.PI_DESKTOP_TERMINAL ?? "").trim() || "Terminal";
     const steps = [{ command: "open", args: ["-a", app, scriptPath] }];
@@ -110,6 +125,7 @@ export function terminalLauncherPlans({ platform = process.platform, scriptPath,
     ];
   }
 
+  /** @type {[string, string[]][]} */
   const shells = [
     ["x-terminal-emulator", ["-e", "sh", scriptPath]],
     ["gnome-terminal", ["--", "sh", scriptPath]],
@@ -123,6 +139,8 @@ export function terminalLauncherPlans({ platform = process.platform, scriptPath,
 /**
  * 后台运行的启动计划：不弹窗，直接一个 shell 跑命令，stdout/stderr 由调用方重定向到日志。
  * `-lc` 让命令拿到和登录 shell 接近的 PATH（`npm` / `node` 之类才找得到）。
+ *
+ * @param {{ platform?: string, command?: string, cwd?: string }} [options]
  */
 export function backgroundCommandPlan({ platform = process.platform, command, cwd } = {}) {
   if (platform === "win32") {
@@ -179,6 +197,19 @@ function requireCommand(command) {
  *
  * 日志先写好头（命令 / 目录 / pid / 时间），再用 append 模式把 fd 交给子进程 —— 用
  * `writeFileSync` 写头会截断子进程已写出的内容（顺序反过来就丢日志）。
+ *
+  * @param {string} command
+ * @param {string} cwd
+ * @param {{
+ *   spawnImpl?: typeof import("node:child_process").spawn,
+ *   platform?: NodeJS.Platform,
+ *   baseDir?: string,
+ *   now?: number,
+ *   exists?: (path: string) => boolean,
+ *   args?: string,
+ *   env?: readonly (string | { key: string, value: string })[],
+ * }} [options]
+ * @returns {Promise<{ launcher: "background", logPath: string, pid: Promise<number | undefined>, command: string, cwd: string }>}
  */
 export async function runProjectCommandInBackground(command, cwd, {
   spawnImpl = spawn,
@@ -191,7 +222,7 @@ export async function runProjectCommandInBackground(command, cwd, {
 } = {}) {
   const text = commandLine(requireCommand(command), normalizeCommandArgs(args));
   const directory = requireProjectDirectory(cwd, exists);
-  const childEnv = commandProcessEnv(env);
+  const childEnv = commandProcessEnv([...env]);
 
   sweepRunScripts({ baseDir, now });
 
@@ -206,7 +237,7 @@ export async function runProjectCommandInBackground(command, cwd, {
       "# Pi Desktop 后台运行",
       `# command: ${text}`,
       `# cwd: ${directory}`,
-      ...normalizeCommandEnv(env).map(({ key }) => `# env: ${key}=***`),
+      ...normalizeCommandEnv([...env]).map(({ key }) => `# env: ${key}=***`),
       `# started: ${new Date(now).toISOString()}`,
       "",
     ].join("\n"),
@@ -243,6 +274,29 @@ export async function runProjectCommandInBackground(command, cwd, {
  * 命令内容 —— 它就是用户想跑的那串东西。
  *
  * `background: true` 走上面的静默路径；否则按 `terminalApp` 打开一个终端窗口。
+ *
+ * @param {string} command
+ * @param {string} cwd
+ * @param {{
+ *   spawnImpl?: typeof import("node:child_process").spawn,
+ *   platform?: NodeJS.Platform,
+ *   env?: Record<string, string | undefined>,
+ *   baseDir?: string,
+ *   now?: number,
+ *   exists?: (path: string) => boolean,
+ *   terminalApp?: string,
+ *   background?: boolean,
+ *   args?: string,
+ *   commandEnv?: readonly (string | { key: string, value: string })[],
+ * }} [options]
+ *
+ * 两条返回形状：后台静默跑（可跟踪进程）和弹终端（只有脚本路径）。
+ * `launcher` 是可判别字段 —— 调用方必须能靠它收窄，否则 `result.pid` 这类字段在类型上永远不存在。
+ *
+ * @returns {Promise<
+ *   | { launcher: "background", logPath: string, pid: Promise<number | undefined>, command: string, cwd: string }
+ *   | { launcher: string, scriptPath: string, logPath?: undefined, pid?: undefined }
+ * >}
  */
 export async function runProjectCommand(
   command,
@@ -286,14 +340,16 @@ export async function runProjectCommand(
     try {
       for (const step of steps) {
         try {
-          await launchDetached(step.command, step.args, spawnImpl ? { spawnImpl } : {});
+          await launchDetached(step.command, step.args.filter((arg) => typeof arg === "string"), spawnImpl ? { spawnImpl } : {});
         } catch (error) {
           if (!step.optional) {
             throw error;
           }
         }
       }
-      return { launcher: steps[0].command, scriptPath };
+      // 显式把后台专属字段标成 undefined：`launcher` 的类型是任意 app 名（string），
+      // 只有当另一支把这两个字段声明成 undefined 时，`result.logPath !== undefined` 才能收窄。
+      return { launcher: steps[0].command, scriptPath, logPath: undefined, pid: undefined };
     } catch (error) {
       lastError = error;
     }
@@ -355,7 +411,13 @@ export function isRunLogPath(logPath, baseDir = tmpdir()) {
   return resolve(String(logPath ?? "")).startsWith(dir + sep);
 }
 
-/** 「查看日志」：用系统默认程序打开日志文件（macOS `open` / Linux `xdg-open` / Windows `start`）。 */
+/**
+ * 「查看日志」：用系统默认程序打开日志文件（macOS `open` / Linux `xdg-open` / Windows `start`）。
+ *
+ * @param {string} logPath
+ * @param {{ baseDir?: string, platform?: NodeJS.Platform, spawnImpl?: typeof import("node:child_process").spawn }} [options]
+ * @returns {Promise<void>}
+ */
 export async function revealRunLog(logPath, { baseDir = tmpdir(), platform = process.platform, spawnImpl = spawn } = {}) {
   if (!isRunLogPath(logPath, baseDir)) {
     throw new Error("日志路径不在运行日志目录里。");
@@ -366,7 +428,7 @@ export async function revealRunLog(logPath, { baseDir = tmpdir(), platform = pro
       : platform === "win32"
         ? { command: "cmd", args: ["/c", "start", "", logPath] }
         : { command: "xdg-open", args: [logPath] };
-  await new Promise((resolvePromise, reject) => {
+  await /** @type {Promise<void>} */ (new Promise((resolvePromise, reject) => {
     let child;
     try {
       child = spawnImpl(plan.command, plan.args, { stdio: "ignore", detached: true });
@@ -379,5 +441,5 @@ export async function revealRunLog(logPath, { baseDir = tmpdir(), platform = pro
       child.unref?.();
       resolvePromise();
     });
-  });
+  }));
 }

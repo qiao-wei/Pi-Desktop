@@ -11,10 +11,9 @@
  */
 import { spawn } from "node:child_process";
 
-/** @typedef {{ command: string, args: string[], optional?: boolean }} RevealStep */
-
-/**
- * The steps that open `path` in the platform's file manager.
+/** @typedef {{ command: string, args: string[], optional?: boolean }} RevealStep
+ *
+ ** The steps that open `path` in the platform's file manager.
  *
  * `optional: true` means "the folder window is already open; failing to raise it must not
  * fail the reveal".
@@ -36,6 +35,11 @@ export function revealFolderCommands(path, platform = process.platform) {
   return steps;
 }
 
+/**
+ * @param {{ command: string, args: string[], optional?: boolean }} step
+ * @param {typeof import("node:child_process").spawn} spawnImpl
+ * @returns {Promise<void>}
+ */
 function runStep(step, spawnImpl) {
   return new Promise((resolve, reject) => {
     const child = spawnImpl(step.command, step.args, { stdio: "ignore" });

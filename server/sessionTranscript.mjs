@@ -16,9 +16,8 @@
  * Everything that keys off bubble identity - merge, optimistic 插话, scroll
  * anchor - depends on that staying true. Use this function everywhere a turn
  * count is seeded from a transcript.
- */
-
-/** Roles that become conversation. `custom` / `bashExecution` / summaries do not. */
+ *
+ *Roles that become conversation. `custom` / `bashExecution` / summaries do not. */
 const DISPLAY_ROLES = new Set(["user", "assistant", "toolResult"]);
 
 export function isDisplayMessage(message) {

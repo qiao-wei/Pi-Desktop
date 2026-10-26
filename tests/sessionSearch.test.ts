@@ -6,7 +6,7 @@
  * 或者「高亮的字根本不在结果里」。
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import test from "node:test";
 
 import {
@@ -21,8 +21,9 @@ import {
   stepMatchIndex,
   type SessionSearchDocument,
 } from "../src/shared/sessionSearch.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
-const serverSource = readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
+const serverSource = bridgeSource();
 
 test("normalizeSearchQuery 只去首尾空白，空查询视为不搜", () => {
   assert.equal(normalizeSearchQuery("  hello  "), "hello");
@@ -118,7 +119,9 @@ test("searchDocuments 同一消息里的多次命中只出一行", () => {
 
 test("searchDocuments 空查询没结果，limit 截断并回报 truncated", () => {
   assert.deepEqual(searchDocuments([doc()], "   "), { results: [], truncated: false });
-  const { results, truncated } = searchDocuments([doc(), doc({ projectId: "p2" })], "search", { limit: 2 });
+  const { results, truncated } = searchDocuments([doc(), doc({ projectId: "p2" })], "search", {
+    limit: 2,
+  });
   assert.equal(results.length, 2);
   assert.equal(truncated, true);
 });

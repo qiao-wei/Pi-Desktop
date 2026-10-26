@@ -8,6 +8,9 @@ import {
   selectRestorableQueuedEntries,
 } from "../src/features/chat/queuedComposerText.ts";
 import type { ChatMessage } from "../src/types/domain.ts";
+import { appSource } from "./lib/appSource.ts";
+import { functionBody } from "./lib/sourceText.ts";
+import { bridgeSource } from "./lib/bridgeSource.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 
@@ -119,7 +122,8 @@ test("usePiDesktopApp.stopTurn：停止前抓本地排队气泡，响应一到�
 });
 
 test("App：停止后按本地 parts 重建徽标退回输入框，最后才退化成原文", () => {
-  const source = readFileSync(join(ROOT, "src/app/App.tsx"), "utf8");
+  // `App.tsx` 现在是两行胶水：视图在 `AppShell.tsx`、回调在 `useAppModel.ts` → 读整个 `src/app/`。
+  const source = appSource();
 
   // 停止按钮区域（限定在 stop-button 附近）必须用 handleStopTurn
   const buttonRegion = sliceBetween(source, 'className="icon-button stop-button"', "send-button");
@@ -137,16 +141,18 @@ test("App：停止后按本地 parts 重建徽标退回输入框，最后才退�
   assert.match(appendBody, /composerAttachmentMapRef\.current\.set/);
   assert.match(appendBody, /composerCapabilityMapRef\.current\.set/);
 
-  const handleBody = sliceBetween(source, "async function handleStopTurn", "function insertAttachmentsAtCursor");
+  // 这两个函数现在不在同一个文件里（前者在 useAppTurn.ts、后者在 useAppComposerEditing.ts），
+  // 「两锚点之间切一段」会随文件顺序假红 → 直接取函数体。
+  const handleBody = functionBody(source, "handleStopTurn");
   assert.match(handleBody, /stopTurn\(\(cleared\) => restoreQueuedComposerMessages\(cleared\)\)/);
 });
 
 test("服务端契约：/api/stop 的 stopSession 必须把 clearQueue() 取出的原文放进响应", () => {
-  const source = readFileSync(join(ROOT, "server/index.mjs"), "utf8");
+  const source = bridgeSource();
   const stopSessionBody = sliceBetween(
     source,
     "async function stopSession(targetRuntime, options = {})",
-    "async function abortSession(session, { requestId, reason })",
+    "async function abortSession(session, { requestId, reason } = {})",
   );
   assert.match(stopSessionBody, /activeSession\.clearQueue\(\)/);
   assert.match(stopSessionBody, /clearedQueue,/);

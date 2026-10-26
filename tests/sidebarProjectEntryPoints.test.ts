@@ -16,19 +16,20 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
 import { en } from "../src/i18n/en.ts";
 import { zh } from "../src/i18n/zh.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 
 /** Source of a top-level `function name(...) { ... }`, delimited at the next flush-left brace. */
 function topLevelFunctionSource(name: string): string {
-  const start = appSource.indexOf(`function ${name}(`);
+  const start = appSourceText.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} is gone from App.tsx`);
-  const end = appSource.indexOf("\n}\n", start);
+  const end = appSourceText.indexOf("\n}\n", start);
   assert.notEqual(end, -1, `${name} body could not be delimited`);
-  return appSource.slice(start, end);
+  return appSourceText.slice(start, end);
 }
 
 function countOccurrences(haystack: string, needle: string): number {
@@ -83,7 +84,7 @@ test("动作簇的图标是一族 16px 画法，且顺序对齐 ZCode", () => {
 });
 
 test("文件树在左侧栏里，本体只有一份（App 组好整块传进来）", () => {
-  assert.equal(countOccurrences(appSource, "<FilesPane"), 1, "FilesPane 只许有一处实例：侧栏的文件树");
+  assert.equal(countOccurrences(appSourceText, "<FilesPane"), 1, "FilesPane 只许有一处实例：侧栏的文件树");
 
   const sidebar = topLevelFunctionSource("ProjectSidebar");
   assert.equal(countOccurrences(sidebar, "<FilesPane"), 0, "侧栏不许再抄一遍文件树");
@@ -95,7 +96,7 @@ test("文件树在左侧栏里，本体只有一份（App 组好整块传进来�
   assert.match(sidebar, /data-sidebar-file-tree/);
 
   // 侧栏不再有「文件」这个右面板 tab 的接线（那个视图搬走了：见 rightPanelTabs.test.ts）。
-  assert.doesNotMatch(appSource, /rightPanelTab:[\s\S]{0,200}"files"/);
+  assert.doesNotMatch(appSourceText, /rightPanelTab:[\s\S]{0,200}"files"/);
 });
 
 test("点别的项目上的入口会先切到那个项目（树与预览必须指向同一个项目）", () => {
@@ -111,9 +112,9 @@ test("点别的项目上的入口会先切到那个项目（树与预览必须�
 });
 
 test("技能/包弹窗里放的是那个共享面板，且一次只有一个", () => {
-  assert.equal(countOccurrences(appSource, "<ProjectCapabilitiesPanel"), 1, "面板的 call site 只许有一处");
-  assert.match(appSource, /open=\{Boolean\(capabilitiesDialogProjectId\)\}/);
-  assert.match(appSource, /onOpenChange=\{\(next\) => \{[\s\S]{0,120}?setCapabilitiesDialogProjectId\(""\)/);
+  assert.equal(countOccurrences(appSourceText, "<ProjectCapabilitiesPanel"), 1, "面板的 call site 只许有一处");
+  assert.match(appSourceText, /open=\{Boolean\(capabilitiesDialogProjectId\)\}/);
+  assert.match(appSourceText, /onOpenChange=\{\(next\) => \{[\s\S]{0,120}?setCapabilitiesDialogProjectId\(""\)/);
 });
 
 test("新加的两个图标画在侧栏同一套族谱上（不是另一个图标族）", () => {

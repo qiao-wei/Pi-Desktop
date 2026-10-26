@@ -166,6 +166,15 @@ function cacheKeyFor(path) {
  * `pathValue` is the effective PATH as inherited by the bridge. `ownDirs` are the entries this
  * app (or a previous launch) put in front of it - they are stripped before judging, otherwise
  * our own bundled node would be found as "the user's node" on every start.
+ *
+ * @param {{
+ *   pathValue?: string,
+ *   ownDirs?: string[],
+ *   bundled?: { node?: { bin?: string, npmCli?: string } | null, python?: { bin?: string, home?: string } | null },
+ *   forceSystem?: boolean,
+ *   platform?: NodeJS.Platform,
+ *   probe?: (candidate: { path: string }, kind: string) => { ok?: boolean, version?: string } | null | undefined,
+ * }} [options]
  */
 export function selectAgentRuntimes({
   pathValue,

@@ -1,4 +1,3 @@
-import { loadUiPreferences, saveUiPreferences } from "../lib/ui-preferences.ts";
 import { zh } from "./zh.ts";
 import { en } from "./en.ts";
 
@@ -22,7 +21,30 @@ import { en } from "./en.ts";
  */
 
 export type Locale = "zh" | "en";
+import type { LocalePreferencePort } from "../types/protocols.ts";
 export type LocalePreference = Locale | "auto";
+
+/**
+ * 语言偏好的持久化是**适配层**的事，不是 i18n 的事：这一层（foundation）不许 import 任何
+ * 会读磁盘/localStorage 的东西（架构规则 `layer-direction`）。谁在启动时把它接上？
+ * `src/main.tsx` 调 `installLocalePreferencePort()`（见 `src/lib/localePreferences.ts`）。
+ *
+ * 不接也不影响：没接的时候 i18n 只看环境变量与系统语言 —— 纯模块单测正是这种情况。
+ */
+// 契约在 `src/types/protocols.ts`（contracts 层）：i18n 是 foundation，不能向上依赖 protocol 层，
+// 而端口的契约要放在比它更低的层才合法。这里再导出一次，免得调用方多认一条路径。
+export type { LocalePreferencePort };
+
+let preferencePort: LocalePreferencePort | undefined;
+
+/** 装配点：适配层在启动时注入读写实现。传 `undefined` 可以卸下来（测试用）。 */
+export function configureLocalePreference(port: LocalePreferencePort | undefined): void {
+  preferencePort = port;
+  // 还没人问过当前语言时，按新读到的偏好重算；已经问过就不回滚用户当下的选择。
+  if (currentLocale === undefined) {
+    currentLocale = resolveInitialLocale();
+  }
+}
 
 const dictionaries: Record<Locale, Readonly<Record<string, string>>> = {
   zh: zh as Readonly<Record<string, string>>,
@@ -37,7 +59,7 @@ function detectSystemLocale(): Locale {
 }
 
 function resolveInitialLocale(): Locale {
-  const stored = loadUiPreferences().locale;
+  const stored = preferencePort?.read();
   if (stored === "zh" || stored === "en") {
     return stored;
   }
@@ -51,17 +73,23 @@ function resolveInitialLocale(): Locale {
   return detectSystemLocale();
 }
 
-let currentLocale: Locale = resolveInitialLocale();
+// 懒解析：首次真正需要语言时才问（那时 main.tsx 的装配已完成）；在此之前 setLocale() 的
+// 显式选择优先于任何读盘结果。
+let currentLocale: Locale | undefined;
+
+function locale(): Locale {
+  return (currentLocale ??= resolveInitialLocale());
+}
 
 const listeners = new Set<() => void>();
 
 export function getLocale(): Locale {
-  return currentLocale;
+  return locale();
 }
 
 /** UI-preferences-stored value: "zh" | "en", or undefined (follow the OS). */
 export function getLocalePreference(): LocalePreference {
-  return loadUiPreferences().locale ?? "auto";
+  return preferencePort?.read() ?? "auto";
 }
 
 export function setLocale(locale: Locale): void {
@@ -69,7 +97,7 @@ export function setLocale(locale: Locale): void {
     return;
   }
   currentLocale = locale;
-  saveUiPreferences({ locale });
+  preferencePort?.write(locale);
   for (const listener of listeners) {
     listener();
   }
@@ -94,7 +122,7 @@ function interpolate(template: string, params: TranslationParams | undefined): s
 }
 
 export function t(key: string, params?: TranslationParams): string {
-  const dictionary = dictionaries[currentLocale];
+  const dictionary = dictionaries[locale()];
   const template = dictionary[key] ?? dictionaries.zh[key];
   if (template === undefined) {
     return key;
@@ -107,5 +135,5 @@ export function t(key: string, params?: TranslationParams): string {
  * （见 shared/builtinCommandNotice.ts）。查表顺序与 `t` 完全一致，避免两者判断不一致。
  */
 export function hasTranslation(key: string): boolean {
-  return dictionaries[currentLocale][key] !== undefined || dictionaries.zh[key] !== undefined;
+  return dictionaries[locale()][key] !== undefined || dictionaries.zh[key] !== undefined;
 }

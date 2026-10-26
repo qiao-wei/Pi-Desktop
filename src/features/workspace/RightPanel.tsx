@@ -1,12 +1,6 @@
 import {
-  Blocks,
-  FileDiff,
-  FileText,
-  FolderTree,
-  GitCompare,
   Plus,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 
@@ -27,7 +21,6 @@ import { cn } from "@/lib/utils";
 
 import { PanelTabOverview } from "./PanelTabOverview";
 import {
-  DEFAULT_RIGHT_PANEL_TAB,
   RIGHT_PANEL_TAB_FRAME,
   RIGHT_PANEL_TOOL_TABS,
   toolTab,
@@ -35,6 +28,7 @@ import {
   type RightPanelTab,
   type RightPanelToolTabId,
 } from "./rightPanelTabs";
+import { PanelTabIcon } from "./PanelTabIcon";
 
 /**
  * 「一张 tab 都没有」（全被关掉）时，空状态内容在 `views` 里的 key。
@@ -43,25 +37,6 @@ import {
  * `views[""]` 好读，也免得和真实的 tab id 混淆。
  */
 export const EMPTY_RIGHT_PANEL_VIEW_ID = "__empty__";
-
-/**
- * tab → 图标。
- *
- * 图标留在组件侧：`rightPanelTabs.ts` 是给 `node --test` 用的纯表，不该为了一个图标去 import lucide。
- * 工具 tab 用和「新标签页」列表里**同一张表**（`RIGHT_PANEL_TOOL_TABS` 的顺序），所以两处不会跑偏。
- */
-const TOOL_TAB_ICON_ORDER: LucideIcon[] = [Blocks, FolderTree, GitCompare];
-
-export function PanelTabIcon({ tab, className }: { tab: RightPanelTab; className?: string }) {
-  const Icon =
-    tab.kind === "file"
-      ? tab.mode === "diff"
-        ? FileDiff
-        : FileText
-      : (TOOL_TAB_ICON_ORDER[RIGHT_PANEL_TOOL_TABS.findIndex((tool) => tool.id === tab.id)] ?? Blocks);
-
-  return <Icon aria-hidden="true" className={cn("size-3.5 shrink-0", className)} />;
-}
 
 /**
  * 一个 tab 的标题。

@@ -20,8 +20,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { RIGHT_PANEL_TAB_FRAME } from "../src/features/workspace/rightPanelTabs.ts";
+import { appSource as readAppSource } from "./lib/appSource.ts";
 
-const appSource = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appSourceText = readAppSource();
 const rightPanelSource = readFileSync(
   new URL("../src/features/workspace/RightPanel.tsx", import.meta.url),
   "utf8",
@@ -49,7 +50,7 @@ test("左侧项目栏和右侧面板用同一套窄屏定位，不会再次跑�
   // 收口用侧栏自己的 aria-label（语义终点），原来的收口是写死的阴影 class 字符串：
   // 阴影改走 `--app-*` token 后那种断言就只是「锁住实现细节」了。
   const sidebar = sliceBetween(
-    appSource,
+    appSourceText,
     '"project-sidebar-surface',
     'aria-label={t("sidebar.projectsAria")}',
   );

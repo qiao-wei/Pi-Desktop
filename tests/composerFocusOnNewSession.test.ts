@@ -12,8 +12,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { appSource } from "./lib/appSource.ts";
+import { functionBody } from "./lib/sourceText.ts";
 
-const appTsx = readFileSync(new URL("../src/app/App.tsx", import.meta.url), "utf8");
+const appTsx = appSource();
 
 /** 取 `start 标记` 到 `end 标记` 之间的源码区间，两边锚点都必须唯一。 */
 function region(source: string, startMark: string, endMark: string): string {
@@ -80,7 +82,7 @@ test("ProjectSidebar 声明并接收 onFocusComposer，App 用 composerEditorRef
 });
 
 test("程序化聚焦压住绿色聚焦框：聚焦前同步打 data-focus-quiet，用户一碰就摘掉", () => {
-  const focusFn = region(appTsx, "function focusComposerQuietly", "async function handleSubmit");
+  const focusFn = functionBody(appTsx, "focusComposerQuietly");
   // 属性必须在 focus() 之前设上：先 focus 再 setAttribute 会闪一帧绿框。
   assert.ok(
     focusFn.indexOf('setAttribute("data-focus-quiet", "true")') < focusFn.indexOf("editor.focus({"),
