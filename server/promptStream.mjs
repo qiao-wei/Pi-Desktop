@@ -6,6 +6,7 @@ import { corsHeaders } from "./cors.mjs";
 import { sessionDetails } from "./diagnosticsHelpers.mjs";
 import { readJson } from "./httpHelpers.mjs";
 import { usageFields } from "./modelHelpers.mjs";
+import { DELIVERY_POLICY } from "./protocolVersion.mjs";
 import { rewindSessionToTurn, shouldGenerateInitialTitle } from "./sessionHelpers.mjs";
 import { diagnosticLog } from "./sessionStoreFactory.mjs";
 import { displayTranscript } from "./sessionTranscript.mjs";
@@ -451,7 +452,13 @@ async function streamPrompt(req, res, requestId, options = {}) {
       closed,
       ...sessionDetails(activeRuntime),
     });
-    if (!wasStreaming && !closed && activeSession.isStreaming) {
+    // 断开策略是**档位上声明的值**（见 server/protocolVersion.mjs 的 DELIVERY_POLICY），
+    // 不是这里临时判的条件：`local-live` = 启动这一轮的请求断开即中止该轮；
+    // 将来的 `replayable` = 保持运行、为后来者保留事件（那时这里不需要再改条件）。
+    //
+    // `!wasStreaming` 那道门**不是**这条策略的一部分，而是"谁有权中止这一轮"的界定：
+    // 只有*启动*这一轮的请求断开才中止；后到的订阅者断开不动别人的 run。
+    if (DELIVERY_POLICY.onOwnerDisconnect === "abort-run" && !wasStreaming && !closed && activeSession.isStreaming) {
       diagnosticLog("prompt.client_close_abort.start", { requestId, ...sessionDetails(activeRuntime) });
       void abortSession(activeSession, { requestId, reason: "prompt_client_close" })
         .catch(() => undefined);

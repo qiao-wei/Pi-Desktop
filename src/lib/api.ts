@@ -23,7 +23,7 @@ import {
   setBridgeTransport,
 } from "./bridge/transport.ts";
 import type { TransportErrorCode } from "../shared/protocol/bridgeStreamFrames.ts";
-import { protocolMismatch } from "../shared/protocol/version.ts";
+import { deliveryProfileMismatch, protocolMismatch } from "../shared/protocol/version.ts";
 import { getStoragePort } from "./storage.ts";
 import type { BridgeHandshake } from "../shared/protocol/bridgeEndpoints.ts";
 
@@ -531,6 +531,11 @@ export async function probeBridgeProtocol(): Promise<BridgeHandshake> {
   const handshake = await transport.request<BridgeHandshake>("/api/protocol");
   // 只做校验（不匹配就抛），版本本身不用留 —— 留成变量会变成「只写不读」的死存储。
   assertProtocolVersion(handshake, "/api/protocol");
+  // 档位也只校验：认不出的档位**不能**照着"大概还是老行为"继续（缺声明同样算认不出）。
+  const profileMismatch = deliveryProfileMismatch(handshake?.deliveryProfile);
+  if (profileMismatch) {
+    throw new Error(`${profileMismatch.message} (path: /api/protocol)`);
+  }
   probedTransport = transport;
   return handshake as BridgeHandshake;
 }

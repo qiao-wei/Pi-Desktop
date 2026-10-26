@@ -26,6 +26,12 @@ export interface BridgeHandshake {
   protocolVersion: number;
   /** Bridge process id - useful when two bridges are alive and the UI talks to the wrong one. */
   pid?: number;
+  /**
+   * How this bridge delivers stream frames (`DeliveryProfile` in `./version.ts`).
+   * Declared, not inferred: a client must be able to refuse a profile it does not implement
+   * instead of assuming the frames will look like the ones it was built against.
+   */
+  deliveryProfile?: string;
 }
 
 export type BridgeEndpointTransport = "json" | "ndjson";

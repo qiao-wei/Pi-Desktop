@@ -22,7 +22,7 @@ import {
   reportDiagnostic,
   streamNdjson,
 } from "../src/lib/api.ts";
-import { PROTOCOL_VERSION } from "../src/shared/protocol/version.ts";
+import { DELIVERY_PROFILE, PROTOCOL_VERSION } from "../src/shared/protocol/version.ts";
 
 /** 一个最小但完整的假实现：证明上层只依赖接口，不依赖 fetch。 */
 class FakeTransport implements BridgeTransport {
@@ -79,7 +79,8 @@ function jsonResponse({ status = 200, body = "{}", etag = null as string | null 
 
 test("换掉 transport 后，上层的四个入口行为不变", async () => {
   const fake = new FakeTransport();
-  fake.responses.set("/api/protocol", { protocolVersion: PROTOCOL_VERSION });
+  // 假桥也必须像真桥那样声明投递档位：缺声明是"认不出"，客户端会拒绝继续（B6）。
+  fake.responses.set("/api/protocol", { protocolVersion: PROTOCOL_VERSION, deliveryProfile: DELIVERY_PROFILE });
   fake.responses.set("/api/bootstrap", { protocolVersion: PROTOCOL_VERSION, snapshot: { id: "s" } });
   fake.responses.set("/api/custom-models", { models: [] });
   setBridgeTransport(fake);

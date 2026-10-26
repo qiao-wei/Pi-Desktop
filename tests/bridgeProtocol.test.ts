@@ -5,7 +5,8 @@
  * - 两侧版本号字面量相等（改一侧不行）；
  * - 冻结表面既不能少一条客户端调用，也不能少一条桥路由；
  * - 握手分类函数在 `missing / older / newer / ok` 四种情况下都正确（含边界值）；
- * - `fetchBootstrap` 真的会在搬大包之前先握手，并且在版本不对时抛错而不是静默继续。
+ * - `fetchBootstrap` 真的会在搬大包之前先握手，并且在版本不对时抛错而不是静默继续；
+ * - 投递档位（B6）：桥**声明**它怎么投递帧，客户端认不出就拒绝继续（缺声明也算认不出）。
  */
 
 import assert from "node:assert/strict";
@@ -14,8 +15,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  DELIVERY_POLICIES,
+  DELIVERY_POLICY,
+  DELIVERY_PROFILE,
   PROTOCOL_VERSION,
+  checkDeliveryProfile,
   checkProtocolCompatibility,
+  deliveryProfileMessage,
+  deliveryProfileMismatch,
   protocolMismatch,
   protocolMismatchMessage,
 } from "../src/shared/protocol/version.ts";
@@ -84,6 +91,55 @@ test("不兼容时给出可操作的文案，兼容时为 null", () => {
   }
 });
 
+// 桥那一侧的声明：用 import 读真值，而不是拿正则去文件里找字面量
+// （正则那种写法"文件里写着但没人导出"也会假绿）。
+const bridgeDeclarations = await import("../server/protocolVersion.mjs");
+
+test("档位与断开策略两侧字面量相等，且每个档位都有行为声明", () => {
+  assert.equal(
+    bridgeDeclarations.DELIVERY_PROFILE,
+    DELIVERY_PROFILE,
+    "桥声明的档位必须与渲染层认识的那个字符串逐字相等",
+  );
+  assert.deepEqual(
+    bridgeDeclarations.DELIVERY_POLICY,
+    DELIVERY_POLICY,
+    "桥声明的断开策略必须与共享的那条逐字相等（处理器里的分支由它驱动）",
+  );
+  assert.ok(DELIVERY_POLICIES[DELIVERY_PROFILE], "本 UI 声明的档位必须有行为声明");
+  for (const [id, policy] of Object.entries(DELIVERY_POLICIES)) {
+    assert.ok(
+      policy.onOwnerDisconnect === "abort-run" || policy.onOwnerDisconnect === "keep-running",
+      `${id} 的 onOwnerDisconnect 必须是有限取值，不能是随手写的字符串`,
+    );
+    assert.equal(typeof policy.retainsFramesAfterOwnerLeaves, "boolean", `${id} 必须声明有没有保留`);
+  }
+});
+
+test("档位分类：认识的 ok；缺声明与不认识的都算不兼容（不许静默降级）", () => {
+  assert.equal(checkDeliveryProfile(DELIVERY_PROFILE), "ok");
+  assert.equal(checkDeliveryProfile(undefined), "missing");
+  assert.equal(checkDeliveryProfile(null), "missing");
+  assert.equal(checkDeliveryProfile(""), "missing");
+  assert.equal(
+    checkDeliveryProfile("replayable"),
+    "unsupported",
+    "未实现的档位必须显式判为不支持——照着旧假设继续正是会变成静默错帧的那种假设",
+  );
+
+  assert.equal(deliveryProfileMismatch(DELIVERY_PROFILE), null);
+  const unsupported = deliveryProfileMismatch("replayable");
+  assert.ok(unsupported);
+  assert.match(unsupported.message, /replayable/);
+  assert.match(unsupported.message, new RegExp(DELIVERY_PROFILE));
+  assert.equal(unsupported.message, deliveryProfileMessage("unsupported", "replayable"));
+
+  const missing = deliveryProfileMismatch(undefined);
+  assert.ok(missing);
+  assert.match(missing.message, /Delivery profile mismatch/);
+  assert.match(missing.message, /bridge:sync|restart/i);
+});
+
 test("手写核心端点都在桥里实现，路径不重复", () => {
   const routes = extractBridgeRoutes(bridgeSource());
   const seen = new Set();
@@ -122,7 +178,7 @@ test("冻结表面覆盖两个方向（客户端调用点 与 桥路由）", () 
 test("fetchBootstrap 先握手再搬包；版本不对时抛错而不是继续", async () => {
   const good = fakeTransport({
     responses: {
-      "/api/protocol": { protocolVersion: PROTOCOL_VERSION, pid: 123 },
+      "/api/protocol": { protocolVersion: PROTOCOL_VERSION, pid: 123, deliveryProfile: DELIVERY_PROFILE },
       "/api/bootstrap": { protocolVersion: PROTOCOL_VERSION, snapshot: {}, projects: [] },
     },
   });
@@ -157,6 +213,31 @@ test("fetchBootstrap 先握手再搬包；版本不对时抛错而不是继续",
     }),
   );
   await assert.rejects(() => probeBridgeProtocol(), /Protocol mismatch/);
+
+  // 版本对得上但档位不认识：同样不许继续（新档位是新语义，不是新字段）
+  setBridgeTransport(
+    fakeTransport({
+      responses: { "/api/protocol": { protocolVersion: PROTOCOL_VERSION, deliveryProfile: "replayable" } },
+    }),
+  );
+  await assert.rejects(() => probeBridgeProtocol(), /Delivery profile mismatch/);
+
+  // 档位没声明：也算认不出（旧桥的可能形态，说人话让人去重启/同步）
+  setBridgeTransport(
+    fakeTransport({ responses: { "/api/protocol": { protocolVersion: PROTOCOL_VERSION } } }),
+  );
+  await assert.rejects(() => probeBridgeProtocol(), /Delivery profile mismatch/);
+
+  // 两侧都说对了才放行
+  setBridgeTransport(
+    fakeTransport({
+      responses: {
+        "/api/protocol": { protocolVersion: PROTOCOL_VERSION, deliveryProfile: DELIVERY_PROFILE },
+      },
+    }),
+  );
+  const handshake = await probeBridgeProtocol();
+  assert.equal(handshake.deliveryProfile, DELIVERY_PROFILE);
 
   setBridgeTransport(null);
 });

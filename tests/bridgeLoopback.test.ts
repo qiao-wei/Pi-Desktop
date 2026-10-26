@@ -16,7 +16,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { PROTOCOL_VERSION } from "../src/shared/protocol/version.ts";
+import { DELIVERY_PROFILE, PROTOCOL_VERSION } from "../src/shared/protocol/version.ts";
 import { createLoopbackBridgeTransport, type BridgeRequestMessage } from "../src/lib/bridge/loopback.ts";
 import { createHttpBridgeTransport } from "../src/lib/bridge/transport.ts";
 import { setBridgeTransport } from "../src/lib/bridge/transport.ts";
@@ -47,7 +47,11 @@ function inProcessBridge() {
     });
 
     if (message.path === "/api/protocol") {
-      return { status: 200, body: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, pid: 42 }) };
+      // 与真桥同形：握手声明版本 + 投递档位（缺档位会被客户端判为"认不出"）。
+      return {
+        status: 200,
+        body: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, pid: 42, deliveryProfile: DELIVERY_PROFILE }),
+      };
     }
 
     if (message.path === "/api/bootstrap") {

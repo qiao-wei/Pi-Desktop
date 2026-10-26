@@ -109,8 +109,12 @@ export function createRunStreams(options = {}) {
           sink.write(payload);
         }
         sinks.add(sink);
+        // 订阅者自己走了：只摘它这一条。run 归提交者所有，别人的流不受影响。
+        const drop = () => sinks.delete(sink);
+        res.once?.("close", drop);
         return {
           close() {
+            res.off?.("close", drop);
             sinks.delete(sink);
             return sink.close();
           },

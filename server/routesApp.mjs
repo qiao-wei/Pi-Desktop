@@ -6,7 +6,7 @@ import { requestModelListing, resolveListingApiKey } from "./customModels.mjs";
 import { corsHeaders } from "./cors.mjs";
 import { sanitizeDiagnosticDetails, sessionDetails } from "./diagnosticsHelpers.mjs";
 import { readJson, sendBootstrapJson } from "./httpHelpers.mjs";
-import { PROTOCOL_VERSION } from "./protocolVersion.mjs";
+import { DELIVERY_PROFILE, PROTOCOL_VERSION } from "./protocolVersion.mjs";
 import { diagnosticLog } from "./sessionStoreFactory.mjs";
 import { searchResultLimit, sendJson } from "./smallHelpers.mjs";
 
@@ -77,7 +77,13 @@ export function createRoutesApp(state, deps) {
 async function handle_get_api_protocol(ctx) {
       // 握手：哪个协议版本的 bridge 在应答。刻意不构建快照（那要几百 KB 和一次 md5），
       // 所以渲染进程可以在接管任何状态之前、用最便宜的一条请求先问清楚。
-      sendJson(ctx.res, 200, { protocolVersion: PROTOCOL_VERSION, pid: process.pid });
+      // `deliveryProfile` 是**声明**而不是推测：客户端据此判断"我认不认识这种投递方式"，
+      // 认不出就该停下来说话（见 src/shared/protocol/version.ts 的 checkDeliveryProfile）。
+      sendJson(ctx.res, 200, {
+        protocolVersion: PROTOCOL_VERSION,
+        pid: process.pid,
+        deliveryProfile: DELIVERY_PROFILE,
+      });
       return;
 }
 

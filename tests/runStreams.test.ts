@@ -19,15 +19,26 @@ function fakeResponse() {
     written: [],
     ended: false,
     destroyed: false,
+    listeners: new Map(),
     write(text) {
       this.written.push(text);
       return true;
     },
-    once() {
+    once(event, listener) {
+      const set = this.listeners.get(event) ?? new Set();
+      set.add(listener);
+      this.listeners.set(event, set);
       return this;
     },
-    off() {
+    off(event, listener) {
+      this.listeners.get(event)?.delete(listener);
       return this;
+    },
+    close() {
+      this.destroyed = true;
+      for (const listener of [...(this.listeners.get("close") ?? [])]) {
+        listener();
+      }
     },
     end() {
       this.ended = true;
@@ -126,6 +137,23 @@ test("close() 收尾每一个 sink，之后这条 run 不再可订阅", async ()
   assert.equal(first.ended, true);
   assert.equal(second.ended, true, "订阅者那一条也要收尾，否则它会一直等一个不会再来的 done");
   assert.deepEqual(run.plan(1).kind, "closed");
+});
+
+test("订阅者那条 socket 关掉时，它的 sink 立刻从扇出里摘掉", async () => {
+  const run = createRunStreams().open({ runId: "r1", sessionPath: "/tmp/s.jsonl" });
+  const owner = fakeResponse();
+  const subscriber = fakeResponse();
+  run.attach(owner, run.plan(1));
+  run.attach(subscriber, run.plan(1));
+
+  // 断线：response 被 destroyed 并发出 close（真实 Node 就是这个形态）。
+  subscriber.destroyed = true;
+  subscriber.close();
+  run.publish({ type: "delta", text: "a" });
+  await settle();
+
+  assert.deepEqual(frames(subscriber), [], "已经关掉的 response 不该再收到帧");
+  assert.equal(frames(owner).length, 1, "别的订阅者照收");
 });
 
 test("订阅者只摘自己的 sink：它断开不影响这条 run", async () => {

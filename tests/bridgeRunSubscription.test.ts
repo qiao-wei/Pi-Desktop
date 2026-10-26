@@ -13,55 +13,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { startE2E } from "../e2e/lib/bridge.mjs";
-
-/**
- * 逐条读 NDJSON。`next()` 拿一条（流结束返回 null），`rest()` 收完剩下的。
- * 之所以不能直接用 `response.text()`：这个用例必须在**这一轮还没跑完时**接上去。
- */
-function ndjson(response) {
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let ended = false;
-
-  const next = async () => {
-    for (;;) {
-      const newline = buffer.indexOf("\n");
-      if (newline >= 0) {
-        const line = buffer.slice(0, newline).trim();
-        buffer = buffer.slice(newline + 1);
-        if (line) {
-          return JSON.parse(line);
-        }
-        continue;
-      }
-      if (ended) {
-        const tail = buffer.trim();
-        buffer = "";
-        return tail ? JSON.parse(tail) : null;
-      }
-      const chunk = await reader.read();
-      if (chunk.done) {
-        ended = true;
-        continue;
-      }
-      buffer += decoder.decode(chunk.value, { stream: true });
-    }
-  };
-
-  const rest = async () => {
-    const frames = [];
-    for (;;) {
-      const frame = await next();
-      if (frame === null) {
-        return frames;
-      }
-      frames.push(frame);
-    }
-  };
-
-  return { next, rest };
-}
+import { ndjson } from "./lib/ndjsonStream.ts";
 
 /** 期望 200：失败时把响应体贴出来（成功时**不要**碰 body，那会把流锁掉）。 */
 async function expectOk(response, label) {

@@ -5,7 +5,7 @@ import { once } from "node:events";
 
 import { ALLOWED_REQUEST_HEADERS, respondToPreflight, setCors } from "../server/cors.mjs";
 import { fetchBootstrap } from "../src/lib/api.ts";
-import { PROTOCOL_VERSION } from "../src/shared/protocol/version.ts";
+import { DELIVERY_PROFILE, PROTOCOL_VERSION } from "../src/shared/protocol/version.ts";
 
 /**
  * 现象：会话结束后前端 console 报
@@ -130,7 +130,7 @@ test("every header the client sends is in the server allow-list", async () => {
   globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
     calls.push(Object.fromEntries(new Headers(init.headers as HeadersInit | undefined).entries()));
     if (String(url).endsWith("/api/protocol")) {
-      return respond({ protocolVersion: PROTOCOL_VERSION, pid: 1 });
+      return respond({ protocolVersion: PROTOCOL_VERSION, pid: 1, deliveryProfile: DELIVERY_PROFILE });
     }
     return respond({ protocolVersion: PROTOCOL_VERSION, ok: true });
   }) as typeof fetch;
@@ -142,7 +142,7 @@ test("every header the client sends is in the server allow-list", async () => {
     globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
       calls.push(Object.fromEntries(new Headers(init.headers as HeadersInit | undefined).entries()));
       if (String(url).endsWith("/api/protocol")) {
-        return respond({ protocolVersion: PROTOCOL_VERSION, pid: 1 });
+        return respond({ protocolVersion: PROTOCOL_VERSION, pid: 1, deliveryProfile: DELIVERY_PROFILE });
       }
       return new Response(null, { status: 304, headers: { ETag: '"v1"' } });
     }) as typeof fetch;    assert.equal(await fetchBootstrap(), null);
