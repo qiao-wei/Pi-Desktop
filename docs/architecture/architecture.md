@@ -103,7 +103,7 @@ ZCode 的 UI 包与 agent 包之间没有这种共享内核；我们把它变成
 
 <!-- architecture:begin surface -->
 - 边界协议版本：**v1**（渲染进程与 bridge 两侧各有一个字面量，检查器要求相等）
-- 冻结的协议表面：**100** 条路由（`architecture/generated/bridge-surface.json`）
+- 冻结的协议表面：**101** 条路由（`architecture/generated/bridge-surface.json`）
 - bridge 实际应答：**undefined** 条；渲染进程命名：**95** 条
 - 扫描范围：`src`, `server`, `src-electron`, `e2e`
 <!-- architecture:end surface -->

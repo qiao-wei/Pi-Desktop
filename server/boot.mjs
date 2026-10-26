@@ -6,6 +6,7 @@ import { bridgeUrlFor, isPortExplicit, preferredPort } from "./bridgeListen.mjs"
 import { readJsonFile } from "./httpHelpers.mjs";
 import { createModelLoginBroker } from "./modelLogin.mjs";
 import { ModelRuntime, SettingsManager, initTheme, runPiCli } from "./piKernel.mjs";
+import { createRunStreams } from "./runStreams.mjs";
 import { createProjectId } from "./sessionHelpers.mjs";
 import { normalizeComposerDefaults } from "./sessionModelPolicy.mjs";
 import { agentDir, createSessionStore, diagnosticLines, diagnosticLog, diagnosticLogFile, diagnosticsEnabled, projectSessionRoot } from "./sessionStoreFactory.mjs";
@@ -49,6 +50,8 @@ const portWasRequested = isPortExplicit(process.env);
  *   （复用已开的会话），写成 `ReturnType<typeof createRuntime>` 会形成循环注解（TS2502）。
  * @property {Promise<unknown>} skillReloadQueue
  * @property {Set<string> | null} builtInProviderIdCache
+ * @property {ReturnType<typeof createRunStreams>} runStreams —— 进行中的 run 与它们的帧日志
+ *   （提交那条流是 sink #1，`POST /api/runs/stream` 接的是后来的。见 server/runStreams.mjs）
  */
 /** @type {BridgeState} */
 const state = /** @type {BridgeState} */ (/** @type {unknown} */ ({
@@ -60,6 +63,7 @@ const state = /** @type {BridgeState} */ (/** @type {unknown} */ ({
   runtime: null,
   skillReloadQueue: Promise.resolve(),
   builtInProviderIdCache: null,
+  runStreams: createRunStreams(),
 }));
 
 const searchDocumentCache = new Map();

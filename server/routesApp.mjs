@@ -3,6 +3,7 @@ import { assertBridgePayload } from "../src/shared/protocol/bridgeMessages.ts";
 import { normalizeSearchQuery } from "../src/shared/sessionSearch.ts";
 import { parseMcpImportRequest } from "./capabilityMetadata.mjs";
 import { requestModelListing, resolveListingApiKey } from "./customModels.mjs";
+import { corsHeaders } from "./cors.mjs";
 import { sanitizeDiagnosticDetails, sessionDetails } from "./diagnosticsHelpers.mjs";
 import { readJson, sendBootstrapJson } from "./httpHelpers.mjs";
 import { PROTOCOL_VERSION } from "./protocolVersion.mjs";
@@ -249,6 +250,49 @@ async function handle_post_api_capabilities_package_command_arguments(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/package/command"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_package_command(ctx) {
       await streamCapabilityPackageCommand(ctx.req, ctx.res);
+      return;
+}
+
+/** 路由处理器：req.method === "POST" && url.pathname === "/api/runs/stream"（订阅一条进行中的 run） */
+async function handle_post_api_runs_stream(ctx) {
+      const body = await readJson(ctx.req);
+      const runId = String(body?.runId ?? "").trim();
+      const requestedSessionPath = String(body?.sessionPath ?? "").trim();
+      const run = runId ? state.runStreams.get(runId) : undefined;
+      // runId 是随机的：把"从来没有过"和"已经结束"合并成同一个回答，不给探测留缝。
+      if (!run) {
+        sendJson(ctx.res, 404, { error: "Unknown run: it never existed or has already finished." });
+        return;
+      }
+      if (requestedSessionPath && run.sessionPath !== requestedSessionPath) {
+        sendJson(ctx.res, 403, { error: "This run belongs to a different session." });
+        return;
+      }
+      const plan = run.plan(body?.fromSeq);
+      if (plan.kind === "closed") {
+        sendJson(ctx.res, 404, { error: "Unknown run: it never existed or has already finished." });
+        return;
+      }
+      if (plan.kind === "beyond") {
+        sendJson(ctx.res, 400, { error: `fromSeq ${plan.fromSeq} is ahead of this run (last frame ${plan.seq}).` });
+        return;
+      }
+      if (plan.kind === "truncated") {
+        // 明说"服务不了"，让客户端走 bootstrap 重新同步。静默从中间接上会留一段看不见的洞。
+        sendJson(ctx.res, 409, {
+          error: `frame ${plan.fromSeq} is no longer in this run's log (earliest available ${plan.oldestSeq}); resync through bootstrap instead.`,
+        });
+        return;
+      }
+      ctx.res.writeHead(200, {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        ...corsHeaders(),
+      });
+      // 接上之后这条流不属于"提交那个请求"：它断开只摘自己的 sink（run 归提交者所有）。
+      run.attach(ctx.res, plan);
+      diagnosticLog("run.subscribe", { requestId: ctx.requestId, runId, fromSeq: plan.fromSeq });
       return;
 }
 
@@ -583,5 +627,5 @@ async function handle_post_api_messages_edit(ctx) {
       return;
 }
 
-  return { handle_get_api_attachments, handle_get_api_bootstrap, handle_get_api_capabilities, handle_get_api_custom_models, handle_get_api_local_media, handle_get_api_model_providers, handle_get_api_model_providers_x, handle_get_api_models, handle_get_api_protocol, handle_get_api_search, handle_get_api_skills_content, handle_post, handle_post_api_builtin_command, handle_post_api_capabilities_default, handle_post_api_capabilities_extension_add, handle_post_api_capabilities_extension_remove, handle_post_api_capabilities_mcp_import, handle_post_api_capabilities_mcp_inspect, handle_post_api_capabilities_mcp_read, handle_post_api_capabilities_mcp_remove, handle_post_api_capabilities_mcp_save, handle_post_api_capabilities_package_command, handle_post_api_capabilities_package_command_arguments, handle_post_api_capabilities_package_file, handle_post_api_capabilities_package_install, handle_post_api_capabilities_package_remove, handle_post_api_capabilities_package_resources, handle_post_api_capabilities_package_update, handle_post_api_capabilities_pin, handle_post_api_capabilities_session_extension, handle_post_api_capabilities_session_package, handle_post_api_capabilities_session_skill, handle_post_api_capabilities_skills_delete, handle_post_api_capabilities_skills_import, handle_post_api_compact, handle_post_api_custom_models, handle_post_api_custom_models_key, handle_post_api_custom_models_reload, handle_post_api_custom_models_remove, handle_post_api_custom_models_test, handle_post_api_diagnostic, handle_post_api_extension_ui_response, handle_post_api_messages_edit, handle_post_api_model, handle_post_api_model_providers_discover, handle_post_api_model_providers_login_cancel, handle_post_api_model_providers_login_respond, handle_post_api_model_providers_update, handle_post_api_personalization, handle_post_api_prompt, handle_post_api_skills_reload, handle_post_api_stop, handle_post_api_thinking_level, handle_post_api_tools_settings, handle_post_x, handle_post_x_x };
+  return { handle_get_api_attachments, handle_get_api_bootstrap, handle_get_api_capabilities, handle_get_api_custom_models, handle_get_api_local_media, handle_get_api_model_providers, handle_get_api_model_providers_x, handle_get_api_models, handle_get_api_protocol, handle_get_api_search, handle_get_api_skills_content, handle_post, handle_post_api_builtin_command, handle_post_api_capabilities_default, handle_post_api_capabilities_extension_add, handle_post_api_capabilities_extension_remove, handle_post_api_capabilities_mcp_import, handle_post_api_capabilities_mcp_inspect, handle_post_api_capabilities_mcp_read, handle_post_api_capabilities_mcp_remove, handle_post_api_capabilities_mcp_save, handle_post_api_capabilities_package_command, handle_post_api_capabilities_package_command_arguments, handle_post_api_capabilities_package_file, handle_post_api_capabilities_package_install, handle_post_api_capabilities_package_remove, handle_post_api_capabilities_package_resources, handle_post_api_capabilities_package_update, handle_post_api_capabilities_pin, handle_post_api_capabilities_session_extension, handle_post_api_capabilities_session_package, handle_post_api_capabilities_session_skill, handle_post_api_capabilities_skills_delete, handle_post_api_capabilities_skills_import, handle_post_api_compact, handle_post_api_custom_models, handle_post_api_custom_models_key, handle_post_api_custom_models_reload, handle_post_api_custom_models_remove, handle_post_api_custom_models_test, handle_post_api_diagnostic, handle_post_api_extension_ui_response, handle_post_api_messages_edit, handle_post_api_model, handle_post_api_model_providers_discover, handle_post_api_model_providers_login_cancel, handle_post_api_model_providers_login_respond, handle_post_api_model_providers_update, handle_post_api_personalization, handle_post_api_prompt, handle_post_api_runs_stream, handle_post_api_skills_reload, handle_post_api_stop, handle_post_api_thinking_level, handle_post_api_tools_settings, handle_post_x, handle_post_x_x };
 }

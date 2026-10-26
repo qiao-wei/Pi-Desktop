@@ -48,19 +48,21 @@ function waitForDrain(res) {
  * 造一个写入器。调用方只做两件事：`write(payload)`（不 await，顺序由队列保证）和 `close()`。
  *
  * @param {any} res Node 的 `ServerResponse`（或测试里的同形替身）。
- * @param {{ maxPendingBytes?: number, runId?: string }} [options] `runId` 给了就压在每一帧上：
+ * @param {{ maxPendingBytes?: number, runId?: string, startSeq?: number }} [options] `runId` 给了就压在每一帧上：
  *   帧的归属和序号一样"不能后加"——没带归属的帧发出去之后，谁也不知道它属于哪一次运行。
  */
 export function createFrameWriter(res, options = {}) {
   const maxPendingBytes = options.maxPendingBytes ?? DEFAULT_MAX_PENDING_BYTES;
   const runId = options.runId;
+  // `startSeq` 让"从第 N 条接上"的 sink 与 run 的编号严丝合缝（见 server/runStreams.mjs）：
+  // 它不重新从 1 数，而是接着说客户端已经收到的那条。
   /** @type {Array<{ text: string, bytes: number }>} */
   const queue = [];
   /** 已排队的字节。 */
   let queuedBytes = 0;
   /** 已交给 socket、但还没等到 `drain` 的字节（Node 已经收下了，只是还没发出去）。 */
   let awaitingBytes = 0;
-  let seq = 0;
+  let seq = options.startSeq ?? 0;
   let closed = false;
   let overflowed = false;
   /** 上次 flush 的尾：每次入队接在它后面，顺序有保证，也不会漏掉"上一轮已经跑完"时才入队的帧。 */

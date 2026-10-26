@@ -3,7 +3,6 @@ import { domainErrorFrame } from "../src/shared/protocol/bridgeStreamFrames.ts";
 import { appendAttachmentContext, sanitizeAttachmentName } from "./attachmentHelpers.mjs";
 import { normalizeMessageParts } from "./conversationParts.mjs";
 import { corsHeaders } from "./cors.mjs";
-import { createFrameWriter } from "./frameWriter.mjs";
 import { sessionDetails } from "./diagnosticsHelpers.mjs";
 import { readJson } from "./httpHelpers.mjs";
 import { usageFields } from "./modelHelpers.mjs";
@@ -124,15 +123,20 @@ async function streamPrompt(req, res, requestId, options = {}) {
   // message interleaves text and tool calls around the thinking.
   const thinkingStreamKeyOf = (contentIndex) =>
     `assistant-${assistantMessageStreamIndex}-thinking-${contentIndex}`;
-  // 帧的归属（runId）、序号、背压、待发上限和收尾都在写入器里（见 server/frameWriter.mjs）。
-  // `writeEvent` 不 await：顺序由写入器内部的队列保证，背压只影响它什么时候真的发出去。
+  // 帧的归属（runId）、序号、背压、待发上限和收尾都在 run 的帧日志里
+  // （见 server/runStreams.mjs / server/frameWriter.mjs）。`writeEvent` 不 await：
+  // 顺序由队列保证，背压只影响它什么时候真的发出去。
   //
   // `runId` 是这一次**流**的身份，不是请求身份：pi 的一次运行可以被多个请求看见（插话那轮只有
   // 确认帧，真正的帧来自启动它的那个请求），而"我要续订哪条流"问的是后者。它是一个随机值，
   // 因为它要跨进程边界被客户端回传，语义上不该能猜。
+  //
+  // 提交的这个 response **就是第一个订阅者**（也是这条 run 的 owner：它断开即中止这一轮）。
+  // 后来者走 `POST /api/runs/stream`，从同一份日志补齐——所以"提交"与"订阅"是两件事。
   const runId = randomUUID();
-  const frames = createFrameWriter(res, { runId });
-  const writeEvent = (payload) => frames.write(payload);
+  const run = state.runStreams.open({ runId, sessionPath: activeSession.sessionFile });
+  run.attach(res, run.plan(1));
+  const writeEvent = (payload) => run.publish(payload);
   // 回退后先播一次权威快照：旧轮次从 UI 消失、剩下来的轮次编号与新 stream 一致，
   // 否则新 prompt 的 `t{turn}#...` 事件会和客户端里还没清掉的旧轮次撞号。
   if (options.rewindTurn != null) {
@@ -488,8 +492,9 @@ async function streamPrompt(req, res, requestId, options = {}) {
       // queue insert (the run keeps going) or actually ended the run.
       writeEvent({ type: "done", lifecycle: wasStreaming ? "queued" : "run" });
       closed = true;
-      // 排空队列再 end：背压期间 `done` 可能还在队列里，直接 end 会把尾帧切掉。
-      await frames.close();
+      // 收尾这条 run 的**每一个** sink（自己的队列排空 + end，含后来接上的订阅者）：
+      // 背压期间 `done` 可能还在队列里，直接 end 会把尾帧切掉。
+      await run.close();
     }
     diagnosticLog("prompt.success", {
       requestId,
@@ -511,7 +516,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
     if (!closed) {
       writeEvent(domainErrorFrame(message));
       closed = true;
-      await frames.close();
+      await run.close();
     }
   } finally {
     diagnosticLog("prompt.finally", { requestId, closed, ...sessionDetails(activeRuntime) });

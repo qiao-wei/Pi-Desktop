@@ -834,6 +834,14 @@
         "src/lib/api.ts"
       ]
     },
+    "/api/runs/stream": {
+      "methods": [
+        "POST"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": []
+    },
     "/api/search": {
       "methods": [
         "GET",

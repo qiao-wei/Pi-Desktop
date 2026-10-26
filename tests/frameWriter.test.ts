@@ -189,6 +189,18 @@ test("没有 runId 的写入器不加这个字段（进度流的帧形状不变�
   assert.deepEqual(parse(res.written), [{ type: "done", streamSeq: 1 }]);
 });
 
+test("startSeq 播种：订阅者从第 N 条接上时，第一条就是 N（不是重新从 1 数）", async () => {
+  const res = fakeResponse();
+  const frames = createFrameWriter(res, { runId: "run-1", startSeq: 4 });
+
+  frames.write({ type: "delta", text: "e" });
+  await settle();
+
+  assert.deepEqual(parse(res.written), [
+    { type: "delta", text: "e", runId: "run-1", streamSeq: 5 },
+  ]);
+});
+
 test("close() 先把排队的帧写完再 end()，尾帧不会因为 end() 掉在半路", async () => {
   const res = fakeResponse();
   const frames = createFrameWriter(res);
