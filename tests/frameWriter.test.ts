@@ -165,6 +165,30 @@ test("上限只产出一帧 overflow，之后不再收帧，而且它必须是�
   assert.ok(written.length < 20, `越限之后不许再堆帧（实际写了 ${written.length} 帧）`);
 });
 
+test("带上 runId 时每一帧都带它，而且 payload 盖不掉", async () => {
+  const res = fakeResponse();
+  const frames = createFrameWriter(res, { runId: "run-1" });
+
+  frames.write({ type: "delta", text: "a", runId: "骗人的" });
+  frames.write({ type: "done" });
+  await settle();
+
+  assert.deepEqual(parse(res.written), [
+    { type: "delta", text: "a", runId: "run-1", streamSeq: 1 },
+    { type: "done", runId: "run-1", streamSeq: 2 },
+  ]);
+});
+
+test("没有 runId 的写入器不加这个字段（进度流的帧形状不变）", async () => {
+  const res = fakeResponse();
+  const frames = createFrameWriter(res);
+
+  frames.write({ type: "done" });
+  await settle();
+
+  assert.deepEqual(parse(res.written), [{ type: "done", streamSeq: 1 }]);
+});
+
 test("close() 先把排队的帧写完再 end()，尾帧不会因为 end() 掉在半路", async () => {
   const res = fakeResponse();
   const frames = createFrameWriter(res);

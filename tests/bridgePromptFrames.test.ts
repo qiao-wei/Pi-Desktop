@@ -37,6 +37,20 @@ test("一轮对话的每一帧都带连续递增的 streamSeq，并以 done 收�
     const done = frames.at(-1);
     assert.equal(done.type, "done");
     assert.equal(done.lifecycle, "run");
+
+    // 帧的归属：这一轮的所有帧都认同一个 runId，下一轮换一个。
+    // 没有它，已经发出去的帧永远无法归到某一次运行上（订阅/重连只能全量重发）。
+    const runIds = new Set(frames.map((frame) => frame.runId));
+    assert.equal(runIds.size, 1, `同一轮的帧必须只有一个 runId（实际 ${JSON.stringify([...runIds])}）`);
+    assert.equal(typeof [...runIds][0], "string");
+
+    const nextRun = await e2e.api.prompt({ input: "again" });
+    assert.notEqual(nextRun[0].runId, [...runIds][0], "下一轮必须是新的 runId");
+    assert.deepEqual(
+      nextRun.map((frame) => frame.streamSeq),
+      nextRun.map((_, index) => index + 1),
+      "第二轮同样从 1 开始编号",
+    );
   } catch (error) {
     const logs = e2e.logs();
     throw new Error(`${error instanceof Error ? error.message : String(error)}\n${logs.stdout}\n${logs.stderr}`);

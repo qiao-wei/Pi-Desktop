@@ -270,6 +270,11 @@ export interface PromptStreamEvent {
   code?: TransportErrorCode;
   /** run 内的帧序号：单调递增、不跳号。传输错误没有（那一行没解析出来，无从寻址）。 */
   streamSeq?: number;
+  /**
+   * 这一帧属于哪一次运行（同一轮的帧共用一个值）。
+   * 与 `streamSeq` 一起构成「回到这条流」的地址：`(runId, 我收到 N 了)`。
+   */
+  runId?: string;
   id?: string;
   method?: "select" | "confirm" | "input" | "editor" | "notify" | "setStatus" | "setWidget" | "setTitle" | "set_editor_text" | "custom" | "web";
   title?: string;

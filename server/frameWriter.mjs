@@ -48,10 +48,12 @@ function waitForDrain(res) {
  * 造一个写入器。调用方只做两件事：`write(payload)`（不 await，顺序由队列保证）和 `close()`。
  *
  * @param {any} res Node 的 `ServerResponse`（或测试里的同形替身）。
- * @param {{ maxPendingBytes?: number }} [options]
+ * @param {{ maxPendingBytes?: number, runId?: string }} [options] `runId` 给了就压在每一帧上：
+ *   帧的归属和序号一样"不能后加"——没带归属的帧发出去之后，谁也不知道它属于哪一次运行。
  */
 export function createFrameWriter(res, options = {}) {
   const maxPendingBytes = options.maxPendingBytes ?? DEFAULT_MAX_PENDING_BYTES;
+  const runId = options.runId;
   /** @type {Array<{ text: string, bytes: number }>} */
   const queue = [];
   /** 已排队的字节。 */
@@ -68,7 +70,7 @@ export function createFrameWriter(res, options = {}) {
 
   const enqueue = (payload) => {
     seq += 1;
-    const text = `${JSON.stringify({ ...payload, streamSeq: seq })}\n`;
+    const text = `${JSON.stringify({ ...payload, ...(runId ? { runId } : {}), streamSeq: seq })}\n`;
     const bytes = Buffer.byteLength(text);
     queue.push({ text, bytes });
     queuedBytes += bytes;

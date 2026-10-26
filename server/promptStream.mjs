@@ -124,9 +124,14 @@ async function streamPrompt(req, res, requestId, options = {}) {
   // message interleaves text and tool calls around the thinking.
   const thinkingStreamKeyOf = (contentIndex) =>
     `assistant-${assistantMessageStreamIndex}-thinking-${contentIndex}`;
-  // 帧的序号、背压、待发上限和收尾都在写入器里（见 server/frameWriter.mjs）。
+  // 帧的归属（runId）、序号、背压、待发上限和收尾都在写入器里（见 server/frameWriter.mjs）。
   // `writeEvent` 不 await：顺序由写入器内部的队列保证，背压只影响它什么时候真的发出去。
-  const frames = createFrameWriter(res);
+  //
+  // `runId` 是这一次**流**的身份，不是请求身份：pi 的一次运行可以被多个请求看见（插话那轮只有
+  // 确认帧，真正的帧来自启动它的那个请求），而"我要续订哪条流"问的是后者。它是一个随机值，
+  // 因为它要跨进程边界被客户端回传，语义上不该能猜。
+  const runId = randomUUID();
+  const frames = createFrameWriter(res, { runId });
   const writeEvent = (payload) => frames.write(payload);
   // 回退后先播一次权威快照：旧轮次从 UI 消失、剩下来的轮次编号与新 stream 一致，
   // 否则新 prompt 的 `t{turn}#...` 事件会和客户端里还没清掉的旧轮次撞号。
