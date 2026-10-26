@@ -35,7 +35,7 @@ const docPaths = Object.values(policy.docs);
 const docsLanded = docPaths.every((docPath) => existsSync(join(REPO_ROOT, docPath)));
 
 test("仓库没有未登记的架构违规", () => {
-  // docs-regions 单独一个用例：docs/ 有写保护，落盘需要显式开启（见 .wiki/output/）。
+  // docs-regions 单独一个用例：它只检查已落盘的 docs/ 与策略逐字一致。
   const unexpected = result.violations.filter((item) => item.rule !== "docs-regions");
   assert.deepEqual(
     unexpected.map((item) => `[${item.rule}] ${item.message}`),
@@ -43,7 +43,7 @@ test("仓库没有未登记的架构违规", () => {
   );
 });
 
-test("架构文档在盘上，且生成的区域与策略逐字一致", { skip: docsLanded ? false : "docs/architecture 尚未落盘（需要 /pw allow-docs-write on），草稿在 .wiki/output/" }, () => {
+test("架构文档在盘上，且生成的区域与策略逐字一致", { skip: docsLanded ? false : "docs/architecture 尚未落盘" }, () => {
   const stale = result.violations.filter((item) => item.rule === "docs-regions");
   assert.deepEqual(
     stale.map((item) => item.message),

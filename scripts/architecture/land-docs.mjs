@@ -2,8 +2,9 @@
 /**
  * 把 `.wiki/output/` 里的架构文档草稿落盘到 `docs/`，然后生成并校验。
  *
- * 为什么需要这一步：`docs/` 是人工拥有的权威层，带写保护（见 project-wiki 的约定），
- * agent 不能直接写。草稿放在 `.wiki/output/`，由人确认后执行本脚本落盘。
+ * 这个脚本做三件事：把清单里的文件拷进 `docs/` → 生成区域与棘轮快照 → 按 CI 口径校验一遍。
+ *
+ * 草稿从哪来、要不要先经过一层草稿，由使用者决定（清单里的 `.wiki/output/` 只是历史来源）。
  *
  *   node scripts/architecture/land-docs.mjs          # 落盘 + 生成 + 校验
  *   node scripts/architecture/land-docs.mjs --dry    # 只打印会做什么
