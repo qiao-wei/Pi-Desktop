@@ -384,9 +384,9 @@ tags: [reference, design]
   （主题注册表与新增主题的步骤），以及 `docs/architecture/`（分层与边界，不是视觉规范）。
 - **不要**把它当成本项目的 token 来源：文件里的 `colors:` / `components:` 描述的是 Meta 的界面，
   抄进主题会得到一个「像 Meta 但不属于这里」的界面。
-- 计划中的整理：移入 `docs/reference/meta-design-analysis.md`（`docs/` 当前有写保护，需要
-  `/pw allow-docs-write on`），文件名与位置都表明它是外部参考。在那之前保持原名 + 这段说明，
-  以免移动时丢引用。
+- 计划中的整理：移入 `docs/reference/meta-design-analysis.md`，文件名与位置都表明它是外部参考。
+  在那之前保持原名 + 这段说明，以免移动时丢引用。（原文提到「`docs/` 有写保护，需要
+  `/pw allow-docs-write on`」——那个约束来自已关闭的 pi-project-wiki，2026-10-26 起作废。）
 
 
 ## Overview

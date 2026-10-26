@@ -273,7 +273,7 @@ reviewers: ["@qiaowei"]
 2. **一处内部矛盾**：被评审文档在「DI 容器不该登记进 `seams.ts`（那是换实现的门）」与「帧信封要登记进 `protocols`」之间自相矛盾。本文按前者的一致性处理：帧信封放 protocol 层模块 + 一致性测试，**不新增 protocol 行**。
 3. **`land-docs.mjs` 与 `tests/architecture.test.ts` 里关于 `docs/` 写保护与 `/pw` 的陈旧说明已在本轮改掉**（pi-project-wiki 已关闭）。
 4. **未决项按推荐定案**（本 spec 已按这些写）：只加不改地拆提交/订阅；帧序号命名 `streamSeq`、扁平信封 + `transport_error`；DI 定位为清债而非 B1 前置；背压与序号同批；信任模型只登记不实现；ADR + 词表 + 顺序表如上。
-5. **未被本 spec 覆盖的三处同类陈旧引用**（`docs/adr/ADR-001` 与其草稿、`docs/reference/design-meta.md`）仍在说 `docs/` 有写保护，建议顺手清掉（ADR-001 需草稿与落盘两份同步改）。
+5. **同类陈旧引用已全部清掉**（2026-10-26）：`docs/adr/ADR-001` 与其 `.wiki/output/` 草稿、`docs/reference/design-meta.md` 里「`docs/` 有写保护 / 需要 `/pw allow-docs-write on`」的说法都改成了事实（那约束来自已关闭的 pi-project-wiki）。仅剩 `docs/reference/design-meta.md` 一句保留原文引用并注明作废，以免读者在别处又看到那个说法时困惑。
 6. **发布状态**：本文件是 spec 的落地形态，**尚未发布到 issue tracker**——`/setup-matt-pocock-skills` 未运行；按建议配置（GitHub tracker + 默认五件套标签，`ready-for-agent`）后即可发布。
 7. **2026-10-26 架构审查**（报告：`<tmpdir>/architecture-review-1792993499.html`，跑完即弃）新增/确认的候选，已并入本 spec 的部分：①`deps` 袋**两侧孪生**（A1，渲染侧是新证据）；②`buildSnapshot` 的 9 处同款转发闭包（A1b）；③流帧**没有共享契约**（B3 加强）。
 8. **审查中提出但本次不做**（已用删除检验筛过，写在这里以免下次重新提）：

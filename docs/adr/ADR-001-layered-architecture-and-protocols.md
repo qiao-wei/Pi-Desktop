@@ -82,5 +82,6 @@ Pi Desktop 已经长到 6.2 万行生产代码（`src` + `server` + `src-electro
 - **代价**：新增 `architecture/policy.json` 与 `scripts/architecture/*`（约 800 行工具代码）；
   新路由/新协议端点需要跑一次 `architecture:write`；17 个超标文件进入债务登记（带期限）。
 - **仍待办**：`server/*.mjs` 的类型检查（决策 2 之外的最大风险）、`App.tsx` 与
-  `server/index.mjs` 的拆分（已登记棘轮）、`docs/` 与 `.wiki/output/` 的落盘流程
-  （docs/ 有写保护，需要显式开启）。
+  `server/index.mjs` 的拆分（已登记棘轮）。`docs/` 的落盘流程**曾经**由 pi-project-wiki 把门
+  （草稿必须先放 `.wiki/output/`）；**该工具已于 2026-10-26 关闭，这个约束随之作废** —— 现在直接写
+  `docs/`，`.wiki/output/` 只是历史草稿的去处。
