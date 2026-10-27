@@ -102,22 +102,12 @@ function renderList(indent, key, names) {
 /** 渲染整张表（`--write` 写它，`--check` 逐字节比它）。 */
 export function renderDomainTable(rows) {
   const stats = describe(rows);
+  // import 由行生成（按 id 排序）：这是一份会随域增减的列表，手写它等于给生成器又塞一份会漂的真源。
+  const imports = [...rows]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((row) => `import { ${row.create} } from "./${row.id}.mjs";`);
   const lines = [
-    'import { createBridgeUtils } from "./bridgeUtils.mjs";',
-    'import { createCapabilitySnapshot } from "./capabilitySnapshot.mjs";',
-    'import { createExtensionUiDomain } from "./extensionUiDomain.mjs";',
-    'import { createMcpInspector } from "./mcpInspector.mjs";',
-    'import { createMcpServers } from "./mcpServers.mjs";',
-    'import { createModelLeaves } from "./modelLeaves.mjs";',
-    'import { createModelProviders } from "./modelProviders.mjs";',
-    'import { createProjectSessions } from "./projectSessions.mjs";',
-    'import { createPromptStream } from "./promptStream.mjs";',
-    'import { createRoutesApp } from "./routesApp.mjs";',
-    'import { createRoutesProjects } from "./routesProjects.mjs";',
-    'import { createRuntimeDomain } from "./runtimeDomain.mjs";',
-    'import { createSessionSnapshots } from "./sessionSnapshots.mjs";',
-    'import { createSkillLeaves } from "./skillLeaves.mjs";',
-    'import { createSkillPackages } from "./skillPackages.mjs";',
+    ...imports,
     "",
     "/**",
     " * 域表：每个域工厂从共享袋里读哪些名字，以及这些读取发生在**建厂期**还是**闭包里**。",

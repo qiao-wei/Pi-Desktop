@@ -223,6 +223,15 @@ test("规则不冤枉人：模块与表一致、入口走容器 → 零违规", 
   assert.deepEqual(ruleViolations(root), []);
 });
 
+test("生成器只 import 表里真有的域（import 也是生成的，不是一份会漂的手写清单）", () => {
+  const root = fakeRepo({ modules: { "widgets.mjs": DOMAIN_MODULE } });
+  const table = readFileSync(join(root, "server", "domainTable.mjs"), "utf8");
+  const imports = [...table.matchAll(/^import \{ (\w+) \} from "\.\/(\w+)\.mjs";$/gm)].map(
+    (match) => match[2],
+  );
+  assert.deepEqual(imports, ["widgets"], "一个域就只 import 一个模块");
+});
+
 test("规则咬住：模块读了新名字而表没跟上 → 报违规（启动期名字闸之外的第二道）", () => {
   const root = fakeRepo({ modules: { "widgets.mjs": DOMAIN_MODULE } });
   writeFileSync(
