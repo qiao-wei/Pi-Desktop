@@ -12,7 +12,10 @@
  *    `then`/`toJSON`/`constructor` 这类**任何值都可能被读**的属性与 Symbol 放行（被 await、打日志、
  *    `String(x)` 都会碰）；但整体枚举（`JSON.stringify(deps)`、`{ ...deps }`、`Object.keys` 后逐个取值）
  *    **会命中闸** —— 枚举不是声明，拿到的是别的域的导出。今天 `server/` 里没有这种写法。
- * 2. **建厂期就绪校验**：建厂期（工厂函数体直接执行的部分）读到的名字必须已有值。
+ * 2. **建厂期就绪校验**：建厂期（工厂函数体直接执行的部分）读到的名字必须已有值，否则**当场抛**。
+ *    不抛的话读到的是 `undefined`，真正炸的是**调用点**（`deps.findProject is not a function`）——
+ *    那句话指不出「哪个域缺哪个名字」，也就等于又回到 A1 之前那种「只在某条请求路径上炸」的状态。
+ *    报错分三类：常量传了 undefined / 提供者返回了 undefined / 还没有人提供（给动作：去找哪个域 return 了它）。
  *    **闭包里的读取不参与排序**：袋子是共享可变的，闭包读到的时候早就填好了；把闭包读当排序约束
  *    会造出假环（实测 15 个域之间 130+ 条这种反向边，还有真环），收益是零。
  * 3. **发布**：域的返回值整包进共享袋；两个域返回同一个名字会在启动时抛（今天是静默覆盖）。
@@ -44,11 +47,28 @@ export function createDomainContainer({ domains, constants, state }) {
   const ownerOf = new Map();
   /** @type {Map<string, string[]>} 域 id → 它声明的名字。 */
   const declaredBy = new Map();
-  /** @type {Map<string, string[]>} 域 id → 它实际返回的名字。 */
-  const providedBy = new Map();
   const exports = {};
 
   const problems = [];
+
+  /**
+   * 建厂期读到还没值的名字。**当场抛**，因为返回 `undefined` 只会在调用点炸成
+   * `deps.x is not a function`——那条信息既不说哪个域，也不说下一步干什么。
+   *
+   * 这里不能点名「提供它的域是谁」：顺序错误恰恰意味着那个域**还没建**，袋里根本没有它的导出
+   * （静态名字表只记「谁读」，不记「谁提供」—— 后者是真实返回值，见 ADR-005 偏差 2）。
+   * 所以顺序这一类给的是动作（去 `server/` 里找哪个域 `return` 了它），不是名字。
+   * @param {string} domainId
+   * @param {string} name
+   */
+  function notReady(domainId, name) {
+    const why = constantNames.has(name)
+      ? "它被当作外部注入的常量，但传进来的值就是 undefined（检查 constants 里这一项）"
+      : ownerOf.has(name)
+        ? "提供它的域确实已经建了，但它把那项返回成了 undefined"
+        : "还没有任何域提供它：要么提供它的域排在这一行后面（去 server/ 里找哪个域 return 了它，挪到前面），要么这个名字拼错了";
+    return new Error(`域 ${domainId} 建厂期读到的 deps.${name} 还没有值（${why}）`);
+  }
 
   // 0) 声明自检：域 id 不能重名。（**读**同一个名字是正常的：`appCwd`、`findProject` 谁都可以用；
   // 两个域**返回**同名才算问题，那在第 3 步用真实返回值检出。）
@@ -71,12 +91,7 @@ export function createDomainContainer({ domains, constants, state }) {
           );
         }
         const value = Reflect.get(target, prop, receiver);
-        if (creating && value === undefined) {
-          problems.push(
-            `域 ${domain.id} 建厂期读到的 deps.${prop} 还没有值` +
-              (constantNames.has(prop) ? "（常量理应有值，检查 constants 是否漏传）" : "（只可能是声明顺序错了：把提供它的域挪到它前面）"),
-          );
-        }
+        if (creating && value === undefined) throw notReady(domain.id, prop);
         return value;
       },
     });
@@ -85,7 +100,6 @@ export function createDomainContainer({ domains, constants, state }) {
     creating = false;
 
     const keys = provided && typeof provided === "object" ? Object.keys(provided) : [];
-    providedBy.set(domain.id, keys);
     for (const key of keys) {
       const previous = ownerOf.get(key);
       if (previous) problems.push(`名字 ${key} 同时由域 ${previous} 与 ${domain.id} 返回`);
@@ -96,6 +110,7 @@ export function createDomainContainer({ domains, constants, state }) {
   }
 
   // 4) 完整性：声明的名字最终都要有值（建厂期没读到的名字，到这里才验得出「没人提供」）。
+  //    注意这一步能一次报全，是因为它不依赖运行时值 —— 上一条（建厂期读到空值）必须当场抛。
   for (const [id, declared] of declaredBy) {
     for (const name of declared) {
       if (constantNames.has(name) || ownerOf.has(name)) continue;

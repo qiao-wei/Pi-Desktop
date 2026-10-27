@@ -93,7 +93,8 @@ import { createBridgeBoot } from "./boot.mjs";
  * 启动块：路径/环境常量 + `state` + PI 运行时装配。
  *
  * **必须在组合区之前调用** —— 组合区的域工厂在建立时就要注入这些值（`agentDir`、`openRuntimes`…），
- * 而它们自己又只能排在这些值之后。启动工厂只返回这些东西；共享的 `deps` 容器在下面才声明。
+ * 而它们自己又只能排在这些值之后。启动工厂只返回这些东西；它们到组合区时成为共享依赖袋的**初始袋**
+ * （袋本身由 `server/domainContainer.mjs` 持有，入口不再声明它）。
  */
 const boot = await createBridgeBoot();
 const { state } = boot;
@@ -107,7 +108,7 @@ const { sessionStore, activePackageCommands, agentSkillsDir, agentsSkillsDir, ap
 // （BorderedLoader 构造函数 → keyHint → theme.fg）一碰就抛
 // "Theme not initialized. Call initTheme() first."。TUI 启动时会 initTheme()，
 // 桥是无头宿主，必须自己补上；enableWatcher 关掉（没有终端可监听背景色）。
-/* deps 声明已上移到文件顶部的启动块处（组合区要填的就是那一个对象）。 */
+/* 依赖袋不在入口声明：它由 `server/domainContainer.mjs` 建立，上面这些启动期常量是它的初始袋。 */
 
 // 已打开的运行时（Map 本身要在组合区之前存在：多个域会注入它），内容等组合区之后再填。
 // 已抽到: server/boot.mjs

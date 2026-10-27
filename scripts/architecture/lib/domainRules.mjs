@@ -12,8 +12,8 @@
  * **生成**（`npm run architecture:write`），本规则逐字节比对。表里的每一行都必须是提取器
  * 真读出来的，多一个少一个都红 —— 于是"声明"与"实际"不可能再各自漂移。
  *
- * 为什么不把 requires 手写：340 个名字手抄一遍必然有错，而它们 100% 可从模块文本推导。
- * 生成不是偷懒 —— 生成物的价值在于它同时是**启动期名字闸的白名单**（见 domainContainer.mjs）
+ * 为什么不把 requires 手写：313 个名字（63 个建厂期 + 250 个闭包读取）手抄一遍必然有错，
+ * 而它们 100% 可从模块文本推导。生成不是偷懒 —— 生成物的价值在于它同时是**启动期名字闸的白名单**（见 domainContainer.mjs）
  * 和**完整性校验的输入**（每个名字最终都得有人提供）。
  */
 
@@ -64,7 +64,8 @@ export function scanDomainRows(root, order = [], exclude = []) {
     const text = readFileSync(join(dir, name), "utf8");
     const row = domainRowOf(name, text);
     if (row) rows.push(row);
-  }  rows.sort((a, b) => {
+  }
+  rows.sort((a, b) => {
     const ia = order.indexOf(a.id);
     const ib = order.indexOf(b.id);
     if (ia === -1 && ib === -1) return a.id.localeCompare(b.id);
@@ -81,15 +82,15 @@ export function declaredOrder(tableText) {
 }
 
 /**
- * 表里有多少个建厂期读取是"外部注入的常量"（即不属于任何域返回的名字）。
- * 生成器把统计写进文件头，好让"域之间建厂期零依赖"这类事实跟着代码走，而不是烂在注释里。
+ * 表里有多少个建厂期/闭包读取，以及两份清单涉及多少个**不同**的名字。
+ * 生成器把统计写进文件头，好让「15 个域 / 63 / 250」这类数字跟着代码走，而不是烂在注释里。
  */
 function describe(rows) {
-  const provided = new Set();
-  for (const row of rows) for (const name of [...row.eager, ...row.lazy]) provided.add(name);
+  const declared = new Set();
+  for (const row of rows) for (const name of [...row.eager, ...row.lazy]) declared.add(name);
   const eagerReads = rows.reduce((n, row) => n + row.eager.length, 0);
   const lazyReads = rows.reduce((n, row) => n + row.lazy.length, 0);
-  return { eagerReads, lazyReads, names: provided.size };
+  return { eagerReads, lazyReads, declaredNames: declared.size };
 }
 
 function renderList(indent, key, names) {
@@ -119,8 +120,9 @@ export function renderDomainTable(rows) {
     " *",
     " * 两份清单是 `server/domainContainer.mjs` 的输入：",
     " *",
-    ` * - \`eager\`：**建厂期**就要读到的名字（工厂函数体直接执行的部分）。容器建厂时校验它们已有值 ——`,
-    " *   这是**真排序约束**（读到 `undefined` 会静默烂进闭包）。",
+    ` * - \`eager\`：**建厂期**就要读到的名字（工厂函数体直接执行的部分）。容器建厂时校验它们已有值，`,
+    " *   读到空值**当场抛**（报错点名域与名字）—— 这是**真排序约束**。不可放宽：返回 `undefined`",
+    " *   只会炸在调用点（`deps.x is not a function`），那条信息对不上下一步干什么。",
     " * - `lazy`：**闭包里**可能读到的名字（请求处理器/回调里）。袋子是共享可变的，读到的时候早就填好了，",
     " *   它们不参与排序，只是名字闸的白名单。",
     " *",
@@ -128,10 +130,10 @@ export function renderDomainTable(rows) {
     " * 实测 15 个域之间会凭空多出 130+ 条反向边和一个真环（`promptStream` ⇄ `sessionSnapshots`），",
     " * 而闭包读取对建厂顺序没有任何要求。",
     " *",
-    ` * 当前规模：${rows.length} 个域 / ${stats.eagerReads} 个建厂期读取 / ${stats.lazyReads} 个闭包读取。`,
-    " * 建厂期读取全是外部注入的常量（域之间建厂期零依赖），所以下面的顺序不被任何约束绑住 ——",
-    " * 但容器仍按这个顺序建，并校验每个域建厂期读到的名字都已就绪：将来真出现域间建厂期依赖，",
-    " * 启动会点名告诉你要把哪一行往上搬。",
+    ` * 当前规模：${rows.length} 个域 / ${stats.eagerReads} 个建厂期读取 / ${stats.lazyReads} 个闭包读取（去重后 ${stats.declaredNames} 个名字）。`,
+    " * 今天这些建厂期读取没有一个指向别的域的导出（都是外部注入的常量，实测见 ADR-005），所以下面的顺序",
+    " * 不被任何约束绑住 —— 但容器仍按这个顺序建，并校验每个域建厂期读到的名字都已就绪：将来真出现域间",
+    " * 建厂期依赖，启动会点名告诉你要把哪一行往上搬。",
     " */",
     "export const DOMAINS = [",
   ];

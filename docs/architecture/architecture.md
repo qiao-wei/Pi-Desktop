@@ -90,6 +90,10 @@ ZCode 的 UI 包与 agent 包之间没有这种共享内核；我们把它变成
 | `protocol-core` | `bridgeEndpoints.ts` 里手写文档的端点，bridge 实际不应答 | 手写的那部分不许说谎 |
 | `shell-commands` | preload 白名单 ≠ 协议声明 ≠ `invoke()` 调用点 | 三个曾经各写一份、没人比对的名单 |
 | `kernel-boundary` | `server/` 里除 `piKernel.mjs` 外直接 import `@earendil-works/*` | 内核升级只该改一个文件 |
+| `process-boundary` | 进程边界声明的 tsconfig 不含它声称的文件，或某个源码根没被任何边界认领 | 新增一棵源码树时不决定「谁来 typecheck 它」就应该失败 |
+| `node-typecheck` | `server/`、`src-electron/`、`scripts/` 在 `checkJs` 下新增的类型诊断 | 与 `max-lines` 同一套棘轮：诊断堆只降不升（基线在 `architecture/generated/`） |
+| `route-table` | `server/` 里除路由表以外还在 `if` 链上判路径、匹配优先级不显式 | 路由是数据（见 `ADR-004`），散落的 `url.pathname === …` 就是第二份真源 |
+| `domain-deps` | 域表与各域模块真实读取的名字不一致、动态读依赖、又手写一份纯转发、入口没读表 | 域装配是**生成 + 校验**的（见 `ADR-005`），手改表或绕过容器都该被拦 |
 | `exceptions` | 过期未处理 / 已经没必要的例外 | 例外是带期限的待办，不是永久豁免 |
 | `docs-regions` | 本文档生成的表格与 policy 不一致 | 文档与代码不允许各说各话 |
 
@@ -137,9 +141,14 @@ ZCode 的 UI 包与 agent 包之间没有这种共享内核；我们把它变成
 
 - **新增一个源文件**：放进上面任一根目录即可（属于所属模块）；没有合适模块时，先在
   `architecture/policy.json` 里登记模块，再放文件。
-- **新增一个 bridge 路由**：加进 `server/index.mjs` 后跑 `npm run architecture:write`
+- **新增一个 bridge 路由**：加进 `server/routeTable.mjs`（路由是数据，`priority` 显式；别在
+  `if` 链上判路径——`route-table` 规则会拦），再跑 `npm run architecture:write`
   ——路由会进冻结表面。想让它同时进"人读的核心清单"，就在
   `src/shared/protocol/bridgeEndpoints.ts` 里加一条。
+- **新增一个域 / 改域之间的依赖**：写 `server/<域>.mjs`（工厂形参叫 `deps`），跑
+  `npm run architecture:write` 把表补上（`eager`/`lazy` 由提取器生成，不要手改表）；
+  域之间读写名字走容器，不要手写纯转发、也不要 `deps["x"]` 动态读。`domain-deps` 规则会逐字节
+  比对表，容器在**启动时**校验名字闸与建厂期顺序（错了桥起不来，并指名域与名字）——见 `ADR-005`。
 - **改协议形状（不兼容）**：同一个改动里同时 bump `src/shared/protocol/version.ts` 与
   `server/protocolVersion.mjs`（`protocol-version` 规则会强制）；加字段不用 bump。
 - **拆大文件**：拆完跑 `npm run architecture:write`，棘轮上限自动收紧；拆到上限以下时，
@@ -156,4 +165,7 @@ ZCode 的 UI 包与 agent 包之间没有这种共享内核；我们把它变成
 | 层方向 / 无环 / 文件已登记 / bridge 闭包 / 行数棘轮 / 例外未过期 / 文档未漂移 | `tests/architecture.test.ts` |
 | 协议版本两侧相等、协议表面双向一致、握手分类正确 | `tests/bridgeProtocol.test.ts` |
 | 换 transport 后上层无感（可替换性本身） | `tests/bridgeTransport.test.ts` |
+| 域装配：名字闸 / 建厂期就绪 / 重名 / 完整性 / 域表与真实读取一致 | `tests/domainAssembly.test.ts` |
+| 路由是数据：匹配优先级、未被任何处理器认领的路由、客户端调用点与冻结表面双向一致 | `tests/routeTable.test.ts` |
+| 流帧：`streamSeq` 单调、背压与溢出帧、传输错误与领域错误分开、按 `runId` 订阅 | `tests/frameWriter.test.ts`、`tests/runStreams.test.ts`、`tests/bridgeRunSubscription.test.ts` |
 | `piKernel.mjs` 的每个 re-export 都真实存在 | `tests/kernelAdapter.test.ts` |

@@ -21,7 +21,7 @@ import { test } from "node:test";
 
 import { createDomainContainer } from "../server/domainContainer.mjs";
 import { loadPolicy, runCheck } from "../scripts/architecture/check.mjs";
-import { domainDepsViolations, generatedDomainTable } from "../scripts/architecture/lib/domainRules.mjs";
+import { domainDepsViolations, declaredOrder, generatedDomainTable } from "../scripts/architecture/lib/domainRules.mjs";
 
 const REPO_ROOT = join(import.meta.dirname, "..");
 
@@ -32,6 +32,16 @@ const domain = (id, create, opts = {}) => ({
   eager: opts.eager ?? [],
   lazy: opts.lazy ?? [],
 });
+
+/** 装配合成域；装配失败就返回那个异常（断言消息用，省得每条都写 assert.throws 的校验函数）。 */
+function errorFrom(domains: any[], constants: Record<string, unknown> = { cwd: "/tmp" }): any {
+  try {
+    createDomainContainer({ domains, constants, state: {} });
+  } catch (error: any) {
+    return error;
+  }
+  throw new Error("装配本应失败，但没抛");
+}
 
 test("正常装配：按声明顺序建域，返回值并集交给入口，袋里的名字闭包随时可读", () => {
   const seen = [];
@@ -86,8 +96,35 @@ test("名字闸：建厂期读到还没就绪的名字 → 装配失败（这就
         constants: {},
         state: {},
       }),
-    /域 early 建厂期读到的 deps\.thing 还没有值.*把提供它的域挪到它前面/s,
+    /域 early 建厂期读到的 deps\.thing 还没有值.*还没有任何域提供它.*挪到前面/s,
   );
+});
+
+test("建厂期读到空值时当场抛：调用形态也得是那条消息，不是 `deps.x is not a function`", () => {
+  // 真实形态是 `deps.findProject(...)`，不是把值取出来看。若容器把就绪问题留到最后汇总，
+  // 这里会先炸成 TypeError —— 那条信息既不说哪个域，也不说下一步干什么。
+  const error = errorFrom([
+    domain("early", (state, deps) => ({ ok: deps.thing() }), { eager: ["thing"] }),
+    domain("late", () => ({ thing: () => 42 })),
+  ]);
+  assert.match(error.message, /域 early 建厂期读到的 deps\.thing 还没有值/);
+  assert.doesNotMatch(error.message, /is not a function/, "不能是调用点的 TypeError");
+});
+
+test("建厂期读到空值时当场抛：常量传了 undefined 与提供者返回 undefined 各有自己的说法", () => {
+  // 常量这一类不是「漏传」，而是「传进来了但值本身是 undefined」——`constants` 里有它的名字，
+  // 所以容器说得出这个区别；没传进来的名字跟「没有域提供」就是同一回事，说不了。
+  const leaked = errorFrom(
+    [domain("a", (state, deps) => ({ got: deps.blank }), { eager: ["blank"] })],
+    { blank: undefined },
+  );
+  assert.match(leaked.message, /deps\.blank 还没有值.*它被当作外部注入的常量，但传进来的值就是 undefined/s);
+
+  const emptyProvider = errorFrom([
+    domain("provider", () => ({ blank: undefined })),
+    domain("reader", (state, deps) => ({ got: deps.blank }), { eager: ["blank"] }),
+  ]);
+  assert.match(emptyProvider.message, /deps\.blank 还没有值.*它把那项返回成了 undefined/s);
 });
 
 test("闭包里的读取不参与排序：晚于自己的域提供的名字也能读（读到的是调用时的值）", () => {
@@ -290,7 +327,7 @@ test("真仓库：domain-deps 规则零违规，且表里每个域都能在 serv
   const violations = runCheck(REPO_ROOT).violations.filter((item: any) => item.rule === "domain-deps");
   assert.deepEqual(violations.map((item: any) => item.message), []);
   const table = readFileSync(join(REPO_ROOT, "server", "domainTable.mjs"), "utf8");
-  const ids = [...table.matchAll(/^ {4}id: "([^"]+)",$/gm)].map((match) => match[1]) as string[];
+  const ids = declaredOrder(table);
   assert.ok(ids.length >= 15, `域表应有全部域（现在 ${ids.length}）`);
   for (const id of ids) {
     assert.ok(existsSync(join(REPO_ROOT, "server", `${id}.mjs`)), `域 ${id} 没有对应模块`);
