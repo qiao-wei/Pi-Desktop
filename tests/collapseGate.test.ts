@@ -152,34 +152,44 @@ function declaration(name: string): string {
 }
 
 /**
- * 运行中会自己从开变关的三个点：工具卡、思考面板、工具组。
- * 只要有一处把状态机的 false 直接写进 DOM，视口内就会出现位移。
- *
- * `PiDesktopProcessGroup` 不在列表里：它的“自动”不是运行中的状态翻转，而是整轮结束时
- * 本来要把全部过程块重包进一个以折叠态挂载的组（新面板没有旧高度可保持，CSS 还带
- * `data-[starting-style]:h-0`，hold 它等于在读者眼前把页面撑开），所以单独有用例。
+ * 现在唯一的自动折叠点是**过程概览**（整轮结束把它收起）。行级（思考行 / 工具行）按 ZCode 保持
+ * 「默认收起、只有读者点击才开」，所以它们不该出现闸门调用 —— 反过来也要钉住：闸门不能被悄悄
+ * 引到行上（那会让每一行都在流式里自己开合，正是用户 2026-10-27 不要的那种）。
  */
-for (const name of ["AssistantToolCall", "AssistantReasoningGroup", "AssistantToolGroup"]) {
-  test(`${name} defers its auto-collapse through the gate`, () => {
-    const body = declaration(name);
-    assert.ok(
-      body.includes("useDeferredCollapse("),
-      `${name} must route through useDeferredCollapse`,
+test("自动折叠只能发生在过程概览上，行级没有这套逻辑", () => {
+  const group = declaration("PiDesktopProcessGroup");
+  assert.ok(
+    group.includes("useDeferredCollapse("),
+    "过程概览的自动折叠必须过闸门",
+  );
+  assert.ok(
+    /\bopen=\{open\}/.test(group),
+    "过程概览渲染的是闸门后的 open，而不是原始意图",
+  );
+  assert.ok(
+    group.includes("releaseCollapseGate()"),
+    "手动点击必须能取消一次被推迟的自动折叠",
+  );
+  assert.ok(
+    !/setOpen\(/.test(group),
+    "过程概览还在直接写 open（自动折叠绕过了闸门）",
+  );
+
+  for (const file of ["tool-row.tsx", "thinking-row.tsx"] as const) {
+    const row = readFileSync(
+      new URL(`../src/components/assistant-ui/elements/${file}`, import.meta.url),
+      "utf8",
     );
     assert.ok(
-      /\bopen=\{open\}/.test(body),
-      `${name} must render the gated open state, not the raw intent`,
+      !row.includes("useDeferredCollapse("),
+      `${file} 不该自己自动开合（自动折叠只有过程概览一处）`,
     );
     assert.ok(
-      body.includes("releaseCollapseGate()"),
-      `${name} must let a manual toggle overrule a deferred collapse`,
+      !/setIntentOpen\(/.test(row),
+      `${file} 不该有「意图态」这层`,
     );
-    assert.ok(
-      !/setOpen\(/.test(body),
-      `${name} still writes the open state directly (auto-collapse bypasses the gate)`,
-    );
-  });
-}
+  }
+});
 
 test("a disclosure that merely mounts closed is never held open", () => {
   // hold 只对「已经展开、现在想收起」的块成立。挂载就 hold 会本末倒置：
@@ -202,12 +212,20 @@ test("过程概览全程挂载，整轮结束只是意图翻转而不是重建�
   // 运行中就展开：收起才是一个能被闸门推后的变化，而不是一次 DOM 替换。
   assert.match(summary, /useDeferredCollapse\(\s*processRef,\s*messageRunning \|\| userOpen,\s*\)/);
   assert.doesNotMatch(summary, /open=\{userOpen\}/);
-  // 表头本身是一个占位的行：没真折叠、又不是用户自己点开时它必须隐藏，
-  // 否则“结束”这一帧光是露出表头就能把读者那一行顶走。
-  assert.match(summary, /const showSummaryHeader = !open \|\| userTouched/);
-  assert.match(summary, /hidden=\{!showSummaryHeader\}/);
-  // 没切换成概览形态前，内容容器不参与布局，保证包组前后的几何一致。
-  assert.match(summary, /"flex flex-col gap-2 ps-1 pt-2" : "contents"/);
+  // 表头从一开始就在流里（ZCode 的 turn header 也常驻，底下一道分隔线）：没有“到点才出现”
+  // 的元素，也就没有“出现”这一下位移。旧版靠 `showSummaryHeader` 隐藏它，是为了让包组前的
+  // 几何逐像素一致 —— 常驻表头把那个理由去掉了。
+  assert.match(summary, /data-slot="aui_process-group"/);
+  assert.match(summary, /border-border\/50 border-b pb-2/);
+  assert.match(
+    summary,
+    /t\(messageRunning \? "process\.workingFor" : "process\.workedFor", \{ seconds \}\)/,
+    "表头文案要走 i18n（ZCode 的 chat.history.workingFor / workedFor）",
+  );
+  // 拿不到时长就说不出「已工作 0 秒」——ZCode 在同样的情况下退回不带时长的标签。
+  assert.match(summary, /t\(messageRunning \? "process\.working" : "process\.history"\)/);
+  // 区域内部的间距与消息列同一个来源，行不会在概览里换一套节奏。
+  assert.match(summary, /flex flex-col gap-\[var\(--conversation-block-gap\)\]/);
   // 分组边界不再等运行结束才成立。
   assert.doesNotMatch(threadAui, /if \(messageRunning\) return -1/);
 });
@@ -250,15 +268,12 @@ test("the completion lock anchors on a surviving text block, not the message roo
   );
 });
 
-test("gated disclosures can actually be measured", () => {
-  for (const file of [
-    "../src/components/assistant-ui/elements/tool-call.tsx",
-    "../src/components/assistant-ui/elements/tool-group.aui.tsx",
-  ]) {
-    const source = readFileSync(new URL(file, import.meta.url), "utf8");
-    assert.match(source, /ref=\{composedRef\}/, `${file} must expose its root to the gate`);
-    assert.match(source, /ref\?: Ref<HTMLDivElement>/, `${file} must accept the gate's ref`);
-  }
+test("过程概览把自己的根节点交给闸门", () => {
+  // 闸门要量的是「这块现在占多高」，所以根 ref 必须真的挂在这个 disclosure 上
+  //（旧版这层挂在 tool-call.tsx / tool-group.aui.tsx 上，行级不再自动折叠后只剩过程概览）。
+  const summary = declaration("PiDesktopProcessGroup");
+  assert.match(summary, /ref=\{processRef\}/, "过程概览必须把根节点交给闸门");
+  assert.match(summary, /const processRef = useRef<HTMLDivElement>\(null\)/);
 });
 
 test("the gate reads geometry and never writes the scroll position", () => {

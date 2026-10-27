@@ -1,4 +1,5 @@
 import type { ChatMessage, MessageLiveBlock, MessageProcessBlock } from "../types";
+import { sameToolDisplay } from "./toolDisplay.ts";
 
 /**
  * The process-block algebra behind a streaming assistant bubble: thinking text,
@@ -27,6 +28,7 @@ function sameBlocks(a: MessageProcessBlock, b: MessageProcessBlock): boolean {
       a.toolName === b.toolName &&
       a.callText === b.callText &&
       a.resultText === b.resultText &&
+      sameToolDisplay(a.display, b.display) &&
       a.isError === b.isError &&
       a.status === b.status
     );
@@ -152,6 +154,7 @@ export function mergeAssistantProcessBlocks(
         toolName: block.toolName || "tool",
         callText: block.callText || "",
         resultText: block.resultText,
+        ...(block.display === undefined ? {} : { display: block.display }),
         isError: block.isError,
         status: block.status ?? "streaming",
       });
@@ -167,6 +170,7 @@ export function mergeAssistantProcessBlocks(
       continue;
     }
 
+    const display = block.display ?? prior.display;
     write(matchingIndex, {
       kind: "tool",
       toolCallId: block.toolCallId || prior.toolCallId,
@@ -174,6 +178,7 @@ export function mergeAssistantProcessBlocks(
       toolName: block.toolName || prior.toolName,
       callText: block.callText || prior.callText,
       resultText: block.resultText ?? prior.resultText,
+      ...(display === undefined ? {} : { display }),
       isError: block.isError ?? prior.isError,
       status: block.status ?? prior.status ?? "streaming",
     });
@@ -361,6 +366,7 @@ function upsertToolBlock<T extends MessageProcessBlock | MessageLiveBlock>(
       firstMatchedIndex = index;
     }
     const prior = item as Extract<MessageProcessBlock, { kind: "tool" }>;
+    const display = block.display ?? prior.display;
     const updated = {
       kind: "tool",
       toolCallId: block.toolCallId || prior.toolCallId,
@@ -368,6 +374,7 @@ function upsertToolBlock<T extends MessageProcessBlock | MessageLiveBlock>(
       toolName: block.toolName || prior.toolName,
       callText: block.callText || prior.callText,
       resultText: block.resultText ?? prior.resultText,
+      ...(display === undefined ? {} : { display }),
       isError: block.isError ?? prior.isError,
       status: block.status ?? prior.status,
     } as unknown as T;

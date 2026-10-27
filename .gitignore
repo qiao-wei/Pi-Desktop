@@ -65,6 +65,9 @@ playwright-report/
 blob-report/
 test-results/
 .playwright/
+# e2e 截图是验收证据，不是仓库内容（字体/滚动条/动画帧让它们不稳定，进不了 CI 断言）。
+e2e/.screenshots/
+e2e/.report/
 
 # Agent-app local state. NOTE: <project>/.pi is a real resource root (README),
 # only the auto-generated version backups next to an installed skill are local.

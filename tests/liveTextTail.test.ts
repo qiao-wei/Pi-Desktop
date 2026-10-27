@@ -88,29 +88,35 @@ test("the upstream caret really is keyed on data-status=running", () => {
 /* -------------------------------------------------------------------------- */
 
 test("ChatThread tags only the computed tail block as running", () => {
-  const source = readFileSync(
+  const chatThread = readFileSync(
     new URL("../src/features/chat/ChatThread.tsx", import.meta.url),
+    "utf8",
+  );
+  // 2026-10-27：块 → part 的映射从 ChatThread 搬到 assistantUiParts.ts（ChatThread 到了
+  // 行数上限）。断言跟着走：分支在那里，尾块的计算与传参仍在 ChatThread。
+  const parts = readFileSync(
+    new URL("../src/features/chat/assistantUiParts.ts", import.meta.url),
     "utf8",
   );
   // The text branch must decide status from `isLiveTail`, never from `isStreaming`
   // alone — that was the bug.
   assert.match(
-    source,
+    parts,
     /status: isLiveTail \? \{ type: "running" \} : \{ type: "complete" \}/,
   );
   assert.equal(
-    /type: "text",[\s\S]{0,200}?status: isStreaming \? \{ type: "running" \}/.test(source),
+    /type: "text",[\s\S]{0,200}?status: isStreaming \? \{ type: "running" \}/.test(parts),
     false,
     "正文块不得只看 isStreaming 就标 running",
   );
   assert.match(
-    source,
+    chatThread,
     /const liveTailIndex = liveTextTailIndex\(processBlocks, isStreaming\);/,
     "必须用 liveTextTailIndex 找尾块",
   );
   // The per-block call has to pass the flag through, or nothing is tagged at all.
   assert.match(
-    source,
+    chatThread,
     /toAssistantUiParts\(block, isStreaming, index, index === liveTailIndex\)/,
   );
 });

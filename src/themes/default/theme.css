@@ -166,6 +166,11 @@
   --app-content-surface: #202020;
   --app-header-border: #3a3a3a;
 
+  /* ZCode 兼容 token（见 tailwind.css）：深色下「最淡」那档要更淡。 */
+  --foreground-subtlest: color-mix(in oklab, var(--foreground) 30%, transparent);
+  --color-diff-added: var(--color-green-500);
+  --color-diff-removed: var(--color-red-500);
+
   /*
    * 注意：这里**故意不**覆盖 `--app-*`。深色下大多数遗留规则仍然是"浅色控件落在
    * 深色画布上"（只有 `.dark …` 列出的那一小批被重写过），所以这些字面量的深色

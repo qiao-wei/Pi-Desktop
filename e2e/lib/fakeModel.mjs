@@ -18,6 +18,72 @@ export const E2E_MODEL_NAME = "E2E Model";
 
 const DEFAULT_CHUNKS = ["E2E-1 ", "E2E-2 ", "E2E-3 done"];
 
+/**
+ * 脚本化工具调用：用户消息里出现 marker 时，这一轮先回一个工具调用，拿到工具结果后再回文本。
+ *
+ * 为什么需要它：过程行（思考行 / 工具行）只在**工具真的跑过一轮**之后才存在，而工具是 pi
+ * 真执行的（这里是 edit / bash，参数是相对工作区路径）。断言"行画成什么样"必须建立在
+ * 真实的工具结果上 —— 手写一份假的 transcript 就等于把投影层和渲染层一起绕过。
+ */
+const TOOL_REQUESTS = {
+  "E2E-TOOL-EDIT": {
+    name: "edit",
+    arguments: JSON.stringify({
+      path: "demo.ts",
+      edits: [{ oldText: "alpha", newText: "beta" }],
+    }),
+  },
+  "E2E-TOOL-BASH": {
+    name: "bash",
+    arguments: JSON.stringify({ command: "printf 'e2e-stdout-line\\n'" }),
+  },
+};
+
+/**
+ * 脚本化思考流：用户消息里出现 `E2E-THINK` 时，先在回答前发两段 `reasoning_content`
+ * （pi 会把它变成 `thinking_delta` → 聚合出一个 thinking 块），再发普通文本。
+ * 思考行必须在**真实的思考事件**上验证：手拼一段假 transcript 会把投影层绕过去。
+ */
+const THINKING_CHUNKS = ["先看这一段的前半句，", "然后这是思考的尾巴（最后一行）。"];
+
+/** 本轮该先发思考流吗？ */
+function reasoningChunks(body) {
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  const lastUser = [...messages].reverse().find((message) => message?.role === "user");
+  const text =
+    typeof lastUser?.content === "string"
+      ? lastUser.content
+      : JSON.stringify(lastUser?.content ?? "");
+  return text.includes("E2E-THINK") ? THINKING_CHUNKS : null;
+}
+
+/**
+ * 本轮该回工具调用吗？
+ *
+ * 判据是「**最后一条用户消息之后**还没有工具结果」——不能只看整段会话里有没有出现过
+ * 工具结果：多个用例共用桥的会话，上一条用例的工具结果会一直留在历史里，只看全局就会
+ * 让后续的 marker 永远静默失效（本文件第一版就这么错过）。
+ */
+function pendingToolCall(body) {
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  const lastUserIndex = messages.findLastIndex((message) => message?.role === "user");
+  if (lastUserIndex < 0) {
+    return null;
+  }
+  if (messages.slice(lastUserIndex + 1).some((message) => message?.role === "tool")) {
+    return null;
+  }
+  const lastUser = messages[lastUserIndex];
+  const text =
+    typeof lastUser?.content === "string"
+      ? lastUser.content
+      : JSON.stringify(lastUser?.content ?? "");
+  for (const [marker, call] of Object.entries(TOOL_REQUESTS)) {
+    if (text.includes(marker)) return call;
+  }
+  return null;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -115,8 +181,41 @@ export async function startFakeModel(options = {}) {
         choices: [{ index: 0, delta: payload, finish_reason: finishReason }],
       });
 
+    const toolCall = pendingToolCall(body);
+    if (toolCall) {
+      await sleep(firstTokenDelayMs);
+      // 动手之前先想一下：同一个 marker 也能带 `E2E-THINK`，于是这一轮的事件序是
+      // 「思考 → 工具调用 → 文本」，正好用来验证**相邻两行**的间距（不是只有 行→正文）。
+      for (const chunk of reasoningChunks(body) ?? []) {
+        delta({ reasoning_content: chunk });
+        await sleep(chunkDelayMs);
+      }
+      delta({
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            index: 0,
+            id: `call_e2e_${requests.length}`,
+            type: "function",
+            function: { name: toolCall.name, arguments: "" },
+          },
+        ],
+      });
+      await sleep(chunkDelayMs);
+      delta({ tool_calls: [{ index: 0, function: { arguments: toolCall.arguments } }] });
+      delta({}, "tool_calls");
+      res.write("data: [DONE]\n\n");
+      res.end();
+      return;
+    }
+
     await sleep(firstTokenDelayMs);
     delta({ role: "assistant", content: "" });
+    for (const chunk of reasoningChunks(body) ?? []) {
+      delta({ reasoning_content: chunk });
+      await sleep(chunkDelayMs);
+    }
     for (const chunk of chunks) {
       delta({ content: chunk });
       await sleep(chunkDelayMs);

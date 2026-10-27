@@ -153,6 +153,39 @@ React、npm 这类通用词。
 
 ---
 
+## 会话过程区（聊天渲染）
+
+助手气泡里**除正文之外**的那部分：一串过程块。它们按 ZCode 生产环境的行语法渲染（见 ADR-006）。
+
+**process region（过程区）**
+- 是什么：一轮里**全部**过程行（+ 夹在它们之间的叙述文本）折成的**一个** disclosure，表头是「工作中/已工作 N 秒」（ZCode 的 `chat.history.workingFor` / `workedFor`，即 turn history）。运行中它是展开的，**整轮结束自动折叠**（ZCode 的 `assistantHistoryDefaultOpen`）。
+- 边界：区域一直盖到**最后一个**思考/工具块为止；那之后的正文（也就是答案）留在区域外 —— 折叠时读者丢掉的只有过程，答案原地不动。
+- _避免_：说成「工具组」（那是已删的旧分组概念）；也别说「行会自己折叠」——**自动折叠只有区域这一处**，行级的开合只由读者点击驱动。
+- 代码：`src/components/assistant-ui/elements/thread.aui.tsx` 的 `PiDesktopProcessGroup`；判定与推迟在 `src/shared/collapseGate.ts`、`src/components/assistant-ui/elements/deferredCollapse.ts`。
+
+**process block（过程块）**
+- 是什么：助手气泡里 `kind` 不是 `text` 的那些块 —— `thinking` / `tool` / `notice`。它们有顺序、可合并（流式里同一块会被反复重算），是过程区的**唯一数据形状**。
+- _避免_：说成「工具组」「步骤」。分组是旧实现的渲染概念（已删），块本身是平铺的。
+- 代码：`src/types/domain.ts` 的 `ProcessBlock`、`src/shared/chatProcessBlocks.ts`（合并与投影）、`src/shared/chatStreamProjection.ts`（线 → 块）。
+
+**tool display（工具展示模型 `ToolDisplay`）**
+- 是什么：一行的**已分类**内容：行族 + 动作词 + 目标 + 状态 + 正文模型（diff 文件 / 终端输出 / 参数 / 结果）。在**投影边界**从「工具名 + 参数 + 结果信封」派生一次，挂在过程块的可选字段 `display` 上。
+- _避免_：说成「格式化」或「主题」。它不是渲染样式，是**从结构化结果里读出来的事实**（`edit` 的 `details.patch`、`bash` 的 `structuredContent.exit_code`）；渲染层不许再解析结果文本。
+- 代码：`src/shared/toolDisplay.ts`（`deriveToolDisplay` / `toolDisplayForBlock` / `sameToolDisplay`）、消费方 `elements/tool-row.tsx` + `elements/tool-bodies.tsx`。
+- 注意：**字段是可选的**。老会话的转录与不产出结构化结果的工具没有它，走兜底行（参数 + 结果），这是常态之一而不是异常。
+
+**row family（行族）**
+- 是什么：工具名 → 一族，决定动作词、图标与正文形态：`read` / `write` / `edit` / `execute`（bash、powershell）/ `search`（grep、ls、find）/ `mcp`（`mcp__<server>__<tool>`）/ `other`。
+- _避免_：与「工具名」混用。族是**一的映射**（`mcp__*` 要先于内置名判定），名字到词表的对照只有一张表。
+- 代码：`src/shared/toolDisplay.ts` 的 `toolRowFamily` / `parseMcpToolName`；词在 `src/i18n/{en,zh}.ts` 的 `process.tool.*`。
+
+**ZCode 兼容 token 层**
+- 是什么：`src/app/tailwind.css` 里那批按 ZCode 名字与公式定义的 token：`--text-ui-caption|base|sm|xs`、`--foreground-subtle` / `--foreground-subtlest`（由**本主题**的 `--foreground` 混出 60%/40%；深色只把 subtlest 提到 30%）、`--color-diff-added|removed`、`--animate-collapsible-down|up`、**`--conversation-block-gap`**（会话内「块与块」的间距，默认 1rem：过程行之间、行与正文之间都是它 —— 正文与行是同一个列里的兄弟，没有第二套间距）。
+- _避免_：当成「主题变量」随意改值。它们的作用是让过程行的**层级**（最淡一档文字、diff 底色）与参考实现一致；深浅两档只写在 `src/themes/{default,codex}/theme.css` 的 `.dark` 里，组件里不写死颜色。
+- 代码：`src/app/tailwind.css` 的 `@theme` 块；契约在 `tests/toolRow.test.ts`（类名与 token 值一起钉）。
+
+---
+
 ## 开发开关（不要和用户偏好混为一谈）
 
 这些是开发者用的，读到就在启动时生效；读法都走存储端口（`getStoragePort()`），但语义上是**开关**不是用户设置：

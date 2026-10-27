@@ -46,6 +46,7 @@ import {
   upsertLiveToolBlock,
   upsertToolProcessBlock,
 } from "./chatProcessBlocks.ts";
+import { deriveToolDisplay, toolDisplayForBlock, toolResultText } from "./toolDisplay.ts";
 
 export interface ChatStreamView {
   /** Bubbles in transcript order, exactly as the UI renders them. */
@@ -489,6 +490,8 @@ function drop(view: ChatStreamView, _event: PromptStreamEvent): ChatStreamView {
 
 function toToolProcessBlock(event: PromptStreamEvent): MessageProcessBlock {
   const done = event.type === "tool_execution_end";
+  const toolName = event.toolName ?? "tool";
+  const result = event.result === undefined ? event.partialResult : event.result;
   return {
     kind: "tool",
     // Deliberately *not* `|| event.toolStreamId`: a stream slot and a call id are
@@ -496,14 +499,21 @@ function toToolProcessBlock(event: PromptStreamEvent): MessageProcessBlock {
     // finally carries the real id miss this block and open a duplicate card.
     toolCallId: event.toolCallId || "",
     toolStreamId: event.toolStreamId,
-    toolName: event.toolName ?? "tool",
+    toolName,
     callText: stringifyToolArgs(event.args),
-    resultText:
-      event.result === undefined
-        ? event.partialResult === undefined
-          ? undefined
-          : stringifyValue(event.partialResult)
-        : stringifyValue(event.result),
+    // The plain text of the result, never the raw envelope: this is what the
+    // persisted-transcript path has always shown (`toolResultProcessText`), and
+    // the live path used to disagree by printing `{"content":[…]}` verbatim.
+    resultText: result === undefined ? undefined : toolResultText(result),
+    // Derived here rather than in the renderer so no component parses tool text.
+    display: toolDisplayForBlock(
+      deriveToolDisplay({
+        toolName,
+        args: event.args,
+        result: event.result,
+        partialResult: event.partialResult,
+      }),
+    ),
     status: done ? "done" : "streaming",
     isError: done ? event.isError : undefined,
   };
@@ -527,6 +537,13 @@ export function normalizeProcessBlock(block: StreamProcessBlock | null | undefin
     toolCallId: block.toolCallId,
     toolName: block.toolName || "tool",
     callText: stringifyToolArgs(block.arguments),
+    display: toolDisplayForBlock(
+      deriveToolDisplay({
+        toolName: block.toolName || "tool",
+        args: block.arguments,
+        result: undefined,
+      }),
+    ),
     status: "streaming",
   };
 }

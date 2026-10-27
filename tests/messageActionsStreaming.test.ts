@@ -26,7 +26,7 @@ function topLevelBlock(source: string, name: string, next: string): string {
 }
 
 test("assistant action bar greys out instead of hiding while streaming", () => {
-  const bar = topLevelBlock(thread, "AssistantActionBar", "const AssistantToolGroup");
+  const bar = topLevelBlock(thread, "AssistantActionBar", "const UserFilePart");
   // The old disappearing act re-flowed the footer; disabled is the contract now.
   assert.doesNotMatch(bar, /hideWhenRunning/);
   assert.match(bar, /const actionsDisabled = useActionsDisabled\(\)/);

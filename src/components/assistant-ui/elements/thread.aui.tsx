@@ -9,24 +9,18 @@ import { File } from "@/components/assistant-ui/elements/file";
 import { ThreadFollowupSuggestions } from "@/components/assistant-ui/elements/follow-up-suggestions.aui";
 import { Image } from "@/components/assistant-ui/elements/image";
 import { MarkdownText } from "@/components/assistant-ui/elements/markdown-text";
-import { ToolCall } from "@/components/assistant-ui/elements/tool-call";
-import { Reasoning } from "@/components/assistant-ui/elements/reasoning.aui";
-import { reasoningGroupFlags } from "@/components/assistant-ui/elements/reasoningState";
-import {
-  ToolGroupContent,
-  ToolGroupRoot,
-  ToolGroupTrigger,
-} from "@/components/assistant-ui/elements/tool-group.aui";
+import { ThinkingRow } from "@/components/assistant-ui/elements/thinking-row";
 import { collapsePanel, useScrollPositionLock } from "@/components/assistant-ui/elements/surfaces";
 import { useDeferredCollapse } from "@/components/assistant-ui/elements/deferredCollapse";
+import { ToolRow } from "@/components/assistant-ui/elements/tool-row";
 import { perfCount } from "@/lib/perf";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
-import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { canOpenTarget, openTarget } from "@/lib/open-target";
@@ -51,15 +45,14 @@ import {
   type FileMessagePartComponent,
   type ImageMessagePartComponent,
   type ToolCallMessagePartComponent,
-  type ToolCallMessagePartProps,
   useAuiState,
   useMessageTiming,
 } from "@assistant-ui/react";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
-  CheckIcon,
   ChevronRightIcon,
+  CheckIcon,
   CopyIcon,
   DownloadIcon,
   FileTextIcon,
@@ -77,9 +70,7 @@ import {
   type ComponentType,
   type FC,
   type PropsWithChildren,
-  Children,
   useCallback,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -127,6 +118,12 @@ type AssistantGroupBy = (
   part: Parameters<typeof ASSISTANT_BASE_GROUP_BY>[0],
   context: Parameters<typeof ASSISTANT_BASE_GROUP_BY>[1],
 ) => readonly AssistantGroupKey[];
+/**
+ * `ToolRow` reads Pi Desktop's own optional part fields (`display`) and takes no
+ * `ToolCallMessagePartComponent` context, so the slot cast is the honest way to
+ * hand it to a registry typed for assistant-ui's component shape.
+ */
+const ToolRowTyped = ToolRow as unknown as ToolCallMessagePartComponent;
 
 const ThreadComponentsContext =
   createContext<ThreadComponents>(EMPTY_COMPONENTS);
@@ -483,7 +480,7 @@ const ComposerAction: FC = () => {
 const MessageError: FC = () => {
   return (
     <MessagePrimitive.Error>
-      <ErrorPrimitive.Root className="aui-message-error-root border-destructive bg-destructive/10 text-destructive dark:bg-destructive/5 mt-2 rounded-md border p-3 text-sm dark:text-red-200">
+      <ErrorPrimitive.Root className="aui-message-error-root border-destructive bg-destructive/10 text-destructive dark:bg-destructive/5 rounded-md border p-3 text-sm dark:text-red-200">
         <ErrorPrimitive.Message className="aui-message-error-message line-clamp-2" />
       </ErrorPrimitive.Root>
     </MessagePrimitive.Error>
@@ -507,13 +504,107 @@ const AssistantWorkingIndicator: FC = () => {
   );
 };
 
+/**
+ * The turn's process region: every thinking / tool part of the turn, folded into one
+ * disclosure that **auto-collapses when the turn ends**.
+ *
+ * ZCode has exactly this region — its turn history header (`chat.history.workedFor`,
+ * 「已工作 58 秒」) whose `assistantHistoryDefaultOpen` is true only while the last
+ * turn is running (`conversationTurnRenderUnits.ts`), i.e. open for the run and
+ * folded once it settles. Pi Desktop had the same thing before the row port; the row
+ * port dropped the wrapper along with it, which is what this restores.
+ *
+ * Three properties are load-bearing:
+ * - **It owns the turn's whole process span from the first token**, rather than
+ *   appearing (or growing into a wrapper) at the end of the run. The auto-collapse is
+ *   then a state flip on an already-expanded block, which is the only shape the
+ *   collapse gate can defer. Introducing the wrapper in the commit that *ends* the run
+ *   would replace the subtree instead, and a reader mid-thread would watch the answer
+ *   jump up.
+ * - **`open` is the gated value**, never the raw intent: releasing hundreds of pixels
+ *   inside someone's viewport is the one thing `collapseGate` exists to postpone.
+ * - **The header row is always in flow** (ZCode keeps it visible too, with its
+ *   divider). Nothing appears at settle time, so nothing moves by appearing.
+ *
+ * The header is tied to the *message*, not to `group.status`: an intermediate group
+ * can look settled while a parallel stream is still live, and folding then would lift
+ * the answer still streaming underneath it.
+ */
+const PiDesktopProcessGroup: FC<PropsWithChildren<{ group: ThreadGroupPart }>> = ({ children }) => {
+  const t = useT();
+  const timing = useMessageTiming();
+  const messageRunning = useAuiState((state) => state.message.status?.type === "running");
+  const processRef = useRef<HTMLDivElement>(null);
+  const lockScroll = useScrollPositionLock(processRef);
+  const [userOpen, setUserOpen] = useState(false);
+  const [open, releaseCollapseGate] = useDeferredCollapse(
+    processRef,
+    messageRunning || userOpen,
+  );
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      // A click has said what the reader wants: the deferred auto-collapse must not
+      // overrule it, and the position they are looking at must stay put.
+      releaseCollapseGate();
+      lockScroll();
+      setUserOpen(next);
+    },
+    [lockScroll, releaseCollapseGate],
+  );
+  // `totalStreamTime` is only known once the runtime has timing for this message; a
+  // turn that is too short to measure (or replayed from a snapshot) has none, and
+  // "已工作 0 秒" would be a claim the data does not make. ZCode falls back to a
+  // duration-less label in exactly this case ("思考过程" / `labels.history`).
+  const seconds = timing?.totalStreamTime
+    ? Math.max(1, Math.round(timing.totalStreamTime / 1000))
+    : undefined;
+  const label =
+    seconds === undefined
+      ? t(messageRunning ? "process.working" : "process.history")
+      : t(messageRunning ? "process.workingFor" : "process.workedFor", { seconds });
+
+  return (
+    <Collapsible
+      ref={processRef}
+      data-slot="aui_process-group"
+      data-live={messageRunning ? "true" : undefined}
+      open={open}
+      onOpenChange={handleOpenChange}
+      className="flex w-full flex-col"
+    >
+      {/* ZCode's `ReadonlyHistoryStatus`: label, trailing chevron, hairline under it. */}
+      <div className="flex w-full border-border/50 border-b pb-2">
+        <CollapsibleTrigger className="group/process-header inline-flex max-w-full items-center gap-2 text-left text-ui-base text-foreground-subtle transition-colors hover:text-foreground focus-visible:outline-none">
+          <span className="truncate">{label}</span>
+          <ChevronRightIcon
+            aria-hidden="true"
+            className={cn(
+              "size-4 shrink-0 text-foreground-subtlest opacity-70 transition-transform",
+              open ? "rotate-90" : "rotate-0",
+            )}
+          />
+        </CollapsibleTrigger>
+      </div>
+      <CollapsibleContent
+        className={cn(collapsePanel, "overflow-hidden outline-none")}
+      >
+        {/* Same rhythm as the message column: the rows inside the region are the same
+            kind of item as the text around it (`--conversation-block-gap`). */}
+        <div className="flex flex-col gap-[var(--conversation-block-gap)] pt-[var(--conversation-block-gap)]">
+          {children}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+};
+
 const AssistantMessage: FC = () => {
   // Per-message render probe: divided into `render.messages` (one per store
   // update) this is the fan-out factor that decides whether a streamed token
   // repaints one bubble or the whole thread.
   perfCount("render.assistantMessage");
   const {
-    ToolFallback: ToolFallbackComponent = AssistantToolCallTyped,
+    ToolFallback: ToolFallbackComponent = ToolRowTyped,
     ToolGroup,
     ReasoningGroup,
   } = useContext(ThreadComponentsContext);
@@ -524,14 +615,11 @@ const AssistantMessage: FC = () => {
   const entrance = useMessageEntrance();
   const parts = useAuiState((s) => s.message.parts);
 
-  // The process summary spans the parts up to the *last* thinking/tool part,
-  // including any narrative text interleaved before that boundary. The wrapper is
-  // created as soon as there is a process part at all and stays open for the whole
-  // turn: the collapse is then always a state change on an already-mounted, already
-  // expanded block, which is the only thing the collapse gate can defer. (It used to
-  // be created in the same commit that ended the run, which *replaced* the subtree -
-  // nothing can hold a replacement, and readers saw the answer lift.) While the turn
-  // runs the summary header is hidden, so the live layout is the one from before.
+  // The process region spans the parts up to the *last* thinking/tool part, including
+  // any narrative text interleaved before that boundary — ZCode folds the same span
+  // (`assistantHistoryRows`), and it is why the answer text below stays readable while
+  // the work folds away. Everything inside is a prefix, so `GroupedParts` sees one
+  // consecutive run and the region cannot fragment.
   const processBoundary = useMemo(() => {
     let boundary = -1;
     parts.forEach((part, index) => {
@@ -564,57 +652,62 @@ const AssistantMessage: FC = () => {
     >
       <div
         data-slot="aui_assistant-message-content"
-        className="text-foreground px-2 text-[14px] leading-[1.85] wrap-break-word"
+        // One rhythm for the whole timeline: rows (thinking / tool) and assistant
+        // text are siblings in the same column, spaced by ZCode's block gap. Before
+        // this, text leaned on its own paragraph margins and rows on a 6px group
+        // gap, so a run of rows read as a different, cramped thing.
+        className="text-foreground flex flex-col gap-[var(--conversation-block-gap)] px-2 text-[14px] leading-[1.85] wrap-break-word"
       >
-        <MessagePrimitive.GroupedParts
-          groupBy={groupBy}
-        >
+        <MessagePrimitive.GroupedParts groupBy={groupBy}>
           {({ part, children }) => {
             switch (part.type) {
               case "group-process":
-                return <PiDesktopProcessGroup group={part}>{children}</PiDesktopProcessGroup>;
-              case "group-chainOfThought":
                 return (
-                  <div
-                    data-slot="aui_chain-of-thought"
-                    className="flex flex-col gap-1.5"
-                  >
+                  <PiDesktopProcessGroup group={part}>{children}</PiDesktopProcessGroup>
+                );
+              case "group-chainOfThought":
+                // `contents`, not a flex column with its own gap: the rows are already
+                // items of the message column, and a second gap inside a wrapper would
+                // space them 6px tighter than the text around them (ZCode keeps one
+                // gap for the whole run).
+                return (
+                  <div data-slot="aui_chain-of-thought" className="contents">
                     {children}
                   </div>
                 );
+              // Transparent group cases: the wrappers that used to live here
+              // ("N tool calls", the turn's "Completed · 12s" summary) are gone.
+              // ZCode renders each row inline with its own disclosure, and a
+              // second, coarser disclosure above a run of them was what made the
+              // process area read as a different thing from ZCode's timeline.
               case "group-tool":
-                if (ToolGroup) {
-                  return <ToolGroup group={part}>{children}</ToolGroup>;
-                }
-                return <AssistantToolGroup group={part}>{children}</AssistantToolGroup>;
-              case "group-reasoning": {
-                if (ReasoningGroup) {
-                  return (
-                    <ReasoningGroup group={part}>{children}</ReasoningGroup>
-                  );
-                }
-                return <AssistantReasoningGroup group={part}>{children}</AssistantReasoningGroup>;
-              }
+                return ToolGroup ? <ToolGroup group={part}>{children}</ToolGroup> : <>{children}</>;
+              case "group-reasoning":
+                return ReasoningGroup ? (
+                  <ReasoningGroup group={part}>{children}</ReasoningGroup>
+                ) : (
+                  <>{children}</>
+                );
               case "text":
                 // Forward the part props like the sibling cases do: the primitive
                 // still reads its text from context, but `memo(MarkdownText)` can now
                 // skip parts whose text did not change.
                 return <MarkdownText {...part} />;
               case "reasoning":
-                return <Reasoning {...part} />;
+                return <ThinkingRow {...part} />;
               case "tool-call":
                 return part.toolUI ?? <ToolFallbackComponent {...part} />;
               case "data":
                 return part.dataRendererUI;
               case "file":
                 return (
-                  <div data-slot="aui_assistant-message-file" className="py-1">
+                  <div data-slot="aui_assistant-message-file">
                     <File {...part} />
                   </div>
                 );
               case "image":
                 return (
-                  <div data-slot="aui_assistant-message-image" className="py-1">
+                  <div data-slot="aui_assistant-message-image">
                     <Image {...part} />
                   </div>
                 );
@@ -695,336 +788,6 @@ const AssistantActionBar: FC = () => {
         </ActionBarMorePrimitive.Content>
       </ActionBarMorePrimitive.Root>
     </ActionBarPrimitive.Root>
-  );
-};
-
-const AssistantToolGroup: FC<
-  PropsWithChildren<{ group: ThreadGroupPart }>
-> = ({ group, children }) => {
-  const running = group.status.type === "running";
-  const toolCount = group.indices.length;
-  const [userOpen, setUserOpen] = useState(true);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  // The group closes by itself when the last call in it settles (or when the
-  // reader had already closed it while it was running) - deferred while that
-  // would be visible.
-  const [open, releaseCollapseGate] = useDeferredCollapse(
-    rootRef,
-    running || userOpen,
-  );
-
-  // A single call already has its own assistant-ui disclosure row. Avoid
-  // adding a second nested "1 tool call" disclosure around it.
-  if (toolCount === 1) return <>{children}</>;
-
-  return (
-    <ToolGroupRoot
-      ref={rootRef}
-      variant="ghost"
-      open={open}
-      onOpenChange={(nextOpen) => {
-        releaseCollapseGate();
-        setUserOpen(nextOpen);
-      }}
-    >
-      <ToolGroupTrigger count={toolCount} active={running} />
-      <ToolGroupContent>{children}</ToolGroupContent>
-    </ToolGroupRoot>
-  );
-};
-
-/**
- * `partialResult` is Pi Desktop's own field (see ChatThread#toAssistantUiParts): the
- * output streamed while the tool is still executing. It cannot live in `result`
- * because assistant-ui treats a present `result` as "tool finished".
- */
-type PiDesktopToolCallProps = ToolCallMessagePartProps & {
-  partialResult?: string | undefined;
-};
-
-const AssistantToolCall = ({
-  args,
-  argsText,
-  result,
-  artifact,
-  partialResult,
-  status,
-  toolName,
-  isError,
-}: PiDesktopToolCallProps) => {
-  const running = status.type === "running";
-  const t = useT();
-  // Same rule as the reasoning group below: while a tool is running, its output has
-  // to be on screen. The card used to start collapsed and nothing ever opened it, so
-  // a 10s run showed nothing at all and then dumped the whole result at the end.
-  // It auto-opens on start, auto-collapses on finish; an explicit click wins.
-  const [intentOpen, setIntentOpen] = useState(running);
-  const previousRunning = useRef(running);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  // `open` is what the card *renders*: the auto-collapse waits until releasing
-  // the height is invisible, so a reader parked mid-thread does not have their
-  // text yanked up when a call settles inside their viewport.
-  const [open, releaseCollapseGate] = useDeferredCollapse(rootRef, intentOpen);
-
-  useEffect(() => {
-    if (running !== previousRunning.current) {
-      setIntentOpen(running);
-      previousRunning.current = running;
-    }
-  }, [running]);
-
-  return (
-    <ToolCall
-      ref={rootRef}
-      label={
-        isError
-          ? t("process.toolFailed", { name: toolName })
-          : t("process.toolUsed", { name: toolName })
-      }
-      activeLabel={t("process.toolRunning", { name: toolName })}
-      query={toolQuery(args, toolName)}
-      request={argsText}
-      result={toolResult(result ?? artifact ?? partialResult, isError)}
-      running={running}
-      open={open}
-      onOpenChange={(nextOpen) => {
-        releaseCollapseGate();
-        setIntentOpen(nextOpen);
-      }}
-    />
-  );
-};
-
-const AssistantToolCallTyped = AssistantToolCall as unknown as ToolCallMessagePartComponent;
-
-function toolQuery(args: unknown, toolName: string) {
-  if (args && typeof args === "object") {
-    const value = Object.values(args as Record<string, unknown>).find(
-      (item) => typeof item === "string" && item.trim().length > 0,
-    );
-    if (typeof value === "string") {
-      const preview = value.replace(/\s+/g, " ").trim();
-      return preview.length > 64 ? `${preview.slice(0, 61)}...` : preview;
-    }
-  }
-  return toolName;
-}
-
-function toolResult(result: unknown, isError?: boolean) {
-  if (result === undefined || result === null) return "";
-  const text =
-    typeof result === "string"
-      ? result
-      : JSON.stringify(result, null, 2) ?? String(result);
-  return isError ? `Error: ${text}` : text;
-}
-
-const PiDesktopProcessGroup: FC<
-  PropsWithChildren<{ group: ThreadGroupPart }>
-> = ({ group, children }) => {
-  const t = useT();
-  const timing = useMessageTiming();
-  const parts = useAuiState((state) => state.message.parts);
-  const messageRunning = useAuiState(
-    (state) => state.message.status?.type === "running",
-  );
-  const processRef = useRef<HTMLDivElement>(null);
-  const lockScroll = useScrollPositionLock(processRef);
-  const { processCount, toolCount } = group.indices.reduce(
-    (counts, index) => {
-      const part = parts[index];
-      if (part?.type === "tool-call") {
-        counts.toolCount += 1;
-        counts.processCount += 1;
-      } else if (part?.type === "reasoning") {
-        counts.processCount += 1;
-      }
-      return counts;
-    },
-    { processCount: 0, toolCount: 0 },
-  );
-  // The summary owns every process part for the whole turn, not just from the
-  // moment the run ends, and it is open while the turn runs. That makes settling
-  // one `open: true -> false` transition on a mounted, expanded block instead of a
-  // subtree replacement, which is the only shape the collapse gate can defer: a
-  // reader looking at the process area keeps it on screen and gets the summary when
-  // they have scrolled away (or are pinned to the new line at the bottom).
-  //
-  // Tied to the message, never to `group.status`: an intermediate group can look
-  // complete while a parallel tool or reasoning stream is still live, and closing
-  // then would lift the answer that is still streaming underneath it.
-  const [userOpen, setUserOpen] = useState(false);
-  // An explicit click is the only thing that may show the summary header while the
-  // group is open: unhidden, the header is a row in flow, so revealing it at settle
-  // time would move the reader's line by itself.
-  const [userTouched, setUserTouched] = useState(false);
-  const [open, releaseCollapseGate] = useDeferredCollapse(
-    processRef,
-    messageRunning || userOpen,
-  );
-  const showSummaryHeader = !open || userTouched;
-  const handleOpenChange = useCallback(
-    (open: boolean) => {
-      setUserTouched(true);
-      releaseCollapseGate();
-      lockScroll();
-      setUserOpen(open);
-    },
-    [lockScroll, releaseCollapseGate],
-  );
-  const elapsed = timing?.totalStreamTime
-    ? ` ${Math.max(1, Math.round(timing.totalStreamTime / 1000))}s`
-    : "";
-  const toolPart = toolCount
-    ? ` · ${t(toolCount === 1 ? "process.toolCount.one" : "process.toolCount.other", { count: toolCount })}`
-    : processCount > 1
-      ? ` · ${t("process.steps", { count: processCount })}`
-      : "";
-  const label = `${t("process.completed")}${elapsed}${toolPart}`;
-
-  return (
-    <Collapsible
-      ref={processRef}
-      data-slot="aui_process-group"
-      data-live={messageRunning ? "true" : undefined}
-      open={open}
-      onOpenChange={handleOpenChange}
-      className={showSummaryHeader ? "mb-3 w-full" : "w-full"}
-    >
-      <CollapsibleTrigger
-        hidden={!showSummaryHeader}
-        className="group/process-trigger text-muted-foreground hover:text-foreground flex items-center gap-1.5 py-1 text-[14px] transition-colors outline-none"
-      >
-        <ChevronRightIcon className="-ms-1 size-4 shrink-0 opacity-70 transition-transform duration-200 group-data-open/process-trigger:rotate-90" />
-        <span className="leading-none tabular-nums">{label}</span>
-      </CollapsibleTrigger>
-      {/* Layout-neutral while the summary header is hidden: the process content has
-          to sit exactly where it sat before this group existed. No `collapsePanel`
-          either - it pins the height to Radix's measured value and animates a
-          freshly-mounted panel from `h-0`, so the group would slide the already read
-          text open the moment the first process part arrives. The animation belongs
-          to the summary form, where a click is what opens it. */}
-      <CollapsibleContent
-        className={
-          showSummaryHeader
-            ? cn(collapsePanel, "overflow-hidden outline-none")
-            : "overflow-hidden outline-none"
-        }
-      >
-        <div
-          className={
-            showSummaryHeader ? "flex flex-col gap-2 ps-1 pt-2" : "contents"
-          }
-        >
-          {children}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  );
-};
-
-const AssistantReasoningGroup: FC<
-  PropsWithChildren<{ group: ThreadGroupPart }>
-> = ({ group, children }) => {
-  const t = useT();
-  const parts = useAuiState((s) => s.message.parts);
-  const timing = useMessageTiming();
-  // Keep the disclosure held for the entire message run, not just while its own
-  // parts are streaming. Otherwise thinking collapses as soon as its
-  // text finishes — even though the message is still producing tool calls or
-  // further thinking steps — which is jarring during a live run. (Holding it open
-  // must not be confused with claiming it is still thinking - see below.)
-  const messageRunning = useAuiState(
-    (s) => s.message.status?.type === "running",
-  );
-  const ownStreaming = useAuiState((s) => {
-    if (s.message.status?.type !== "running") return false;
-    return group.indices.some(
-      (index) => s.message.parts[index]?.status.type === "running",
-    );
-  });
-  // What the reader sees as “still thinking” (`streaming`: shimmer + the
-  // bottom-pinned live preview) and what merely keeps the layout still
-  // (`holdOpen`) are different questions. They used to be one value, which made
-  // every reasoning panel look like it was still outputting for the whole turn -
-  // see `reasoningGroupFlags`.
-  const { streaming, holdOpen } = reasoningGroupFlags({ messageRunning, ownStreaming });
-  const [intentOpen, setIntentOpen] = useState(holdOpen);
-  const previousHoldOpen = useRef(holdOpen);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  // Thinking ends in the middle of a run, usually inside the reader's viewport:
-  // closing it there would lift everything below it, so the gate holds the panel
-  // open until the collapse happens out of sight.
-  const [open, releaseCollapseGate] = useDeferredCollapse(rootRef, intentOpen);
-
-  useEffect(() => {
-    if (holdOpen !== previousHoldOpen.current) {
-      setIntentOpen(holdOpen);
-      previousHoldOpen.current = holdOpen;
-    }
-  }, [holdOpen]);
-
-  const reasoningParts = useMemo(() => {
-    return group.indices.flatMap((index) => {
-      const part = parts[index];
-      if (!part || part.type !== "reasoning") return [];
-      return [part];
-    });
-  }, [group.indices, parts]);
-
-  const renderedParts = Children.toArray(children);
-  const duration = timing?.totalStreamTime
-    ? Math.max(1, Math.round(timing.totalStreamTime / 1000))
-    : undefined;
-
-  return (
-    <Reasoning.Root
-      ref={rootRef}
-      open={open}
-      onOpenChange={(nextOpen) => {
-        releaseCollapseGate();
-        setIntentOpen(nextOpen);
-      }}
-      streaming={streaming}
-      variant="ghost"
-    >
-      <Reasoning.Trigger active={streaming} duration={duration} />
-      <Reasoning.Content aria-busy={streaming}>
-        {/* No height cap: the block has to follow the output like the answer
-            text does. The old `max-h-[7.5rem]` (5 lines at `leading-6`) turned
-            the panel into an inner scroll box that pinned its own bottom, so
-            the reader watched a moving five-line window instead of the
-            thinking itself. The arbitrary value (`max-h-[none]`, not
-            `max-h-none`) is deliberate: tailwind-merge 3.6 does not classify
-            `max-h-none` as a `max-h` utility, so it would leave
-            `ReasoningText`'s own `max-h-64` default in the class list and the
-            cap would silently survive. Unbounded, the inner scroll/pin
-            machinery is a no-op and the thread viewport keeps the newest line
-            in view. */}
-        <Reasoning.Text className="max-h-[none]">
-          <div className="space-y-4">
-            {renderedParts.map((part, index) => {
-              const source = reasoningParts[index];
-              const title =
-                reasoningParts.length > 1
-                  ? source?.unstable_summary?.trim() ||
-                    t("process.stepTitle", { index: index + 1 })
-                  : undefined;
-              return (
-                <div key={index} className="space-y-1">
-                  {title ? (
-                    <p className="text-foreground/90 text-[14px] leading-6 font-medium">
-                      {title}
-                    </p>
-                  ) : null}
-                  {part}
-                </div>
-              );
-            })}
-          </div>
-        </Reasoning.Text>
-      </Reasoning.Content>
-    </Reasoning.Root>
   );
 };
 

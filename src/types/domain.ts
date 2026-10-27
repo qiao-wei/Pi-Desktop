@@ -1,4 +1,5 @@
 import type { ProjectCommand } from "../shared/projectCommands.ts";
+import type { ToolDisplay } from "../shared/toolDisplay.ts";
 
 export type MessageRole = "user" | "assistant" | "system";
 export type MessageKind = "text" | "audio";
@@ -106,6 +107,13 @@ export type MessageProcessBlock =
       toolName: string;
       callText: string;
       resultText?: string;
+      /**
+       * Structured body model derived from pi's result envelope (patch, exit
+       * code, …). Optional because a block can exist before any result does,
+       * and because a hand-built block (tests, or a legacy snapshot) does not
+       * owe us one. See `src/shared/toolDisplay.ts`.
+       */
+      display?: ToolDisplay;
       isError?: boolean;
       status?: "streaming" | "done";
     };

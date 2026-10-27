@@ -94,6 +94,75 @@
 }
 
 /*
+ * ZCode 兼容 token 层。
+ *
+ * 聊天区的「思考行 / 工具行」直接照 ZCode 的 `packages/ui/src/styles.css` 抄了
+ * 一组组件（见 docs/adr/ADR-006）。那些组件写的是 `text-foreground-subtlest` /
+ * `bg-surface` / `text-ui-base` 这类名字，要能用**同样的类名**渲染，就得先有
+ * 同样的 token。这里只放两张表都不变的那部分：中性色阶（Tailwind v4 默认值，
+ * 本项目构建不会自动产出）、字号档位，以及浅色下的取值。深色取值因为基准色不同，
+ * 放在各主题的 `.dark` 里覆盖（`--foreground-subtle` 等）。
+ *
+ * 刻意用非 `inline` 的 `@theme`：这些变量要在运行时可被 `.dark` 覆盖。
+ */
+@theme {
+  --color-neutral-50: oklch(98.5% 0 none);
+  --color-neutral-100: oklch(97% 0 none);
+  --color-neutral-200: oklch(92.2% 0 none);
+  --color-neutral-300: oklch(87% 0 none);
+  --color-neutral-400: oklch(70.8% 0 none);
+  --color-neutral-500: oklch(55.6% 0 none);
+  --color-neutral-600: oklch(43.9% 0 none);
+  --color-neutral-700: oklch(37.1% 0 none);
+  --color-neutral-800: oklch(26.9% 0 none);
+  --color-neutral-900: oklch(20.5% 0 none);
+  --color-neutral-950: oklch(14.5% 0 none);
+
+  --text-ui-caption: 13px;
+  --text-ui-base: 14px;
+  --text-ui-sm: 12px;
+  --text-ui-xs: 10px;
+
+  /*
+   * 会话内「一块与一块」的间距（ZCode 的 `--conversation-block-gap`）：过程行之间、
+   * 过程行与正文之间都是它。ZCode 的默认值就是 16px，另有两档会话密度
+   * （紧凑 0.625rem / 宽松 1.5rem）由 `data-conversation-density` 整体切换；
+   * 本项目还没有密度设置，所以只落默认档——但把名字留下来，将来加档位时不用再找一遍
+   * 散落的 gap-* 数字。
+   */
+  --conversation-block-gap: 1rem;
+
+  /* 工具行内 diff 的增/删色（ZCode：亮色 600、暗色 500，在主题的 .dark 里换档）。 */
+  --color-diff-added: var(--color-green-600);
+  --color-diff-removed: var(--color-red-600);
+
+  /*
+   * 行内折叠的高度动画。ZCode 的 CollapsibleContent 自带这两个 animation token，
+   * 本项目的 `ui/collapsible.tsx` 是裸 Radix，所以把 token 补在这里，
+   * 由 `data-open:`/`data-closed:` 变体（见 tailwind.css 的 @custom-variant）取用。
+   */
+  --animate-collapsible-down: collapsible-down 300ms ease-in-out;
+  --animate-collapsible-up: collapsible-up 300ms ease-in-out;
+
+  /*
+   * 取值按 ZCode 的规则算，但基准色用**本主题的** `--foreground` / `--muted`，
+   * 所以亮色主题的暖灰和 codex 的白都是自己那套。「最淡」那档在深色下要更淡
+   * （ZCode：亮 40% / 暗 30%），单独在主题的 `.dark` 里覆盖。
+   */
+  --foreground-subtle: color-mix(in oklab, var(--foreground) 60%, transparent);
+  --foreground-subtlest: color-mix(in oklab, var(--foreground) 40%, transparent);
+  --surface: color-mix(in oklab, var(--foreground) 4%, transparent);
+  --panel: var(--muted);
+  --background-alt: color-mix(in oklab, var(--muted) 60%, transparent);
+
+  --color-foreground-subtle: var(--foreground-subtle);
+  --color-foreground-subtlest: var(--foreground-subtlest);
+  --color-surface: var(--surface);
+  --color-panel: var(--panel);
+  --color-background-alt: var(--background-alt);
+}
+
+/*
  ---break---
  */
 

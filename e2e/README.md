@@ -12,6 +12,7 @@
 | `specs/protocolMismatch.spec.ts` | 桥公告了对不上的协议版本时，界面**说出可操作的话**（含双方版本号），而不是白屏 |
 | `specs/trustGate.spec.ts` | 未信任项目的项目级资源不加载（技能真的看不见）、提示可见、点"信任并加载"之后技能真的出现 |
 | `specs/packagedShell.spec.ts` | Electron 外壳起窗、首屏画出来、并且真的从桥拿到了数据 |
+| `specs/toolRows.spec.ts` | 过程区的行语法、正文、节奏与自动折叠：假模型回一个**真的** `edit`/`bash` 工具调用（pi 真执行、真出 `details.patch` 与 `exit_code`），断言摘要行、展开后的 diff/终端正文、思考行的「默认收起 / 单行尾巴 / 落定后给时长」，**量出相邻行的间距 = 16px**，并钉住**整轮结束时过程区自动折叠成表头**（运行中 `data-live` + 行在 DOM 里 → 落定后行退场、答案不动 → 点开又回来）；截图（浅色 + 深色、折叠态与展开态）落 `e2e/.screenshots/` |
 
 ## 为什么是"假模型端点"而不是"假内核"
 
@@ -39,7 +40,7 @@ plumbing** 换掉：会话生命周期、事件映射、SSE 帧、渲染进程�
 # 首次：装 Playwright 的 chromium（约 120MB）
 npx playwright install chromium
 
-npm run e2e                 # 4 条用例，约 1 分钟
+npm run e2e                 # 11 条用例，约 1 分钟
 npm run e2e:report          # 看上一次失败的 HTML 报告（e2e/.report）
 
 # 本机已经装了 Chrome 时可以不下载浏览器：

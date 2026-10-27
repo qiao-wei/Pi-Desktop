@@ -30,6 +30,15 @@ import type {
   MessageProcessBlock,
   MessageRole,
 } from "../types";
+import {
+  toolResultAsProcessBlock,
+  toolResultDisplay,
+  toolResultProcessText,
+} from "./chatToolBlocks.ts";
+import { messageToText } from "./messageText.ts";
+import { callToolDisplay } from "./toolDisplay.ts";
+
+export { messageToText };
 
 /* -------------------------------------------------------------------------- */
 /* Bubble identity                                                             */
@@ -224,6 +233,13 @@ export interface TranscriptMessage {
   toolCallId?: string;
   toolName?: string;
   isError?: boolean;
+  /**
+   * pi's tool-specific payload (`edit` puts its unified patch here). The server
+   * forwards transcript messages untouched, so it is on the wire even though the
+   * renderer used to ignore it. `structuredContent` (live events only) is not
+   * part of the stored message.
+   */
+  details?: unknown;
 }
 
 export interface BuildChatBubblesOptions {
@@ -289,6 +305,7 @@ export function buildChatBubbles(
             const existing = toolResult.toolCallId ? toolBlocks.get(toolResult.toolCallId) : undefined;
             if (existing) {
               existing.resultText = toolResultProcessText(toolResult);
+              existing.display = toolResultDisplay(existing, toolResult);
               existing.status = "done";
               existing.isError = Boolean(toolResult.isError);
             } else {
@@ -307,6 +324,7 @@ export function buildChatBubbles(
           const existing = message.toolCallId ? toolBlocks.get(message.toolCallId) : undefined;
           if (existing) {
             existing.resultText = toolResultProcessText(message);
+            existing.display = toolResultDisplay(existing, message);
             existing.status = "done";
             existing.isError = Boolean(message.isError);
           } else {
@@ -386,26 +404,6 @@ export function buildChatBubbles(
 /* -------------------------------------------------------------------------- */
 /* Assistant message shaping (moved out of the server, unchanged semantics)     */
 /* -------------------------------------------------------------------------- */
-
-export function messageToText(message: { content?: unknown }): string {
-  const content = message.content;
-  if (typeof content === "string") {
-    return content;
-  }
-  if (!Array.isArray(content)) {
-    return "";
-  }
-
-  return content
-    .map((block) => {
-      const typed = block as { type?: string; text?: string };
-      if (typed.type === "text") return typed.text ?? "";
-      if (typed.type === "image") return "[image]";
-      return "";
-    })
-    .join("")
-    .trim();
-}
 
 export function messageDisplayText(message: { content?: unknown }): string {
   return parseAttachmentContext(messageToText(message)).text;
@@ -495,11 +493,13 @@ export function assistantMessageConversationView(
     }
 
     if (block?.type === "toolCall") {
+      const toolName = String(block.name ?? "tool");
       processBlocks.push({
         kind: "tool",
         toolCallId: String(block.id ?? ""),
-        toolName: String(block.name ?? "tool"),
+        toolName,
         callText: JSON.stringify(block.arguments ?? {}, null, 2),
+        display: callToolDisplay(toolName, block.arguments),
       });
       continue;
     }
@@ -570,21 +570,6 @@ function assistantContentBlockText(block: { type?: string; text?: string } | und
   return "";
 }
 
-function toolResultAsProcessBlock(message: TranscriptMessage): Extract<MessageProcessBlock, { kind: "tool" }> {
-  return {
-    kind: "tool",
-    toolCallId: String(message.toolCallId ?? ""),
-    toolName: String(message.toolName ?? "tool"),
-    callText: "(tool call completed)",
-    resultText: toolResultProcessText(message),
-    status: "done",
-    isError: Boolean(message.isError),
-  };
-}
-
-function toolResultProcessText(message: TranscriptMessage): string {
-  return messageToText(message) || "(no output)";
-}
 
 /* -------------------------------------------------------------------------- */
 /* Placement: "where does this bubble go", derived from its id only            */

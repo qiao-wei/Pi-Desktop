@@ -89,32 +89,37 @@ test("用户气泡 14px / 1.6（codex-ui .user-bubble）", () => {
 });
 
 /**
- * 会话文本是同一套字号：正文、用户气泡、thinking / 工具 / 过程行都落在 14px。
+ * 会话文本是同一套字号：正文、用户气泡、thinking / 工具行都落在 14px。
  * 只把正文调小、把这些行留在 15px，会让工具标签比答案正文还大，层级反过来。
+ *
+ * 2026-10-27：过程行换成 `text-ui-base`（= 14px，见 tailwind.css 的 ZCode 兼容 token），
+ * 所以这里连带钉住 token 的值 —— 行不再写死 `text-[14px]`，改成引用 token 后才可能
+ * 因为 token 被改而整体漂移。
  */
 test("会话文本同为 14px，没有 15px 残留", () => {
   const files = {
     "thread.aui.tsx": threadTsx,
-    "reasoning.tsx": readFileSync(
-      new URL("../src/components/assistant-ui/elements/reasoning.tsx", import.meta.url),
+    "thinking-row.tsx": readFileSync(
+      new URL("../src/components/assistant-ui/elements/thinking-row.tsx", import.meta.url),
       "utf8",
     ),
-    "tool-call.tsx": readFileSync(
-      new URL("../src/components/assistant-ui/elements/tool-call.tsx", import.meta.url),
+    "tool-row.tsx": readFileSync(
+      new URL("../src/components/assistant-ui/elements/tool-row.tsx", import.meta.url),
       "utf8",
     ),
-    "tool-group.aui.tsx": readFileSync(
-      new URL("../src/components/assistant-ui/elements/tool-group.aui.tsx", import.meta.url),
-      "utf8",
-    ),
-    "tool-fallback.aui.tsx": readFileSync(
-      new URL("../src/components/assistant-ui/elements/tool-fallback.aui.tsx", import.meta.url),
+    "tool-bodies.tsx": readFileSync(
+      new URL("../src/components/assistant-ui/elements/tool-bodies.tsx", import.meta.url),
       "utf8",
     ),
   };
   for (const [name, source] of Object.entries(files)) {
     assert.ok(!source.includes("text-[15px]"), `${name} 里不应再有 text-[15px]`);
   }
+  assert.match(
+    tailwindCss,
+    /--text-ui-base:\s*14px;/,
+    "过程行的字号 token 必须还是 14px",
+  );
 });
 
 test("气泡内文本行高与气泡一致（不让 1.55 覆盖）", () => {
@@ -134,20 +139,83 @@ test("行内代码 0.86em + codex-ui 等宽栈", () => {
 });
 
 /**
- * 前置摺叠箭头要与正文排在同一列：chevron 图标的字面（glyph）在 16px 盒子里左侧
- * 有 6px 空白，只对齐盒子会让箭头看起来比正文右移，因此用 `-ms-1` 把整组（箭头 + 标签）
- * 向左拉 4px，使箭头墨迹与段落左边缘齐平。
+ * ZCode 的行语法：**图标在前，箭头在后**。
+ *
+ * 旧的「过程摘要 / 工具卡」是前置 chevron（`-ms-1` 把墨迹拉到正文左边缘），整行像一棵
+ * 可折叠树的根。ZCode 两种行反过来：开头是语义图标（工具/思考），chevron 在末尾、且只在
+ * hover 或展开时才可见（`group-hover/...:opacity-100`）—— 收起态下它不该出现在视线里。
+ * 两条都要钉住：只把 chevron 挪到末尾、忘了 hover 才显示，行尾巴会永久多出一个箭头。
  */
-test("前置摺叠箭头向左拉一档，与正文左边缘对齐", () => {
-  const leadingChevrons = [
-    ["thread.aui.tsx（过程摘要）", threadTsx, /"-ms-1 size-4 shrink-0 opacity-70/],
-    ["tool-call.tsx（工具行）", readFileSync(
-      new URL("../src/components/assistant-ui/elements/tool-call.tsx", import.meta.url),
-      "utf8",
-    ), /"-ms-1 size-4 shrink-0 opacity-60/],
-  ] as const;
+test("过程行的图标在首、chevron 在尾且只在 hover/展开时可见", () => {
+  const toolRowTsx = readFileSync(
+    new URL("../src/components/assistant-ui/elements/tool-row.tsx", import.meta.url),
+    "utf8",
+  );
+  const thinkingRowTsx = readFileSync(
+    new URL("../src/components/assistant-ui/elements/thinking-row.tsx", import.meta.url),
+    "utf8",
+  );
 
-  for (const [name, source, pattern] of leadingChevrons) {
-    assert.match(source, pattern, `${name} 的前置 chevron 需要 -ms-1`);
+  for (const [name, source, group] of [
+    ["tool-row.tsx", toolRowTsx, "tool-summary"],
+    ["thinking-row.tsx", thinkingRowTsx, "reasoning"],
+  ] as const) {
+    // 末尾的 chevron：hover 才显形，展开时固定显形并旋转 90°。
+    const chevron = source.slice(source.indexOf("ChevronRightIcon"));
+    assert.match(
+      chevron,
+      new RegExp(`group-hover/${group}:opacity-100`),
+      `${name} 的 chevron 应该只在 hover 时出现`,
+    );
+    assert.match(chevron, /rotate-90 opacity-100/, `${name} 展开时 chevron 应旋转并固定显形`);
+    assert.doesNotMatch(
+      source,
+      /-ms-1 size-4 shrink-0/,
+      `${name} 不该再回到「前置 chevron」的写法`,
+    );
   }
+});
+/* -------------------------------------------------------------------------- */
+/* 块与块的节奏                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 过程行（思考 / 工具）与助手正文是**同一个列里的兄弟**，共用 ZCode 的 `--conversation-block-gap`。
+ *
+ * 之前不是：正文靠自己的段落外边距、行组靠一个 6px 的 `gap-1.5` 包裹层，于是
+ * 「思考 · 查阅 · 思考 · 终端」这几行挤在一起，而它们与正文之间的距离又是另一套值 ——
+ * 同一个时间线读起来像两种东西（用户 2026-10-27 给的 ZCode 截图就是唯一间距）。
+ * 要守住三件事：列上有间距、行组不再自己加间距、正文段落的首尾外边距仍然是 0
+ * （否则正文与相邻行会拿到「列间距 + 段落外边距」两份）。
+ */
+test("过程行与正文共用一个列间距（ZCode 的 block gap）", () => {
+  assert.match(
+    tailwindCss,
+    /--conversation-block-gap:\s*1rem;/,
+    "列间距要有名字（ZCode 默认档 = 16px）",
+  );
+
+  const content = classNameAt(threadTsx, 'data-slot="aui_assistant-message-content"');
+  for (const cls of ["flex", "flex-col", "gap-[var(--conversation-block-gap)]"]) {
+    assert.ok(hasClass(content, cls), `助手内容列缺少 ${cls}（当前：${content}）`);
+  }
+
+  // 行组包裹层必须是 `contents`：它自己在列里就是一个 flex item，若再有 gap，
+  // 组内的行间距会比组外紧一档。
+  assert.match(
+    threadTsx,
+    /case "group-chainOfThought":[\s\S]{0,400}?data-slot="aui_chain-of-thought" className="contents"/,
+    "行组包裹层不能再带自己的 gap（否则行间距比正文间距紧）",
+  );
+
+  // 段落首尾外边距必须留着归零：文本块是 flex item，首段的上外边距会叠加在列间距上。
+  assert.match(
+    markdownTsx,
+    /aui-md-p my-3 leading-\[1\.85\] first:mt-0 last:mb-0/,
+    "正文段落要靠 first:mt-0 / last:mb-0 把首尾外边距清掉",
+  );
+
+  // 也会出现在同一条时间线上的其它 part 同样不该自带垂直 padding/margin。
+  assert.doesNotMatch(threadTsx, /data-slot="aui_assistant-message-file" className="py-1"/);
+  assert.doesNotMatch(threadTsx, /aui-message-error-root[^"]* mt-2/);
 });
