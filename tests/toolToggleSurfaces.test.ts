@@ -27,15 +27,15 @@ const typesSource = readFileSync(new URL("../src/types/domain.ts", import.meta.u
 
 test("写开关走 POST /api/tools/settings，读走快照里的 toolSettings", () => {
   assert.match(serverSource, /url\.pathname === "\/api\/tools\/settings"/);
-  assert.match(serverSource, /await saveToolSettings\(body\)/);
+  assert.match(serverSource, /await deps\.saveToolSettings\(body\)/);
   // 现状放在 bootstrap 里（不放在 ambient：那是给别的会话轮询用的，没必要跟着变大）。
-  assert.match(serverSource, /toolSettings: toolSettingsSnapshotFor\(targetRuntime\)/);
+  assert.match(serverSource, /toolSettings: deps\.toolSettingsSnapshotFor\(targetRuntime\)/);
   const ambient = serverSource.slice(serverSource.indexOf("ambient: true"), serverSource.indexOf("function buildSnapshot"));
   assert.doesNotMatch(ambient, /toolSettings/);
 });
 
 test("项目清单里带回每个项目自己的三态，但不落 projects.json", () => {
-  assert.match(serverSource, /codemode: projectToolToggleState\(project\)/);
+  assert.match(serverSource, /codemode: deps\.projectToolToggleState\(project\)/);
   // computed 字段跟着 `saveProjects()` 一起写盘的话，会把死值固化下来。
   const save = serverSource.slice(serverSource.indexOf("function saveProjects()"), serverSource.indexOf("function readActiveProjectId"));
   assert.doesNotMatch(save, /codemode/);

@@ -25,23 +25,6 @@ import { join, resolve } from "node:path";
  */
 export function createBridgeUtils(state, deps) {
   const { agentSkillsDir, appSkillsDir, hostSystemPrompt, openRuntimes, sessionStore } = deps;
-  const buildSnapshot = /** @type {any} */ ((...args) => deps.buildSnapshot(...args));
-  const disposeRuntime = /** @type {any} */ ((...args) => deps.disposeRuntime(...args));
-  const getRuntimeForRequest = /** @type {any} */ ((...args) => deps.getRuntimeForRequest(...args));
-  const listProjectSessions = /** @type {any} */ ((...args) => deps.listProjectSessions(...args));
-  const refreshSnapshot = /** @type {any} */ ((...args) => deps.refreshSnapshot(...args));
-  const reloadOpenRuntimeCapabilities = /** @type {any} */ (
-    (...args) => deps.reloadOpenRuntimeCapabilities(...args)
-  );
-  const reloadRuntimeTargets = /** @type {any} */ ((...args) => deps.reloadRuntimeTargets(...args));
-  const replaceRuntime = /** @type {any} */ ((...args) => deps.replaceRuntime(...args));
-  const sessionWorkspaceCwdForPath = /** @type {any} */ (
-    (...args) => deps.sessionWorkspaceCwdForPath(...args)
-  );
-  const touchProject = /** @type {any} */ ((...args) => deps.touchProject(...args));
-  const updateSessionStoreFromRuntime = /** @type {any} */ (
-    (...args) => deps.updateSessionStoreFromRuntime(...args)
-  );
 
   function disposeProjectRuntimes(projectId) {
     const projectRuntimes = [...openRuntimes.values()].filter(
@@ -105,7 +88,7 @@ export function createBridgeUtils(state, deps) {
    * 提示词），先让用户停掉再试。
    */
   async function runBuiltinCommand(body) {
-    const targetRuntime = getRuntimeForRequest(body);
+    const targetRuntime = deps.getRuntimeForRequest(body);
     const plan = planBuiltinCommand(body?.command, body?.args);
     if (plan.kind === "unknown" || !plan.command) {
       throw new Error("Unknown built-in command.");
@@ -117,8 +100,8 @@ export function createBridgeUtils(state, deps) {
       throw new Error("Stop the running response before reloading.");
     }
 
-    await reloadRuntimeTargets([targetRuntime]);
-    return { command: plan.command.name, snapshot: await buildSnapshot(targetRuntime) };
+    await deps.reloadRuntimeTargets([targetRuntime]);
+    return { command: plan.command.name, snapshot: await deps.buildSnapshot(targetRuntime) };
   }
 
   async function trustProject(projectId) {
@@ -133,8 +116,8 @@ export function createBridgeUtils(state, deps) {
       target.settingsManager.setProjectTrusted(true);
     }
 
-    await reloadOpenRuntimeCapabilities(project.id);
-    return refreshSnapshot();
+    await deps.reloadOpenRuntimeCapabilities(project.id);
+    return deps.refreshSnapshot();
   }
 
   async function pinProjectSession(projectId, sessionPath, pinned) {
@@ -151,9 +134,9 @@ export function createBridgeUtils(state, deps) {
       delete sessionPins[resolvedPath];
     }
 
-    touchProject(project.id, { sessionPins });
+    deps.touchProject(project.id, { sessionPins });
     sessionStore.setPinned(project.id, resolvedPath, pinned);
-    return refreshSnapshot();
+    return deps.refreshSnapshot();
   }
 
   async function deleteProjectSession(projectId, sessionPath) {
@@ -163,11 +146,11 @@ export function createBridgeUtils(state, deps) {
     removeSessionRecord(project, resolvedPath);
 
     if (isActiveSession) {
-      const sessions = listProjectSessions(findProject(project.id));
-      return replaceRuntime(findProject(project.id), sessions[0]?.path);
+      const sessions = deps.listProjectSessions(findProject(project.id));
+      return deps.replaceRuntime(findProject(project.id), sessions[0]?.path);
     }
 
-    return refreshSnapshot();
+    return deps.refreshSnapshot();
   }
 
   /**
@@ -177,7 +160,7 @@ export function createBridgeUtils(state, deps) {
    */
   function removeSessionRecord(project, resolvedPath) {
     scheduleWorktreeCleanup(project, resolvedPath);
-    disposeRuntime(resolvedPath);
+    deps.disposeRuntime(resolvedPath);
 
     if (existsSync(resolvedPath)) {
       unlinkSync(resolvedPath);
@@ -186,7 +169,7 @@ export function createBridgeUtils(state, deps) {
 
     const sessionPins = { ...(project.sessionPins ?? {}) };
     delete sessionPins[resolvedPath];
-    touchProject(project.id, {
+    deps.touchProject(project.id, {
       sessionPins,
       lastSessionPath:
         project.lastSessionPath === resolvedPath ? undefined : project.lastSessionPath,
@@ -207,7 +190,7 @@ export function createBridgeUtils(state, deps) {
 
     targetRuntime.session.setSessionName(cleanTitle);
     persistSessionShell(targetRuntime.session.sessionManager);
-    updateSessionStoreFromRuntime(targetRuntime);
+    deps.updateSessionStoreFromRuntime(targetRuntime);
   }
 
   /**
@@ -264,7 +247,7 @@ export function createBridgeUtils(state, deps) {
       ...patch,
     });
     if (next) {
-      touchProject(projectId, { composerDefaults: next });
+      deps.touchProject(projectId, { composerDefaults: next });
     }
   }
 
@@ -282,12 +265,12 @@ export function createBridgeUtils(state, deps) {
   /** 请求体里带了 sessionPath 就按会话的 workspace 干活，没带就是项目目录。 */
   function requestWorkspaceCwd(project, body) {
     const sessionPath = String(body?.sessionPath ?? "").trim();
-    return sessionPath ? sessionWorkspaceCwdForPath(project, sessionPath) : project.cwd;
+    return sessionPath ? deps.sessionWorkspaceCwdForPath(project, sessionPath) : project.cwd;
   }
 
   /** 要求这条会话现在确实跑在一个活着的托管 worktree 里（建分支 / 删除的入口闸）。 */
   function requireSessionWorktreeCwd(project, sessionPath) {
-    const cwd = sessionWorkspaceCwdForPath(project, sessionPath);
+    const cwd = deps.sessionWorkspaceCwdForPath(project, sessionPath);
     if (!isManagedWorktreePath(worktreesRoot, cwd) || !existsSync(cwd)) {
       throw new Error("这条会话不在托管 worktree 里。");
     }

@@ -12,8 +12,6 @@ import { randomUUID } from "node:crypto";
  */
 export function createExtensionUiDomain(state, deps) {
   const { activePackageCommands, appCwd, extensionUiAnsiAccent, normalizeExtensionUiMode, openRuntimes } = deps;
-  const abortSession = /** @type {any} */ ((...args) => deps.abortSession(...args));
-  const refreshSnapshot = /** @type {any} */ ((...args) => deps.refreshSnapshot(...args));
 
 const headlessUiTheme = {
   fg: (_name, text) => text,
@@ -519,7 +517,7 @@ async function bindPiDesktopSessionExtensions(session, runtimeRef, uiBridge) {
     mode: "tui",
     commandContextActions: createPiDesktopCommandContextActions(runtimeRef),
     abortHandler: () => {
-      void abortSession(session, { reason: "extension_abort_handler" }).catch(() => undefined);
+      void deps.abortSession(session, { reason: "extension_abort_handler" }).catch(() => undefined);
     },
     shutdownHandler: () => {
       session.dispose();
@@ -540,11 +538,11 @@ async function respondToExtensionUiRequest(body) {
   for (const candidate of openRuntimes.values()) {
     if (await candidate.uiBridge?.respond(body)) {
       if (body?.cancelled && activePackageCommands.get(candidate.session.sessionFile) === candidate) {
-        await abortSession(candidate.session, { reason: "extension_ui_cancel" }).catch(() => undefined);
+        await deps.abortSession(candidate.session, { reason: "extension_ui_cancel" }).catch(() => undefined);
       }
       return {
         ok: true,
-        snapshot: await refreshSnapshot(),
+        snapshot: await deps.refreshSnapshot(),
       };
     }
   }

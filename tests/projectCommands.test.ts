@@ -315,7 +315,7 @@ test("四个命令端点在 server 上都有实现，运行只跑项目列表里
   // 分支体已抽成处理器函数（见 tests/lib/bridgeSource.ts#routeBody）。
   const runBody = routeBody(serverSource, 'url.pathname === "/api/projects/commands/run"');
   assert.match(runBody, /selectedProjectCommand\(project\.commands \?\? \[\], String\(body\?\.commandId/);
-  assert.match(runBody, /resolveCommandCwd\(requestWorkspaceCwd\(project, body\), command\.cwd\)/);
+  assert.match(runBody, /resolveCommandCwd\(deps\.requestWorkspaceCwd\(project, body\), command\.cwd\)/);
   // 运行方式（后台静默 / 指定终端）从请求体进入 `runProjectCommand`；断言不再锁死旧的两参调用。
   assert.match(runBody, /runProjectCommand\(command\.command, cwd, \{/);
   assert.match(runBody, /background/);

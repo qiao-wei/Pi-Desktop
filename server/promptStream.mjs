@@ -24,22 +24,6 @@ import { basename, extname, join, resolve } from "node:path";
  */
 export function createPromptStream(state, deps) {
   const { directoryMimeType, maxAttachmentBytes, maxAttachmentCount, maxAttachmentTotalBytes, modelRuntime, projectAttachmentRoot } = deps;
-  const findProject = /** @type {any} */ ((...args) => deps.findProject(...args));
-  const sanitizePathPart = /** @type {any} */ ((...args) => deps.sanitizePathPart(...args));
-  const activeSessionCapabilitySelection = /** @type {any} */ ((...args) => deps.activeSessionCapabilitySelection(...args));
-  const manualSkillPrefixFor = /** @type {any} */ ((...args) => deps.manualSkillPrefixFor(...args));
-  const skillCapabilityId = /** @type {any} */ ((...args) => deps.skillCapabilityId(...args));
-  const abortSession = /** @type {any} */ ((...args) => deps.abortSession(...args));
-  const generateInitialSessionTitle = /** @type {any} */ ((...args) => deps.generateInitialSessionTitle(...args));
-  const isUsableModel = /** @type {any} */ ((...args) => deps.isUsableModel(...args));
-  const latestAssistantError = /** @type {any} */ ((...args) => deps.latestAssistantError(...args));
-  const pendingQueues = /** @type {any} */ ((...args) => deps.pendingQueues(...args));
-  const queueSeq = /** @type {any} */ ((...args) => deps.queueSeq(...args));
-  const readRuntimeCapabilityContext = /** @type {any} */ ((...args) => deps.readRuntimeCapabilityContext(...args));
-  const updateRuntimeSessionCapabilities = /** @type {any} */ ((...args) => deps.updateRuntimeSessionCapabilities(...args));
-  const updateSessionStoreFromRuntime = /** @type {any} */ ((...args) => deps.updateSessionStoreFromRuntime(...args));
-  const buildSnapshot = /** @type {any} */ ((...args) => deps.buildSnapshot(...args));
-  const getRuntimeForRequest = /** @type {any} */ ((...args) => deps.getRuntimeForRequest(...args));
 
 async function streamPrompt(req, res, requestId, options = {}) {
   const promptStartedAt = Date.now();
@@ -47,7 +31,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
   const rawInput = String(body?.input ?? "");
   const displayInput = String(body?.displayInput ?? rawInput);
   const streamingBehavior = body?.streamingBehavior === "followUp" ? "followUp" : "steer";
-  const activeRuntime = getRuntimeForRequest(body);
+  const activeRuntime = deps.getRuntimeForRequest(body);
   // 编辑重发：先回退分支，之后所有 bubble ordinal / 上下文都按回退后的分支计算。
   if (options.rewindTurn != null) {
     await rewindSessionToTurn(activeRuntime.session, options.rewindTurn);
@@ -72,7 +56,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
   if (!rawInput.trim() && !attachments.length && !requestedCapabilities.length) {
     throw new Error("input is required");
   }
-  if (!isUsableModel(activeRuntime.session.model)) {
+  if (!deps.isUsableModel(activeRuntime.session.model)) {
     throw new Error("请先选择 provider 和 model。");
   }
   if (!modelRuntime.hasConfiguredAuth(activeRuntime.session.model.provider)) {
@@ -144,7 +128,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
     // `assumeStreaming`: this snapshot is emitted before `prompt()` starts the run,
     // but the client is already showing it as streaming - without the flag the
     // snapshot would tell the client the run is over and kill the stop button.
-    writeEvent({ type: "snapshot", snapshot: await buildSnapshot(activeRuntime, { assumeStreaming: true }) });
+    writeEvent({ type: "snapshot", snapshot: await deps.buildSnapshot(activeRuntime, { assumeStreaming: true }) });
   }
   // The thinking block whose end the provider has not reported yet.
   //
@@ -241,7 +225,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
       if (event.message.role === "user") {
         // AgentSession persists the message immediately after notifying
         // subscribers, so defer the index refresh until that append completes.
-        queueMicrotask(() => updateSessionStoreFromRuntime(activeRuntime));
+        queueMicrotask(() => deps.updateSessionStoreFromRuntime(activeRuntime));
       }
     }
 
@@ -412,7 +396,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
       writeEvent({
         type: "queued",
         behavior: streamingBehavior,
-        ...pendingQueues(activeSession, queueSeq(activeSession, event)),
+        ...deps.pendingQueues(activeSession, deps.queueSeq(activeSession, event)),
       });
       return;
     }
@@ -437,7 +421,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
     }
 
     if (event.type === "agent_end" && event.willRetry === false) {
-      const assistantError = latestAssistantError(event.messages);
+      const assistantError = deps.latestAssistantError(event.messages);
       if (assistantError) {
         finalAgentError = assistantError;
       }
@@ -460,7 +444,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
     // 只有*启动*这一轮的请求断开才中止；后到的订阅者断开不动别人的 run。
     if (DELIVERY_POLICY.onOwnerDisconnect === "abort-run" && !wasStreaming && !closed && activeSession.isStreaming) {
       diagnosticLog("prompt.client_close_abort.start", { requestId, ...sessionDetails(activeRuntime) });
-      void abortSession(activeSession, { requestId, reason: "prompt_client_close" })
+      void deps.abortSession(activeSession, { requestId, reason: "prompt_client_close" })
         .catch(() => undefined);
     }
   };
@@ -482,15 +466,15 @@ async function streamPrompt(req, res, requestId, options = {}) {
     });
     if (!closed) {
       if (wasStreaming) {
-        writeEvent({ type: "queued", behavior: streamingBehavior, ...pendingQueues(activeSession) });
+        writeEvent({ type: "queued", behavior: streamingBehavior, ...deps.pendingQueues(activeSession) });
       } else {
         if (shouldTitleAfterFirstTurn) {
-          await generateInitialSessionTitle(activeRuntime).catch((error) => {
+          await deps.generateInitialSessionTitle(activeRuntime).catch((error) => {
             console.error(`Failed to generate initial session title: ${error instanceof Error ? error.message : String(error)}`);
           });
         }
-        updateSessionStoreFromRuntime(activeRuntime);
-        writeEvent({ type: "snapshot", snapshot: await buildSnapshot(activeRuntime) });
+        deps.updateSessionStoreFromRuntime(activeRuntime);
+        writeEvent({ type: "snapshot", snapshot: await deps.buildSnapshot(activeRuntime) });
       }
       if (finalAgentError) {
         writeEvent(domainErrorFrame(finalAgentError));
@@ -539,15 +523,15 @@ function persistPromptAttachments(activeRuntime, values) {
     throw new Error(`A maximum of ${maxAttachmentCount} attachments is allowed.`);
   }
 
-  const project = findProject(activeRuntime.projectId);
+  const project = deps.findProject(activeRuntime.projectId);
   const sessionHeader = activeRuntime.session.sessionManager.getHeader();
   const sessionId = String(sessionHeader?.id ?? basename(activeRuntime.session.sessionFile, extname(activeRuntime.session.sessionFile)));
-  const attachmentDir = join(projectAttachmentRoot, project.id, sanitizePathPart(sessionId));
+  const attachmentDir = join(projectAttachmentRoot, project.id, deps.sanitizePathPart(sessionId));
   let totalBytes = 0;
 
   return attachmentValues.map((attachment, index) => {
     const originalName = String(attachment?.name ?? `attachment-${index + 1}`).trim() || `attachment-${index + 1}`;
-    const id = sanitizePathPart(String(attachment?.id ?? randomUUID())) || randomUUID();
+    const id = deps.sanitizePathPart(String(attachment?.id ?? randomUUID())) || randomUUID();
     const sourcePath = typeof attachment?.sourcePath === "string" ? attachment.sourcePath : "";
     const resolvedSource = sourcePath ? resolve(sourcePath) : "";
 
@@ -625,8 +609,8 @@ async function normalizePromptMessageParts(activeRuntime, parts, displayInput, a
     return { parts: normalized, manualSkillPrefix: "" };
   }
 
-  const context = await readRuntimeCapabilityContext(activeRuntime);
-  const current = activeSessionCapabilitySelection(
+  const context = await deps.readRuntimeCapabilityContext(activeRuntime);
+  const current = deps.activeSessionCapabilitySelection(
     activeRuntime.session.sessionManager,
     context.allSkills,
     context.config,
@@ -635,8 +619,8 @@ async function normalizePromptMessageParts(activeRuntime, parts, displayInput, a
   const requestedSkills = requestedCapabilities.filter((capability) => capability.kind === "skill");
   const selection = activeRuntime.session.isStreaming || !requestedSkills.length
     ? current
-    : await updateRuntimeSessionCapabilities(activeRuntime, (currentSelection) => {
-        const knownSkills = new Set(context.allSkills.map(skillCapabilityId));
+    : await deps.updateRuntimeSessionCapabilities(activeRuntime, (currentSelection) => {
+        const knownSkills = new Set(context.allSkills.map(deps.skillCapabilityId));
         const enabledSkills = new Set(currentSelection.enabledSkills);
         const disabledSkills = new Set(currentSelection.disabledSkills);
 
@@ -669,7 +653,7 @@ async function normalizePromptMessageParts(activeRuntime, parts, displayInput, a
   });
   return {
     parts: activeParts,
-    manualSkillPrefix: manualSkillPrefixFor(context.allSkills, requestedSkills),
+    manualSkillPrefix: deps.manualSkillPrefixFor(context.allSkills, requestedSkills),
   };
 }
 

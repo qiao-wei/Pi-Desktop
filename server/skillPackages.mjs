@@ -26,49 +26,20 @@ import { Type } from "typebox";
 export function createSkillPackages(state, deps) {
   const { activePackageCommands } = deps;
   // 跨域引用：由别的域工厂提供，且两边可能互相调用 —— 转发到共享的 deps，调用时才取。
-  const findProject = /** @type {any} */ ((...args) => deps.findProject(...args));
   // 跨域引用：由别的域工厂提供，且两边可能互相调用 —— 转发到共享的 deps，调用时才取。
-  const assertExistingSkillTarget = /** @type {any} */ ((...args) => deps.assertExistingSkillTarget(...args));
-  const assertWritableSkillRoot = /** @type {any} */ ((...args) => deps.assertWritableSkillRoot(...args));
-  const assertWritableSkillTarget = /** @type {any} */ ((...args) => deps.assertWritableSkillTarget(...args));
-  const capabilityPackageManager = /** @type {any} */ ((...args) => deps.capabilityPackageManager(...args));
-  const configuredPackagesForRuntime = /** @type {any} */ ((...args) => deps.configuredPackagesForRuntime(...args));
-  const discoverAllProjectSkills = /** @type {any} */ ((...args) => deps.discoverAllProjectSkills(...args));
-  const getInstalledSkillPath = /** @type {any} */ ((...args) => deps.getInstalledSkillPath(...args));
-  const getInstalledSkillRoot = /** @type {any} */ ((...args) => deps.getInstalledSkillRoot(...args));
-  const getSkillVersionDir = /** @type {any} */ ((...args) => deps.getSkillVersionDir(...args));
-  const getSkillVersionsRoot = /** @type {any} */ ((...args) => deps.getSkillVersionsRoot(...args));
-  const inferInstalledSkillScope = /** @type {any} */ ((...args) => deps.inferInstalledSkillScope(...args));
-  const isBuiltinSkillPath = /** @type {any} */ ((...args) => deps.isBuiltinSkillPath(...args));
-  const normalizeCapabilityId = /** @type {any} */ ((...args) => deps.normalizeCapabilityId(...args));
-  const packageResourcesForRuntime = /** @type {any} */ ((...args) => deps.packageResourcesForRuntime(...args));
-  const reloadOpenRuntimeCapabilities = /** @type {any} */ ((...args) => deps.reloadOpenRuntimeCapabilities(...args));
-  const reloadPiDesktopSkills = /** @type {any} */ ((...args) => deps.reloadPiDesktopSkills(...args));
-  const resolveCapabilityPackageCommand = /** @type {any} */ ((...args) => deps.resolveCapabilityPackageCommand(...args));
-  const skillCapabilityId = /** @type {any} */ ((...args) => deps.skillCapabilityId(...args));
-  const straightenInstalledPackage = /** @type {any} */ ((...args) => deps.straightenInstalledPackage(...args));
   // 跨域引用：由别的域工厂提供，且两边可能互相调用 —— 转发到共享的 deps，调用时才取。
-  const ensureWorktreePiLink = /** @type {any} */ ((...args) => deps.ensureWorktreePiLink(...args));
-  const buildCapabilitiesSnapshot = /** @type {any} */ ((...args) => deps.buildCapabilitiesSnapshot(...args));
-  const buildSnapshot = /** @type {any} */ ((...args) => deps.buildSnapshot(...args));
-  const getRuntimeForRequest = /** @type {any} */ ((...args) => deps.getRuntimeForRequest(...args));
-  const readCapabilitiesConfig = /** @type {any} */ ((...args) => deps.readCapabilitiesConfig(...args));
-  const refreshRuntimeCapabilityPaths = /** @type {any} */ ((...args) => deps.refreshRuntimeCapabilityPaths(...args));
-  const refreshSnapshot = /** @type {any} */ ((...args) => deps.refreshSnapshot(...args));
-  const updateSessionStoreFromRuntime = /** @type {any} */ ((...args) => deps.updateSessionStoreFromRuntime(...args));
-  const writeCapabilitiesConfig = /** @type {any} */ ((...args) => deps.writeCapabilitiesConfig(...args));
 
 async function findCapabilityPackageCommand(targetRuntime, packageId, commandName) {
   if (!packageId || !commandName) {
     throw new Error("Package command is required.");
   }
 
-  const packageItem = configuredPackagesForRuntime(targetRuntime).find((item) => item.id === packageId);
+  const packageItem = deps.configuredPackagesForRuntime(targetRuntime).find((item) => item.id === packageId);
   if (!packageItem) {
     throw new Error("Package not found.");
   }
 
-  const packageExtensionPaths = new Set(enabledResourcePaths(await packageResourcesForRuntime(targetRuntime, packageItem), "extensions"));
+  const packageExtensionPaths = new Set(enabledResourcePaths(await deps.packageResourcesForRuntime(targetRuntime, packageItem), "extensions"));
   const command = targetRuntime.session.extensionRunner?.getRegisteredCommands?.().find((candidate) =>
     commandMatchesPackage(candidate, packageItem, packageExtensionPaths)
     && (candidate.invocationName === commandName || candidate.name === commandName),
@@ -82,7 +53,7 @@ async function findCapabilityPackageCommand(targetRuntime, packageId, commandNam
 
 async function streamCapabilityPackageCommand(req, res) {
   const body = await readJson(req);
-  const { targetRuntime, commandText } = await resolveCapabilityPackageCommand(body);
+  const { targetRuntime, commandText } = await deps.resolveCapabilityPackageCommand(body);
   const sessionPath = targetRuntime.session.sessionFile;
   activePackageCommands.set(sessionPath, targetRuntime);
   res.writeHead(200, {
@@ -130,8 +101,8 @@ async function streamCapabilityPackageCommand(req, res) {
       expandPromptTemplates: true,
       source: "interactive",
     });
-    updateSessionStoreFromRuntime(targetRuntime);
-    writeEvent({ type: "snapshot", snapshot: await buildSnapshot(targetRuntime) });
+    deps.updateSessionStoreFromRuntime(targetRuntime);
+    writeEvent({ type: "snapshot", snapshot: await deps.buildSnapshot(targetRuntime) });
     writeEvent({ type: "done" });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -149,7 +120,7 @@ async function streamCapabilityPackageCommand(req, res) {
 }
 
 async function installCapabilityPackage(body, onProgress) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   const source = String(body?.source ?? "").trim();
   if (!source) throw new Error("Package source is required.");
   const local = body?.scope === "project";
@@ -157,28 +128,28 @@ async function installCapabilityPackage(body, onProgress) {
     throw new Error("Project is not trusted; cannot install a project package.");
   }
 
-  const packageManager = capabilityPackageManager(targetRuntime, onProgress);
+  const packageManager = deps.capabilityPackageManager(targetRuntime, onProgress);
   await packageManager.installAndPersist(source, { local });
   if (!local) {
-    straightenInstalledPackage(targetRuntime, source);
+    deps.straightenInstalledPackage(targetRuntime, source);
   }
   // The persisted source may no longer equal what the UI sent (pi relativises local paths), so
   // match on where the package actually landed as well.
-  const installTarget = installTargetPath(source, findProject(targetRuntime.projectId).cwd);
-  const installed = configuredPackagesForRuntime(targetRuntime).find((pkg) => (
+  const installTarget = installTargetPath(source, deps.findProject(targetRuntime.projectId).cwd);
+  const installed = deps.configuredPackagesForRuntime(targetRuntime).find((pkg) => (
     pkg.scope === (local ? "project" : "user")
     && (pkg.source === source || Boolean(installTarget) && pkg.installedPath === resolve(installTarget))
   ));
   if (installed && body?.autoload === false) {
     setPackageAutoload(targetRuntime.settingsManager, installed, false);
   }
-  await reloadOpenRuntimeCapabilities("all");
-  return refreshSnapshot();
+  await deps.reloadOpenRuntimeCapabilities("all");
+  return deps.refreshSnapshot();
 }
 
 async function removeCapabilityPackage(body) {
-  const targetRuntime = getRuntimeForRequest(body);
-  const project = findProject(targetRuntime.projectId);
+  const targetRuntime = deps.getRuntimeForRequest(body);
+  const project = deps.findProject(targetRuntime.projectId);
   const source = String(body?.source ?? "").trim();
   if (!source) throw new Error("Package source is required.");
   const local = body?.scope === "project";
@@ -190,13 +161,13 @@ async function removeCapabilityPackage(body) {
     projectCwd: project.cwd,
     agentDir,
   });
-  const removed = await capabilityPackageManager(targetRuntime).removeAndPersist(removableSource, { local });
+  const removed = await deps.capabilityPackageManager(targetRuntime).removeAndPersist(removableSource, { local });
   if (!removed) {
     // pi treats "nothing matched" as a no-op; the user pressed Delete, so say so.
     throw new Error(`Package is not configured in ${local ? "project" : "user"} settings: ${source}`);
   }
-  await reloadOpenRuntimeCapabilities("all");
-  return refreshSnapshot();
+  await deps.reloadOpenRuntimeCapabilities("all");
+  return deps.refreshSnapshot();
 }
 
 /**
@@ -222,7 +193,7 @@ async function streamCapabilityPackageAction(req, res, operation) {
 
   try {
     const snapshot = await operation(body, (event) => writeEvent(packageProgressEvent(event)));
-    writeEvent({ type: "snapshot", snapshot: snapshot ?? await refreshSnapshot() });
+    writeEvent({ type: "snapshot", snapshot: snapshot ?? await deps.refreshSnapshot() });
     writeEvent({ type: "done" });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -238,17 +209,17 @@ async function streamCapabilityPackageAction(req, res, operation) {
  * that this package did not resolve is rejected, so the endpoint cannot be used as a file reader.
  */
 async function readCapabilityPackageFile(body) {
-  const targetRuntime = getRuntimeForRequest(body);
-  const packageId = normalizeCapabilityId(body?.packageId);
+  const targetRuntime = deps.getRuntimeForRequest(body);
+  const packageId = deps.normalizeCapabilityId(body?.packageId);
   const requestedPath = String(body?.path ?? "").trim();
   if (!packageId || !requestedPath) {
     throw new Error("Package id and path are required.");
   }
-  const pkg = configuredPackagesForRuntime(targetRuntime).find((candidate) => packageCapabilityId(candidate) === packageId);
+  const pkg = deps.configuredPackagesForRuntime(targetRuntime).find((candidate) => packageCapabilityId(candidate) === packageId);
   if (!pkg) {
     throw new Error(`Package is not configured: ${packageId}`);
   }
-  const resolved = await packageResourcesForRuntime(targetRuntime, pkg);
+  const resolved = await deps.packageResourcesForRuntime(targetRuntime, pkg);
   const entry = findPackageResourceEntry(resolved, requestedPath, { packageRoot: pkg.installedPath ?? "" });
   if (!entry) {
     throw new Error("Path does not belong to this package.");
@@ -278,8 +249,8 @@ async function readCapabilityPackageFile(body) {
 }
 
 async function addCapabilityExtension(body) {
-  const targetRuntime = getRuntimeForRequest(body);
-  const project = findProject(targetRuntime.projectId);
+  const targetRuntime = deps.getRuntimeForRequest(body);
+  const project = deps.findProject(targetRuntime.projectId);
   const rawPath = String(body?.path ?? "").trim();
   if (!rawPath) throw new Error("Extension path is required.");
   const scope = body?.scope === "project" ? "project" : "user";
@@ -295,15 +266,15 @@ async function addCapabilityExtension(body) {
   const next = [...new Set([...current, rawPath])];
   if (scope === "project") settingsManager.setProjectExtensionPaths(next);
   else settingsManager.setExtensionPaths(next);
-  await reloadOpenRuntimeCapabilities("all");
-  return refreshSnapshot();
+  await deps.reloadOpenRuntimeCapabilities("all");
+  return deps.refreshSnapshot();
 }
 
 async function removeCapabilityExtension(body) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   const id = resolve(String(body?.id ?? body?.path ?? "").trim());
   if (!id) throw new Error("Extension id is required.");
-  const project = findProject(targetRuntime.projectId);
+  const project = deps.findProject(targetRuntime.projectId);
   const settingsManager = targetRuntime.settingsManager;
   const scopes = [
     ["user", settingsManager.getGlobalSettings().extensions ?? [], agentDir],
@@ -316,17 +287,17 @@ async function removeCapabilityExtension(body) {
       else settingsManager.setExtensionPaths(next);
     }
   }
-  await reloadOpenRuntimeCapabilities("all");
-  return refreshSnapshot();
+  await deps.reloadOpenRuntimeCapabilities("all");
+  return deps.refreshSnapshot();
 }
 
 async function deleteSkillFromCapabilityPage(body) {
-  const targetRuntime = getRuntimeForRequest(body);
-  const project = findProject(targetRuntime.projectId);
+  const targetRuntime = deps.getRuntimeForRequest(body);
+  const project = deps.findProject(targetRuntime.projectId);
   const skillTarget = String(body?.path ?? body?.id ?? "").trim();
   const skillPath = skillTarget ? resolve(skillTarget) : "";
   const allSkills = targetRuntime.capabilityPaths?.skillInventory
-    ?? await discoverAllProjectSkills(project, targetRuntime.settingsManager);
+    ?? await deps.discoverAllProjectSkills(project, targetRuntime.settingsManager);
   const skill = allSkills.find((candidate) =>
     candidate.name === skillTarget || resolve(candidate.filePath) === skillPath,
   );
@@ -337,18 +308,18 @@ async function deleteSkillFromCapabilityPage(body) {
   // 目录技能删整个目录；独立 markdown 技能（技能根下直接放的 *.md）只删那个文件。
   // 以前一律 `dirname(filePath)`：独立 md 技能会让目标变成整个 skills 根目录。
   const skillRoot = skillPathTarget(skill.filePath);
-  assertWritableSkillTarget(skillRoot);
-  assertExistingSkillTarget(skillRoot);
-  await snapshotInstalledSkillVersion(project, body?.scope === "user" ? "user" : inferInstalledSkillScope(project, skillRoot), basename(skillRoot), skillRoot, "before-delete");
+  deps.assertWritableSkillTarget(skillRoot);
+  deps.assertExistingSkillTarget(skillRoot);
+  await snapshotInstalledSkillVersion(project, body?.scope === "user" ? "user" : deps.inferInstalledSkillScope(project, skillRoot), basename(skillRoot), skillRoot, "before-delete");
   rmSync(skillRoot, { recursive: true, force: true });
 
-  const config = readCapabilitiesConfig();
-  delete config.skills[skillCapabilityId(skill)];
-  writeCapabilitiesConfig(config);
-  await reloadPiDesktopSkills({ scope: "all", projectId: project.id, sourceLoader: targetRuntime.resourceLoader });
+  const config = deps.readCapabilitiesConfig();
+  delete config.skills[deps.skillCapabilityId(skill)];
+  deps.writeCapabilitiesConfig(config);
+  await deps.reloadPiDesktopSkills({ scope: "all", projectId: project.id, sourceLoader: targetRuntime.resourceLoader });
   return {
-    capabilities: await buildCapabilitiesSnapshot(targetRuntime),
-    snapshot: await buildSnapshot(targetRuntime),
+    capabilities: await deps.buildCapabilitiesSnapshot(targetRuntime),
+    snapshot: await deps.buildSnapshot(targetRuntime),
   };
 }
 
@@ -550,7 +521,7 @@ function createPiDesktopSkillTools(project, resourceLoader) {
       ],
       parameters: Type.Object({}, { additionalProperties: false }),
       async execute() {
-        const result = await reloadPiDesktopSkills({ scope: "all", sourceLoader: resourceLoader });
+        const result = await deps.reloadPiDesktopSkills({ scope: "all", sourceLoader: resourceLoader });
         return {
           content: [{ type: "text", text: `Reloaded Pi Desktop skills; ${result.skillCount} skill(s) are now loaded.` }],
           details: result,
@@ -565,13 +536,13 @@ async function installPiDesktopSkill(project, resourceLoader, params, cwd) {
   assertSkillDirectory(sourcePath);
 
   const scope = params?.scope === "user" ? "user" : "project";
-  const targetParent = getInstalledSkillRoot(project, scope);
+  const targetParent = deps.getInstalledSkillRoot(project, scope);
   const name = normalizeSkillFolderName(params?.name, basename(sourcePath));
   const targetPath = resolve(targetParent, name);
   const overwrite = Boolean(params?.overwrite);
   const existedBefore = existsSync(targetPath);
   let alreadyInstalled = false;
-  assertWritableSkillTarget(targetPath);
+  deps.assertWritableSkillTarget(targetPath);
 
   mkdirSync(targetParent, { recursive: true });
 
@@ -608,7 +579,7 @@ async function installPiDesktopSkill(project, resourceLoader, params, cwd) {
   };
   const shouldReload = params?.reload !== false;
   if (shouldReload) {
-    reloadResult = await reloadPiDesktopSkills({ scope, projectId: project.id, sourceLoader: resourceLoader });
+    reloadResult = await deps.reloadPiDesktopSkills({ scope, projectId: project.id, sourceLoader: resourceLoader });
   }
 
   return {
@@ -626,8 +597,8 @@ async function installPiDesktopSkill(project, resourceLoader, params, cwd) {
 async function writePiDesktopSkillFile(project, resourceLoader, params) {
   const scope = params?.scope === "user" ? "user" : "project";
   const skillName = normalizeSkillFolderName(params?.skillName, "");
-  const skillRoot = getInstalledSkillPath(project, scope, skillName);
-  assertWritableSkillRoot(skillRoot);
+  const skillRoot = deps.getInstalledSkillPath(project, scope, skillName);
+  deps.assertWritableSkillRoot(skillRoot);
 
   const relativePath = normalizeSkillRelativePath(params?.relativePath ?? "SKILL.md");
   const absolutePath = resolve(skillRoot, relativePath);
@@ -647,7 +618,7 @@ async function writePiDesktopSkillFile(project, resourceLoader, params) {
   };
   const shouldReload = params?.reload !== false;
   if (shouldReload) {
-    reloadResult = await reloadPiDesktopSkills({ scope, projectId: project.id, sourceLoader: resourceLoader });
+    reloadResult = await deps.reloadPiDesktopSkills({ scope, projectId: project.id, sourceLoader: resourceLoader });
   }
 
   return {
@@ -664,7 +635,7 @@ async function writePiDesktopSkillFile(project, resourceLoader, params) {
 function listPiDesktopSkillVersions(project, params) {
   const scope = params?.scope === "user" ? "user" : "project";
   const skillName = normalizeSkillFolderName(params?.skillName, "");
-  const versionsRoot = getSkillVersionsRoot(project, scope);
+  const versionsRoot = deps.getSkillVersionsRoot(project, scope);
   const skillVersionsRoot = join(versionsRoot, skillName);
   const versions = [];
 
@@ -701,10 +672,10 @@ async function restorePiDesktopSkillVersion(project, resourceLoader, params) {
     throw new Error("versionId is required.");
   }
 
-  const skillRoot = getInstalledSkillPath(project, scope, skillName);
-  assertWritableSkillTarget(skillRoot);
+  const skillRoot = deps.getInstalledSkillPath(project, scope, skillName);
+  deps.assertWritableSkillTarget(skillRoot);
 
-  const versionDir = getSkillVersionDir(project, scope, skillName, versionId);
+  const versionDir = deps.getSkillVersionDir(project, scope, skillName, versionId);
   const snapshotDir = join(versionDir, "files");
   if (!existsSync(snapshotDir)) {
     throw new Error(`Unknown version: ${versionId}`);
@@ -729,7 +700,7 @@ async function restorePiDesktopSkillVersion(project, resourceLoader, params) {
   };
   const shouldReload = params?.reload !== false;
   if (shouldReload) {
-    reloadResult = await reloadPiDesktopSkills({ scope, projectId: project.id, sourceLoader: resourceLoader });
+    reloadResult = await deps.reloadPiDesktopSkills({ scope, projectId: project.id, sourceLoader: resourceLoader });
   }
 
   return {
@@ -749,19 +720,19 @@ async function reloadRuntimeTargets(targets, { skillsOnly = false } = {}) {
     // 刚装的项目技能 / 包就在项目根的 `.pi` 里：先保证 worktree 会话能看到它，再重载。
     const project = state.projects.find((entry) => entry.id === candidate.projectId);
     if (project) {
-      ensureWorktreePiLink(project, candidate.workspaceCwd);
+      deps.ensureWorktreePiLink(project, candidate.workspaceCwd);
     }
     if (skillsOnly) {
       // The loader's filter reads `capabilityPaths` by reference, so refresh it first and
       // then let pi re-run its own skill pass. Fall through to the full reload only when
       // pi does not expose that entry point.
-      await refreshRuntimeCapabilityPaths(candidate);
+      await deps.refreshRuntimeCapabilityPaths(candidate);
       if (reloadRuntimeSkills(candidate)) {
         return;
       }
     }
     await candidate.settingsManager.reload();
-    await refreshRuntimeCapabilityPaths(candidate);
+    await deps.refreshRuntimeCapabilityPaths(candidate);
     await candidate.session.reload();
   }));
 }
@@ -776,7 +747,7 @@ function assertWritableSkillFile(skillRoot, absolutePath) {
 
   if (existsSync(normalizedPath)) {
     const realTarget = realpathSync(normalizedPath);
-    if (isBuiltinSkillPath(realTarget) || !isPathInside(normalizedRoot, realTarget)) {
+    if (deps.isBuiltinSkillPath(realTarget) || !isPathInside(normalizedRoot, realTarget)) {
       throw new Error("Skill file resolves outside the selected skill directory.");
     }
     return;
@@ -793,7 +764,7 @@ function assertWritableSkillFile(skillRoot, absolutePath) {
 
   if (existsSync(existingParent)) {
     const realParent = realpathSync(existingParent);
-    if (isBuiltinSkillPath(realParent) || !isPathInside(normalizedRoot, realParent)) {
+    if (deps.isBuiltinSkillPath(realParent) || !isPathInside(normalizedRoot, realParent)) {
       throw new Error("Skill file resolves outside the selected skill directory.");
     }
   }
@@ -805,7 +776,7 @@ async function snapshotInstalledSkillVersion(project, scope, skillName, skillRoo
   }
 
   const versionId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
-  const versionDir = getSkillVersionDir(project, scope, skillName, versionId);
+  const versionDir = deps.getSkillVersionDir(project, scope, skillName, versionId);
   const snapshotPath = join(versionDir, "files");
 
   mkdirSync(versionDir, { recursive: true });

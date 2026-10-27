@@ -222,6 +222,6 @@ test("normalizePromptMessageParts 两条出口都带上 manualSkillPrefix", () =
   );
   assert.match(
     normalize,
-    /manualSkillPrefix: manualSkillPrefixFor\(context\.allSkills, requestedSkills\)/,
+    /manualSkillPrefix: deps\.manualSkillPrefixFor\(context\.allSkills, requestedSkills\)/,
   );
 });

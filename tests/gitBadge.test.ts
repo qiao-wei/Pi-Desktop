@@ -355,7 +355,7 @@ test("弹层里能从当前分支新建分支：按钮→表单→服务端", ()
   // cwd 仍然只由服务端从 projectId/sessionPath 解析，客户端不能直接传路径。
   assert.match(
     serverSource,
-    /const cwd = requestWorkspaceCwd\(project, body\);\s*await createGitBranch\(cwd, String\(body\?\.name \?\? ""\)\)/,
+    /const cwd = deps\.requestWorkspaceCwd\(project, body\);\s*await createGitBranch\(cwd, String\(body\?\.name \?\? ""\)\)/,
     "新建分支路由在会话 workspace 里执行；起点由服务端定（不接受参数）",
   );
   assert.ok(!/createGitBranch\([^)]*body\?\.from/.test(serverSource), "客户端不能指定分支起点");
@@ -695,8 +695,8 @@ test("生成信息走服务端且用当前会话的模型，不把 diff 发到�
   // 分支体已抽成处理器函数（见 tests/lib/bridgeSource.ts#routeBody）：断言「这段路由的行为」，
   // 原来直接在整份桥源码上跨行匹配，拆分后必然假红。
   const route = routeBody(serverSource, 'url.pathname === "/api/projects/git/commit-message"');
-  assert.match(route, /const cwd = requestWorkspaceCwd\(project, body\);\s*const context = await readCommitDiff\(cwd, body\?\.paths\)/, "服务端自己读 diff，不信客户端传的内容");
-  assert.match(route, /const model = getRuntimeForRequest\(body\)\.session\.model;/, "要用目标会话的模型（而不是面板里碰巧选中的那个）");
+  assert.match(route, /const cwd = deps\.requestWorkspaceCwd\(project, body\);\s*const context = await readCommitDiff\(cwd, body\?\.paths\)/, "服务端自己读 diff，不信客户端传的内容");
+  assert.match(route, /const model = deps\.getRuntimeForRequest\(body\)\.session\.model;/, "要用目标会话的模型（而不是面板里碰巧选中的那个）");
   assert.match(route, /buildCommitMessagePrompt\(\{ locale: body\?\.locale, context \}\)/, "prompt 由纯函数拼");
   assert.match(route, /normalizeGeneratedCommitMessage\(assistantContentText\(response\)\)/, "模型输出要规范化");
   assert.match(route, /sendJson\(ctx\.res, 200, \{ message, model: `\$\{model\.provider\}\/\$\{model\.id\}` \}\)/, "只回文本，不直接提交");
@@ -771,10 +771,10 @@ test("服务端提供只读查询 / init / 切分支 / 提交四条路由，路�
   assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/switch"/, "缺少 POST /api/projects/git/switch");
   assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/commit"/, "缺少 POST /api/projects/git/commit");
   // 读：按会话 workspace 读（worktree 会话显示自己的分支/改动），但 cwd 仍从项目表 + 会话解析。
-  assert.match(serverSource, /readGitInfo\(requestWorkspaceCwd\(project, \{ sessionPath \}\)\)/, "只读路由应解析出会话 workspace 后读取");
+  assert.match(serverSource, /readGitInfo\(deps\.requestWorkspaceCwd\(project, \{ sessionPath \}\)\)/, "只读路由应解析出会话 workspace 后读取");
   // init 永远针对主检出：worktree 是主检出的从属检出，主检出没仓库就无从建 worktree。
   assert.match(serverSource, /initGitRepo\(project\.cwd\)/, "init 路由应从项目表取 cwd");
-  assert.match(serverSource, /const cwd = requestWorkspaceCwd\(project, body\);\s*await switchGitBranch\(cwd, String\(body\?\.branch \?\? ""\)\)/, "切分支要在会话 workspace 里执行");
+  assert.match(serverSource, /const cwd = deps\.requestWorkspaceCwd\(project, body\);\s*await switchGitBranch\(cwd, String\(body\?\.branch \?\? ""\)\)/, "切分支要在会话 workspace 里执行");
   assert.match(serverSource, /commitGitChanges\(cwd, \{ message: body\?\.message, paths: body\?\.paths \}\)/, "提交路由要把信息与路径交给服务端校验");
   assert.match(serverSource, /url\.pathname === "\/api\/projects\/git\/delete-branch"/, "缺少 POST /api/projects/git/delete-branch");
   assert.match(

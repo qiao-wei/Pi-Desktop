@@ -16,12 +16,6 @@ import { dirname, join, resolve } from "node:path";
  */
 export function createModelLeaves(state, deps) {
   const { authFile, modelRuntime, modelsJsonFile, normalizeExtensionUiMode, normalizePersonalizationStyle, personalizationFile, personalizationStyles } = deps;
-  const activeProject = /** @type {any} */ ((...args) => deps.activeProject(...args));
-  const projectContextInstruction = /** @type {any} */ ((...args) => deps.projectContextInstruction(...args));
-  const buildSnapshot = /** @type {any} */ ((...args) => deps.buildSnapshot(...args));
-  const customModelsPayload = /** @type {any} */ ((...args) => deps.customModelsPayload(...args));
-  const getRuntimeForRequest = /** @type {any} */ ((...args) => deps.getRuntimeForRequest(...args));
-  const providerRows = /** @type {any} */ ((...args) => deps.providerRows(...args));
 
 function createPiDesktopRuntimeExtension(project, workspaceCwd = project.cwd) {
   return {
@@ -32,7 +26,7 @@ function createPiDesktopRuntimeExtension(project, workspaceCwd = project.cwd) {
         return {
           systemPrompt: [
             event.systemPrompt,
-            projectContextInstruction(project, workspaceCwd),
+            deps.projectContextInstruction(project, workspaceCwd),
             personalizationInstruction(),
           ].filter(Boolean).join("\n\n"),
         };
@@ -62,7 +56,7 @@ function extensionPathsForSettings(project, settingsManager) {
   return result;
 }
 
-function discoverStandaloneExtensionPaths(project = activeProject(), settingsManager = state.runtime?.settingsManager) {
+function discoverStandaloneExtensionPaths(project = deps.activeProject(), settingsManager = state.runtime?.settingsManager) {
   const roots = [join(agentDir, "extensions")];
   if (settingsManager?.isProjectTrusted?.() !== false) {
     roots.push(join(project.cwd, ".pi", "extensions"));
@@ -117,7 +111,7 @@ function builtInProviderIds() {
 
 /** 「选择已有供应商」的列表：pi 内置的 + models.json 里已经存过的。 */
 function modelProviderCatalog() {
-  return normalizeProviderCatalog(providerRows());
+  return normalizeProviderCatalog(deps.providerRows());
 }
 
 async function reloadCustomModelProviders(providerIds) {
@@ -143,7 +137,7 @@ async function saveProviderApiKey(body) {
     throw new Error("The API key must not contain spaces or line breaks.");
   }
   persistModelApiKey(providerId, apiKey);
-  return customModelsPayload();
+  return deps.customModelsPayload();
 }
 
 function readAuthCredentials() {
@@ -189,7 +183,7 @@ async function setPersonalization(body) {
   const extensionUi = normalizeExtensionUiMode(body?.extensionUi);
   state.personalization = { style, customInstructions, persona, extensionUi };
   writeJsonFile(personalizationFile, state.personalization);
-  return buildSnapshot(getRuntimeForRequest(body));
+  return deps.buildSnapshot(deps.getRuntimeForRequest(body));
 }
 
 function persistModelApiKey(provider, apiKey) {

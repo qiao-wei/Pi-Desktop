@@ -52,7 +52,7 @@ test("discover：自定义 provider 走端点实时列表，key 没填就用已�
   assert.match(body, /await requestModelListing\(\{/, "非动态 provider 要自己去 GET 列表端点");
   assert.match(
     body,
-    /apiKey: apiKey \|\| readStoredApiKey\(providerId\)/,
+    /apiKey: apiKey \|\| deps\.readStoredApiKey\(providerId\)/,
     "用户没重填 key 时应复用存好的 key",
   );
   assert.match(
@@ -128,7 +128,7 @@ test("saveCustomModel：probe 那一步也得放过内置供应商的空 baseUrl
   const body = functionBody("saveCustomModel");
   assert.match(
     body,
-    /const probeBody = builtInProviderIds\(\)\.has\(String\(body\?\.providerId \?\? ""\)\.trim\(\)\)[\s\S]{0,160}providerMode: "builtin"/,
+    /const probeBody = deps\.builtInProviderIds\(\)\.has\(String\(body\?\.providerId \?\? ""\)\.trim\(\)\)[\s\S]{0,160}providerMode: "builtin"/,
   );
   assert.match(body, /normalizeCustomModelInputs\(probeBody, \{ requireApiKey: false \}\)/);
   assert.ok(
@@ -157,12 +157,12 @@ test("POST /api/model-providers/update 走 updateProviderSettings，内置供应
   const body = functionBody("updateProvider");
   assert.match(
     body,
-    /builtInProviderIds\(\)\.has\(providerId\)/,
+    /deps\.builtInProviderIds\(\)\.has\(providerId\)/,
     "内置供应商的 baseUrl 会盖到该家所有模型上，不许改",
   );
-  assert.match(body, /updateProviderSettings\(readCustomModelsConfig\(\)/);
-  assert.match(body, /writeCustomModelsConfig\(result\.config\)/);
-  assert.match(body, /await reloadCustomModelProviders\(\[result\.providerId\]\)/);
+  assert.match(body, /updateProviderSettings\(deps\.readCustomModelsConfig\(\)/);
+  assert.match(body, /deps\.writeCustomModelsConfig\(result\.config\)/);
+  assert.match(body, /await deps\.reloadCustomModelProviders\(\[result\.providerId\]\)/);
 });
 
 test("编辑 provider 时 key 格式先校验，别写了半截 models.json 才报错", () => {
@@ -176,7 +176,7 @@ test("verify-key：key 留空 = 验已存的那一份", () => {
   // 断言必须落在 verify-key 这段路由里：整个文件搜会得到别处的同名写法，那是假绿。
   assert.match(
     routeBody(source, 'url.pathname.endsWith("/verify-key")'),
-    /resolveListingApiKey\(\{ apiKey: body\?\.apiKey, storedKey: readStoredApiKey\(providerId\) \}\)/,
+    /resolveListingApiKey\(\{ apiKey: body\?\.apiKey, storedKey: deps\.readStoredApiKey\(providerId\) \}\)/,
   );
 });
 
@@ -192,7 +192,7 @@ test("拉列表不再被“先填 key”拦住：没 key 也放它去打端点",
   assert.doesNotMatch(body, /Enter an API key first/, "桥不能替端点决定要不要 key");
   assert.match(
     body,
-    /String\(body\?\.apiKey \?\? ""\)\.trim\(\) \|\| readStoredApiKey\(providerId\)/,
+    /String\(body\?\.apiKey \?\? ""\)\.trim\(\) \|\| deps\.readStoredApiKey\(providerId\)/,
   );
   // 拉不到时仍然要按 api 类型分派，并把可读的报错交回去（前端直接贴这句）
   assert.match(body, /listingPlan\(body\?\.api, baseUrl, apiKey\)/);

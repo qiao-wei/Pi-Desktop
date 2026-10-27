@@ -22,25 +22,11 @@ import { basename, resolve } from "node:path";
  */
 export function createProjectSessions(state, deps) {
   const { appCwd, commandRunsFile, openRuntimes, projectsFile, sessionStore } = deps;
-  const activeProject = /** @type {any} */ ((...args) => deps.activeProject(...args));
-  const assertProjectSessionPath = /** @type {any} */ ((...args) => deps.assertProjectSessionPath(...args));
-  const disposeProjectRuntimes = /** @type {any} */ ((...args) => deps.disposeProjectRuntimes(...args));
-  const findProject = /** @type {any} */ ((...args) => deps.findProject(...args));
-  const rememberProjectComposerDefaults = /** @type {any} */ ((...args) => deps.rememberProjectComposerDefaults(...args));
-  const removeSessionRecord = /** @type {any} */ ((...args) => deps.removeSessionRecord(...args));
-  const buildSnapshot = /** @type {any} */ ((...args) => deps.buildSnapshot(...args));
-  const disposeRuntime = /** @type {any} */ ((...args) => deps.disposeRuntime(...args));
-  const getRuntimeForRequest = /** @type {any} */ ((...args) => deps.getRuntimeForRequest(...args));
-  const projectToolToggleState = /** @type {any} */ ((...args) => deps.projectToolToggleState(...args));
-  const refreshSnapshot = /** @type {any} */ ((...args) => deps.refreshSnapshot(...args));
-  const replaceRuntime = /** @type {any} */ ((...args) => deps.replaceRuntime(...args));
-  const updateSessionStoreFromRuntime = /** @type {any} */ ((...args) => deps.updateSessionStoreFromRuntime(...args));
-  const updateSessionStoreFromSession = /** @type {any} */ ((...args) => deps.updateSessionStoreFromSession(...args));
 
 const projectCommandRuns = createProjectCommandRuns({ runsFile: commandRunsFile });
 
 async function setSessionThinkingLevel(body) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   if (isSessionBusy(targetRuntime.session)) {
     throw new Error("Stop the running response before switching thinking.");
   }
@@ -56,10 +42,10 @@ async function setSessionThinkingLevel(body) {
     restore();
   }
   if (remember) {
-    rememberProjectComposerDefaults(targetRuntime.projectId, { thinkingLevel: targetRuntime.session.thinkingLevel });
+    deps.rememberProjectComposerDefaults(targetRuntime.projectId, { thinkingLevel: targetRuntime.session.thinkingLevel });
   }
   await targetRuntime.settingsManager.flush();
-  return buildSnapshot(targetRuntime);
+  return deps.buildSnapshot(targetRuntime);
 }
 
 async function createProject(body) {
@@ -98,18 +84,18 @@ async function createProject(body) {
   state.projects = [...state.projects, project];
   state.activeProjectId = project.id;
   saveProjects();
-  return replaceRuntime(project);
+  return deps.replaceRuntime(project);
 }
 
 async function selectProject(projectId) {
-  const project = findProject(projectId);
+  const project = deps.findProject(projectId);
   state.activeProjectId = project.id;
   saveProjects();
-  return replaceRuntime(project, project.lastSessionPath);
+  return deps.replaceRuntime(project, project.lastSessionPath);
 }
 
 async function updateProject(body) {
-  const project = findProject(String(body?.projectId ?? ""));
+  const project = deps.findProject(String(body?.projectId ?? ""));
   const name = String(body?.name ?? "").trim() || project.name;
   const cwdInput = String(body?.cwd ?? project.cwd).trim();
   const cwd = resolve(cwdInput || project.cwd);
@@ -121,7 +107,7 @@ async function updateProject(body) {
 
   const cwdChanged = cwd !== project.cwd;
   if (cwdChanged) {
-    disposeProjectRuntimes(project.id);
+    deps.disposeProjectRuntimes(project.id);
   }
 
   state.projects = state.projects.map((candidate) =>
@@ -136,12 +122,12 @@ async function updateProject(body) {
   );
   saveProjects();
 
-  const updated = findProject(project.id);
+  const updated = deps.findProject(project.id);
   if (cwdChanged && updated.id === state.activeProjectId) {
-    return replaceRuntime(updated, updated.lastSessionPath);
+    return deps.replaceRuntime(updated, updated.lastSessionPath);
   }
 
-  return refreshSnapshot();
+  return deps.refreshSnapshot();
 }
 
 async function reorderProjects(body) {
@@ -161,42 +147,42 @@ async function reorderProjects(body) {
   const projectsById = new Map(state.projects.map((project) => [project.id, project]));
   state.projects = reorderedIds.map((projectId) => projectsById.get(projectId));
   saveProjects();
-  return refreshSnapshot();
+  return deps.refreshSnapshot();
 }
 
 async function pinProject(projectId, pinned) {
-  const project = findProject(projectId);
+  const project = deps.findProject(projectId);
   touchProject(project.id, { pinned: Boolean(pinned) });
-  return refreshSnapshot();
+  return deps.refreshSnapshot();
 }
 
 async function removeProject(projectId) {
-  const project = findProject(projectId);
+  const project = deps.findProject(projectId);
   if (state.projects.length <= 1) {
     throw new Error("Cannot remove the last project");
   }
 
-  disposeProjectRuntimes(project.id);
+  deps.disposeProjectRuntimes(project.id);
   state.projects = state.projects.filter((candidate) => candidate.id !== project.id);
   sessionStore.deleteProject(project.id);
   state.activeProjectId = state.activeProjectId === project.id ? state.projects[0].id : state.activeProjectId;
   saveProjects();
 
   if (project.id === state.runtime.projectId) {
-    return replaceRuntime(activeProject(), activeProject().lastSessionPath);
+    return deps.replaceRuntime(deps.activeProject(), deps.activeProject().lastSessionPath);
   }
 
-  return refreshSnapshot();
+  return deps.refreshSnapshot();
 }
 
 async function revealProject(projectId) {
-  const project = findProject(projectId);
+  const project = deps.findProject(projectId);
   await revealFolder(project.cwd);
-  return refreshSnapshot();
+  return deps.refreshSnapshot();
 }
 
 async function createProjectSession(projectId, nameValue, worktreeRequest) {
-  const project = findProject(projectId);
+  const project = deps.findProject(projectId);
   state.activeProjectId = project.id;
   saveProjects();
 
@@ -211,8 +197,8 @@ async function createProjectSession(projectId, nameValue, worktreeRequest) {
   // Persist the shell immediately so a newly-created empty session can be
   // selected while its first prompt is still streaming.
   persistSessionShell(sessionManager);
-  updateSessionStoreFromSession(project, sessionManager, { includeEmpty: true });
-  return replaceRuntime(project, sessionManager.getSessionFile());
+  deps.updateSessionStoreFromSession(project, sessionManager, { includeEmpty: true });
+  return deps.replaceRuntime(project, sessionManager.getSessionFile());
 }
 
 /**
@@ -247,7 +233,7 @@ async function createSessionWorktree(project, request = {}) {
 async function selectProjectSession(projectId, sessionPath, requestId, clientTraceId) {
   const startedAt = Date.now();
   diagnosticLog("session.select.start", { requestId, clientTraceId, projectId, sessionPath });
-  const project = findProject(projectId);
+  const project = deps.findProject(projectId);
   if (!sessionPath) {
     throw new Error("sessionPath is required");
   }
@@ -270,7 +256,7 @@ async function selectProjectSession(projectId, sessionPath, requestId, clientTra
     sessionPath: resolvedPath,
     durationMs: Date.now() - startedAt,
   });
-  const response = await replaceRuntime(project, resolvedPath, { requestId, clientTraceId });
+  const response = await deps.replaceRuntime(project, resolvedPath, { requestId, clientTraceId });
   diagnosticLog("session.select.snapshot_ready", {
     requestId,
     clientTraceId,
@@ -283,8 +269,8 @@ async function selectProjectSession(projectId, sessionPath, requestId, clientTra
 }
 
 async function updateProjectSession(projectId, sessionPath, nameValue) {
-  const project = findProject(projectId);
-  const resolvedPath = assertProjectSessionPath(project, sessionPath);
+  const project = deps.findProject(projectId);
+  const resolvedPath = deps.assertProjectSessionPath(project, sessionPath);
   const name = String(nameValue ?? "").replace(/[\r\n]+/g, " ").trim();
   if (!name) {
     throw new Error("Session title is required");
@@ -294,15 +280,15 @@ async function updateProjectSession(projectId, sessionPath, nameValue) {
   if (openRuntime) {
     openRuntime.session.setSessionName(name);
     persistSessionShell(openRuntime.session.sessionManager);
-    updateSessionStoreFromRuntime(openRuntime);
+    deps.updateSessionStoreFromRuntime(openRuntime);
   } else {
     const sessionManager = SessionManager.open(resolvedPath, getProjectSessionDir(project));
     sessionManager.appendSessionInfo(name);
     persistSessionShell(sessionManager);
-    updateSessionStoreFromSession(project, sessionManager);
+    deps.updateSessionStoreFromSession(project, sessionManager);
   }
 
-  return refreshSnapshot();
+  return deps.refreshSnapshot();
 }
 
 /**
@@ -313,29 +299,29 @@ async function updateProjectSession(projectId, sessionPath, nameValue) {
  * 跳回列表里的第一条未归档会话（没有就新建一条），否则活动会话会“挂着”一个不可见的会话。
  */
 async function archiveProjectSession(projectId, sessionPath, archived = true) {
-  const project = findProject(projectId);
-  const resolvedPath = assertProjectSessionPath(project, sessionPath);
+  const project = deps.findProject(projectId);
+  const resolvedPath = deps.assertProjectSessionPath(project, sessionPath);
   const isActiveSession = resolvedPath === state.runtime.session.sessionFile;
 
   // 先确保索引里有这条记录：索引是归档清单的唯一来源，没登记的话归档后就找不回来了。
   const openRuntime = openRuntimes.get(sessionRuntimeKey(resolvedPath));
   if (openRuntime) {
-    updateSessionStoreFromRuntime(openRuntime);
+    deps.updateSessionStoreFromRuntime(openRuntime);
   } else if (existsSync(resolvedPath)) {
     // 不传 cwdOverride：会话文件头里的 cwd 才是它真正的工作目录（worktree 会话不能在这里
     // 被改回项目目录）。
     const sessionManager = SessionManager.open(resolvedPath, getProjectSessionDir(project));
-    updateSessionStoreFromSession(project, sessionManager);
+    deps.updateSessionStoreFromSession(project, sessionManager);
   }
   sessionStore.setArchived(project.id, resolvedPath, archived);
 
   if (archived && isActiveSession) {
-    disposeRuntime(resolvedPath);
-    const sessions = listProjectSessions(findProject(project.id));
-    return replaceRuntime(findProject(project.id), sessions[0]?.path);
+    deps.disposeRuntime(resolvedPath);
+    const sessions = listProjectSessions(deps.findProject(project.id));
+    return deps.replaceRuntime(deps.findProject(project.id), sessions[0]?.path);
   }
 
-  return refreshSnapshot();
+  return deps.refreshSnapshot();
 }
 
 /**
@@ -349,25 +335,25 @@ async function deleteArchivedSessions(projectId = "") {
   let activeSessionDeleted = false;
 
   for (const session of archived) {
-    const project = findProject(session.projectId);
+    const project = deps.findProject(session.projectId);
     if (!project) {
       sessionStore.remove(session.projectId, session.path);
       continue;
     }
-    const resolvedPath = assertProjectSessionPath(project, session.path);
+    const resolvedPath = deps.assertProjectSessionPath(project, session.path);
     if (resolvedPath === state.runtime.session.sessionFile) {
       activeSessionDeleted = true;
     }
-    removeSessionRecord(project, resolvedPath);
+    deps.removeSessionRecord(project, resolvedPath);
   }
 
   if (activeSessionDeleted) {
-    const project = findProject(state.runtime.projectId);
+    const project = deps.findProject(state.runtime.projectId);
     const sessions = listProjectSessions(project);
-    return replaceRuntime(project, sessions[0]?.path);
+    return deps.replaceRuntime(project, sessions[0]?.path);
   }
 
-  return refreshSnapshot();
+  return deps.refreshSnapshot();
 }
 
 function saveProjects() {
@@ -387,7 +373,7 @@ function listProjectsWithSessions() {
   return state.projects.map((project) => ({
     ...project,
     // 计算出来的，不是存的项目字段：`saveProjects()` 写盘时不会带上它。
-    codemode: projectToolToggleState(project),
+    codemode: deps.projectToolToggleState(project),
     sessions: listProjectSessions(project),
   }));
 }
@@ -460,7 +446,7 @@ function sessionWorkspaceCwdForPath(project, sessionPath) {
  * 不在托管 worktree 里就是 `{ isWorktree: false }`，UI 据此不显示徽标。
  */
 async function readSessionWorktreeInfo(project, sessionPath) {
-  const resolvedPath = assertProjectSessionPath(project, sessionPath);
+  const resolvedPath = deps.assertProjectSessionPath(project, sessionPath);
   const cwd = sessionWorkspaceCwdForPath(project, resolvedPath);
   if (!isManagedWorktreePath(worktreesRoot, cwd)) {
     return { isWorktree: false };
@@ -495,7 +481,7 @@ async function readSessionWorktreeInfo(project, sessionPath) {
  * `removeManagedWorktree` 里走 prune），不然那个红徽标永远点不掉。
  */
 async function removeSessionWorktree(project, sessionPath, force) {
-  const resolvedPath = assertProjectSessionPath(project, sessionPath);
+  const resolvedPath = deps.assertProjectSessionPath(project, sessionPath);
   const cwd = sessionWorkspaceCwdForPath(project, resolvedPath);
   if (!isManagedWorktreePath(worktreesRoot, cwd)) {
     throw new Error("这条会话不在托管 worktree 里。");
@@ -512,11 +498,11 @@ async function removeSessionWorktree(project, sessionPath, force) {
   // 会话文件头里的 cwd 改不了（pi 不提供 setter），但目录已经没了 —— `sessionWorkspaceCwd`
   // 下一次就会退回项目目录，索引里的 cwd 也会在 upsert 时跟着改回项目目录。
   if (wasActive) {
-    disposeRuntime(resolvedPath);
-    return { result: await replaceRuntime(project, resolvedPath), worktree: await readSessionWorktreeInfo(project, resolvedPath) };
+    deps.disposeRuntime(resolvedPath);
+    return { result: await deps.replaceRuntime(project, resolvedPath), worktree: await readSessionWorktreeInfo(project, resolvedPath) };
   }
 
-  return { result: await refreshSnapshot(), worktree: await readSessionWorktreeInfo(project, resolvedPath) };
+  return { result: await deps.refreshSnapshot(), worktree: await readSessionWorktreeInfo(project, resolvedPath) };
 }
 
   return { archiveProjectSession, createProject, createProjectSession, createSessionWorktree, deleteArchivedSessions, ensureWorktreePiLink, listProjectSessions, listProjectsWithSessions, pinProject, projectCommandRuns, readSessionWorktreeInfo, removeProject, removeSessionWorktree, reorderProjects, revealProject, saveProjects, selectProject, selectProjectSession, sessionWorkspaceCwdForPath, setSessionThinkingLevel, touchProject, updateProject, updateProjectSession };

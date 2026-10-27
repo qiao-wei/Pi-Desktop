@@ -24,12 +24,6 @@ export function createMcpInspector(state, deps) {
   // getRuntimeForRequest 来自 runtimeDomain、readCapabilitiesConfig 来自 capabilitySnapshot），
   // 而本厂在它们之前就建好了 —— 立即解构会拿到 undefined，所以必须按调用时取值。
   const { mcpToolProbeTimeoutMs } = deps;
-  const findMcpServer = /** @type {any} */ ((...args) => deps.findMcpServer(...args));
-  const findProject = /** @type {any} */ ((...args) => deps.findProject(...args));
-  const getRuntimeForRequest = /** @type {any} */ ((...args) => deps.getRuntimeForRequest(...args));
-  const readCapabilitiesConfig = /** @type {any} */ (
-    (...args) => deps.readCapabilitiesConfig(...args)
-  );
 
   /**
    * MCP 探测超时（毫秒）：只用于能力页显式的「测试连接」，不参与会话自身的连接流程。
@@ -43,7 +37,7 @@ export function createMcpInspector(state, deps) {
    * `pinned` / 描述这些 pi 不认识的字段来自 capabilities.json 的 `mcp` 段。
    */
   function readMcpRuntimeState(targetRuntime) {
-    const project = findProject(targetRuntime.projectId);
+    const project = deps.findProject(targetRuntime.projectId);
     const globalPath = mcpConfigPath({ agentDir, projectCwd: project.cwd, scope: "user" });
     const projectPath = mcpConfigPath({ agentDir, projectCwd: project.cwd, scope: "project" });
     const globalConfig = readMcpConfigPath(globalPath);
@@ -53,7 +47,7 @@ export function createMcpInspector(state, deps) {
     const projectConfig = projectTrusted
       ? readMcpConfigPath(projectPath)
       : { config: { mcpServers: {} }, servers: [], errors: [] };
-    const config = readCapabilitiesConfig();
+    const config = deps.readCapabilitiesConfig();
     const metaMap = (scope, servers) =>
       Object.fromEntries(
         servers.map((server) => [server.name, config.mcp?.[mcpMetaKey(scope, server.name)] ?? {}]),
@@ -87,7 +81,7 @@ export function createMcpInspector(state, deps) {
           command: server.command,
           args: server.args,
           env: environment,
-          cwd: resolveMcpInspectorCwd(findProject(targetRuntime.projectId), server),
+          cwd: resolveMcpInspectorCwd(deps.findProject(targetRuntime.projectId), server),
           stderr: "pipe",
         }),
       );
@@ -154,7 +148,7 @@ export function createMcpInspector(state, deps) {
 
   /** 显式探测：连一次、列出工具、把连接错误原文带回来。 */
   async function inspectMcpServer(targetRuntime, id) {
-    const found = findMcpServer(targetRuntime, id);
+    const found = deps.findMcpServer(targetRuntime, id);
     if (!found) {
       throw new Error("MCP server not found.");
     }
@@ -188,7 +182,7 @@ export function createMcpInspector(state, deps) {
   }
 
   async function inspectMcpServerCapability(body) {
-    const targetRuntime = getRuntimeForRequest(body);
+    const targetRuntime = deps.getRuntimeForRequest(body);
     return { inspection: await inspectMcpServer(targetRuntime, String(body?.id ?? "")) };
   }
 

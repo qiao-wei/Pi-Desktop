@@ -552,5 +552,12 @@
       "prefix": 10,
       "suffix": 10
     }
+  },
+  "domainDeps": {
+    "id": "domain-deps",
+    "why": "域依赖是生成 + 校验的（见 docs/specs/architecture-extensibility.md 的 A1）：唯一装配点 server/domainContainer.mjs 按 server/domainTable.mjs 建域，表由各域模块的真实读取生成并逐字节校验。检查器咬住『别长出第二份手写装配』『别动态读依赖』『表存在就得有人读』。",
+    "table": "server/domainTable.mjs",
+    "container": "server/domainContainer.mjs",
+    "entry": "server/domains.mjs"
   }
 }

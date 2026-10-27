@@ -358,20 +358,20 @@ test("runtime-time snapshots reuse the loader's inventory instead of re-running 
 
   assert.match(source, /const allSkills = targetRuntime\.capabilityPaths\?\.skillInventory/);
   // 快照与删除/读内容路径都只能把重新发现当兜底，两种写法都算：
-  // - `?? await discoverAllProjectSkills(...)`（只要技能清单）；
-  // - `capabilityPaths?.skillInventory ? null : await discoverAllProjectSkillResources(...)`
+  // - `?? await deps.discoverAllProjectSkills(...)`（只要技能清单）；
+  // - `capabilityPaths?.skillInventory ? null : await deps.discoverAllProjectSkillResources(...)`
   //   （诊断要和清单同源，所以走 Resources 版本拿 { skills, diagnostics }）。
   const guarded =
     source.match(
-      /\?\?\s*await discoverAllProjectSkills\(project, targetRuntime\.settingsManager\)/g,
+      /\?\?\s*await deps\.discoverAllProjectSkills\(project, targetRuntime\.settingsManager\)/g,
     )?.length ?? 0;
   const explicitFallback =
     source.match(
-      /capabilityPaths\?\.skillInventory\s*\?\s*null\s*:\s*await discoverAllProjectSkillResources\(project, targetRuntime\.settingsManager\)/g,
+      /capabilityPaths\?\.skillInventory\s*\?\s*null\s*:\s*await deps\.discoverAllProjectSkillResources\(project, targetRuntime\.settingsManager\)/g,
     )?.length ?? 0;
   const total =
     source.match(
-      /await discoverAllProjectSkill(?:s|Resources)\(project, targetRuntime\.settingsManager\)/g,
+      /await (?:deps\.)?discoverAllProjectSkill(?:s|Resources)\(project, targetRuntime\.settingsManager\)/g,
     )?.length ?? 0;
   assert.ok(total >= 3, "the runtime-time call sites must still exist");
   assert.equal(
@@ -388,7 +388,7 @@ test("trust is resolved before the capability inventory", () => {
   const body = source.slice(start, end);
 
   const trustAt = body.indexOf("resolveProjectTrustForRuntime({");
-  const inventoryAt = body.indexOf("const capabilityPaths = await resolveRuntimeCapabilityPaths({");
+  const inventoryAt = body.indexOf("const capabilityPaths = await deps.resolveRuntimeCapabilityPaths({");
   assert.ok(trustAt !== -1 && inventoryAt !== -1, "both steps must still exist");
   assert.ok(
     trustAt < inventoryAt,

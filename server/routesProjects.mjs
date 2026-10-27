@@ -42,44 +42,11 @@ import { randomUUID } from "node:crypto";
  */
 export function createRoutesProjects(state, deps) {
   const { modelRuntime } = deps;
-  const archiveProjectSession = /** @type {any} */ (
-    (...args) => deps.archiveProjectSession(...args)
-  );
-  const createProject = /** @type {any} */ ((...args) => deps.createProject(...args));
-  const createProjectSession = /** @type {any} */ ((...args) => deps.createProjectSession(...args));
-  const deleteArchivedSessions = /** @type {any} */ (
-    (...args) => deps.deleteArchivedSessions(...args)
-  );
-  const deleteProjectSession = /** @type {any} */ ((...args) => deps.deleteProjectSession(...args));
-  const findProject = /** @type {any} */ ((...args) => deps.findProject(...args));
-  const getRuntimeForRequest = /** @type {any} */ ((...args) => deps.getRuntimeForRequest(...args));
-  const isUsableModel = /** @type {any} */ ((...args) => deps.isUsableModel(...args));
-  const pinProject = /** @type {any} */ ((...args) => deps.pinProject(...args));
-  const pinProjectSession = /** @type {any} */ ((...args) => deps.pinProjectSession(...args));
-  const readSessionWorktreeInfo = /** @type {any} */ (
-    (...args) => deps.readSessionWorktreeInfo(...args)
-  );
-  const removeProject = /** @type {any} */ ((...args) => deps.removeProject(...args));
-  const removeSessionWorktree = /** @type {any} */ (
-    (...args) => deps.removeSessionWorktree(...args)
-  );
-  const reorderProjects = /** @type {any} */ ((...args) => deps.reorderProjects(...args));
-  const requestWorkspaceCwd = /** @type {any} */ ((...args) => deps.requestWorkspaceCwd(...args));
-  const requireSessionWorktreeCwd = /** @type {any} */ (
-    (...args) => deps.requireSessionWorktreeCwd(...args)
-  );
-  const revealProject = /** @type {any} */ ((...args) => deps.revealProject(...args));
-  const selectProject = /** @type {any} */ ((...args) => deps.selectProject(...args));
-  const selectProjectSession = /** @type {any} */ ((...args) => deps.selectProjectSession(...args));
-  const touchProject = /** @type {any} */ ((...args) => deps.touchProject(...args));
-  const trustProject = /** @type {any} */ ((...args) => deps.trustProject(...args));
-  const updateProject = /** @type {any} */ ((...args) => deps.updateProject(...args));
-  const updateProjectSession = /** @type {any} */ ((...args) => deps.updateProjectSession(...args));
 
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects(ctx) {
     const body = await readJson(ctx.req);
-    const result = await createProject(body);
+    const result = await deps.createProject(body);
     sendJson(ctx.res, 200, result);
     return;
   }
@@ -87,7 +54,7 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/select"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_select(ctx) {
     const body = await readJson(ctx.req);
-    const result = await selectProject(String(body?.projectId ?? ""));
+    const result = await deps.selectProject(String(body?.projectId ?? ""));
     sendJson(ctx.res, 200, result);
     return;
   }
@@ -95,7 +62,7 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/trust"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_trust(ctx) {
     const body = await readJson(ctx.req);
-    const result = await trustProject(String(body?.projectId ?? state.activeProjectId));
+    const result = await deps.trustProject(String(body?.projectId ?? state.activeProjectId));
     sendJson(ctx.res, 200, result);
     return;
   }
@@ -103,7 +70,7 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/update"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_update(ctx) {
     const body = await readJson(ctx.req);
-    const result = await updateProject(body);
+    const result = await deps.updateProject(body);
     sendJson(ctx.res, 200, result);
     return;
   }
@@ -111,7 +78,7 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/reorder"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_reorder(ctx) {
     const body = await readJson(ctx.req);
-    const result = await reorderProjects(body);
+    const result = await deps.reorderProjects(body);
     sendJson(ctx.res, 200, result);
     return;
   }
@@ -119,7 +86,7 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/pin"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_pin(ctx) {
     const body = await readJson(ctx.req);
-    const result = await pinProject(String(body?.projectId ?? ""), Boolean(body?.pinned));
+    const result = await deps.pinProject(String(body?.projectId ?? ""), Boolean(body?.pinned));
     sendJson(ctx.res, 200, result);
     return;
   }
@@ -127,7 +94,7 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/remove"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_remove(ctx) {
     const body = await readJson(ctx.req);
-    const result = await removeProject(String(body?.projectId ?? ""));
+    const result = await deps.removeProject(String(body?.projectId ?? ""));
     sendJson(ctx.res, 200, result);
     return;
   }
@@ -135,25 +102,25 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/reveal"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_reveal(ctx) {
     const body = await readJson(ctx.req);
-    const result = await revealProject(String(body?.projectId ?? ""));
+    const result = await deps.revealProject(String(body?.projectId ?? ""));
     sendJson(ctx.res, 200, result);
     return;
   }
 
   /** 路由处理器：req.method === "GET" && url.pathname === "/api/projects/git"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_get_api_projects_git(ctx) {
-    const project = findProject(String(ctx.url.searchParams.get("projectId") ?? ""));
+    const project = deps.findProject(String(ctx.url.searchParams.get("projectId") ?? ""));
     const sessionPath = String(ctx.url.searchParams.get("sessionPath") ?? "").trim();
-    sendJson(ctx.res, 200, await readGitInfo(requestWorkspaceCwd(project, { sessionPath })));
+    sendJson(ctx.res, 200, await readGitInfo(deps.requestWorkspaceCwd(project, { sessionPath })));
     return;
   }
 
   /** 路由处理器：req.method === "GET" && url.pathname === "/api/projects/files"（右面板文件树，只列一层） */
   async function handle_get_api_projects_files(ctx) {
-    const project = findProject(String(ctx.url.searchParams.get("projectId") ?? ""));
+    const project = deps.findProject(String(ctx.url.searchParams.get("projectId") ?? ""));
     const sessionPath = String(ctx.url.searchParams.get("sessionPath") ?? "").trim();
     const listing = listWorkspaceDirectory({
-      cwd: requestWorkspaceCwd(project, { sessionPath }),
+      cwd: deps.requestWorkspaceCwd(project, { sessionPath }),
       dir: String(ctx.url.searchParams.get("dir") ?? ""),
     });
     sendJson(ctx.res, listing.ok ? 200 : 400, listing.ok ? listing : { error: listing.status });
@@ -162,13 +129,13 @@ export function createRoutesProjects(state, deps) {
 
   /** 路由处理器：req.method === "GET" && url.pathname === "/api/projects/file"（右面板文件正文预览，只读 + 有界） */
   async function handle_get_api_projects_file(ctx) {
-    const project = findProject(String(ctx.url.searchParams.get("projectId") ?? ""));
+    const project = deps.findProject(String(ctx.url.searchParams.get("projectId") ?? ""));
     const sessionPath = String(ctx.url.searchParams.get("sessionPath") ?? "").trim();
     sendJson(
       ctx.res,
       200,
       readWorkspaceFile({
-        cwd: requestWorkspaceCwd(project, { sessionPath }),
+        cwd: deps.requestWorkspaceCwd(project, { sessionPath }),
         path: String(ctx.url.searchParams.get("path") ?? ""),
       }),
     );
@@ -177,13 +144,13 @@ export function createRoutesProjects(state, deps) {
 
   /** 路由处理器：req.method === "GET" && url.pathname === "/api/projects/git/files"（「对比分支」那一档的文件清单） */
   async function handle_get_api_projects_git_files(ctx) {
-    const project = findProject(String(ctx.url.searchParams.get("projectId") ?? ""));
+    const project = deps.findProject(String(ctx.url.searchParams.get("projectId") ?? ""));
     const sessionPath = String(ctx.url.searchParams.get("sessionPath") ?? "").trim();
     sendJson(
       ctx.res,
       200,
       await listSourceFiles({
-        cwd: requestWorkspaceCwd(project, { sessionPath }),
+        cwd: deps.requestWorkspaceCwd(project, { sessionPath }),
         source: ctx.url.searchParams.get("source") ?? undefined,
         base: ctx.url.searchParams.get("base") ?? undefined,
       }),
@@ -193,13 +160,13 @@ export function createRoutesProjects(state, deps) {
 
   /** 路由处理器：req.method === "GET" && url.pathname === "/api/projects/git/diff"（右面板里渲染某文件的改动，纯读） */
   async function handle_get_api_projects_git_diff(ctx) {
-    const project = findProject(String(ctx.url.searchParams.get("projectId") ?? ""));
+    const project = deps.findProject(String(ctx.url.searchParams.get("projectId") ?? ""));
     const sessionPath = String(ctx.url.searchParams.get("sessionPath") ?? "").trim();
     sendJson(
       ctx.res,
       200,
       await readFileDiff({
-        cwd: requestWorkspaceCwd(project, { sessionPath }),
+        cwd: deps.requestWorkspaceCwd(project, { sessionPath }),
         path: String(ctx.url.searchParams.get("path") ?? ""),
         source: ctx.url.searchParams.get("source") ?? undefined,
         base: ctx.url.searchParams.get("base") ?? undefined,
@@ -211,7 +178,7 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/git/init"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_git_init(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
+    const project = deps.findProject(String(body?.projectId ?? ""));
     await initGitRepo(project.cwd);
     sendJson(ctx.res, 200, await readGitInfo(project.cwd));
     return;
@@ -220,8 +187,8 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/git/switch"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_git_switch(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
-    const cwd = requestWorkspaceCwd(project, body);
+    const project = deps.findProject(String(body?.projectId ?? ""));
+    const cwd = deps.requestWorkspaceCwd(project, body);
     await switchGitBranch(cwd, String(body?.branch ?? ""));
     sendJson(ctx.res, 200, await readGitInfo(cwd));
     return;
@@ -230,8 +197,8 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/git/create-branch"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_git_create_branch(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
-    const cwd = requestWorkspaceCwd(project, body);
+    const project = deps.findProject(String(body?.projectId ?? ""));
+    const cwd = deps.requestWorkspaceCwd(project, body);
     await createGitBranch(cwd, String(body?.name ?? ""));
     sendJson(ctx.res, 200, await readGitInfo(cwd));
     return;
@@ -240,7 +207,7 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/git/rename-branch"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_git_rename_branch(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
+    const project = deps.findProject(String(body?.projectId ?? ""));
     await renameGitBranch(project.cwd, String(body?.name ?? ""));
     sendJson(ctx.res, 200, await readGitInfo(project.cwd));
     return;
@@ -249,8 +216,8 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/git/delete-branch"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_git_delete_branch(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
-    const cwd = requestWorkspaceCwd(project, body);
+    const project = deps.findProject(String(body?.projectId ?? ""));
+    const cwd = deps.requestWorkspaceCwd(project, body);
     await deleteGitBranch(cwd, String(body?.branch ?? ""));
     sendJson(ctx.res, 200, await readGitInfo(cwd));
     return;
@@ -259,8 +226,8 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/git/commit"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_git_commit(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
-    const cwd = requestWorkspaceCwd(project, body);
+    const project = deps.findProject(String(body?.projectId ?? ""));
+    const cwd = deps.requestWorkspaceCwd(project, body);
     await commitGitChanges(cwd, { message: body?.message, paths: body?.paths });
     sendJson(ctx.res, 200, await readGitInfo(cwd));
     return;
@@ -269,8 +236,8 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/git/pull"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_git_pull(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
-    const cwd = requestWorkspaceCwd(project, body);
+    const project = deps.findProject(String(body?.projectId ?? ""));
+    const cwd = deps.requestWorkspaceCwd(project, body);
     await pullGitBranch(cwd);
     sendJson(ctx.res, 200, await readGitInfo(cwd));
     return;
@@ -279,8 +246,8 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/git/merge"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_git_merge(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
-    const cwd = requestWorkspaceCwd(project, body);
+    const project = deps.findProject(String(body?.projectId ?? ""));
+    const cwd = deps.requestWorkspaceCwd(project, body);
     const result = await mergeGitBranchInto(cwd, String(body?.branch ?? ""));
     sendJson(ctx.res, 200, { ...result, info: await readGitInfo(cwd) });
     return;
@@ -289,8 +256,8 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/git/conflicts"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_git_conflicts(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
-    const cwd = requestWorkspaceCwd(project, body);
+    const project = deps.findProject(String(body?.projectId ?? ""));
+    const cwd = deps.requestWorkspaceCwd(project, body);
     const context = await readConflictContext(cwd);
     sendJson(ctx.res, 200, {
       prompt: buildConflictPrompt({ locale: body?.locale, context: { ...context, projectCwd: project.cwd } }),
@@ -303,8 +270,8 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/git/open-file"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_git_open_file(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
-    const cwd = requestWorkspaceCwd(project, body);
+    const project = deps.findProject(String(body?.projectId ?? ""));
+    const cwd = deps.requestWorkspaceCwd(project, body);
     sendJson(ctx.res, 200, await openGitFileInIde(cwd, String(body?.path ?? "")));
     return;
   }
@@ -312,8 +279,8 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/git/push"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_git_push(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
-    const cwd = requestWorkspaceCwd(project, body);
+    const project = deps.findProject(String(body?.projectId ?? ""));
+    const cwd = deps.requestWorkspaceCwd(project, body);
     await pushGitBranch(cwd);
     sendJson(ctx.res, 200, await readGitInfo(cwd));
     return;
@@ -322,14 +289,14 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/git/open-diff"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_git_open_diff(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
+    const project = deps.findProject(String(body?.projectId ?? ""));
     sendJson(ctx.res, 200, await openGitFileDiff(project.cwd, String(body?.path ?? "")));
     return;
   }
 
   /** 路由处理器：req.method === "GET" && url.pathname === "/api/projects/commands"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_get_api_projects_commands(ctx) {
-    const project = findProject(String(ctx.url.searchParams.get("projectId") ?? ""));
+    const project = deps.findProject(String(ctx.url.searchParams.get("projectId") ?? ""));
     sendJson(ctx.res, 200, projectCommandsPayload(project));
     return;
   }
@@ -337,29 +304,29 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/commands"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_commands(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
+    const project = deps.findProject(String(body?.projectId ?? ""));
     const commands = normalizeProjectCommands(body?.commands);
     const selectedCommandId = normalizeSelectedCommandId(body?.selectedCommandId, commands);
-    touchProject(project.id, { commands, selectedCommandId });
-    sendJson(ctx.res, 200, projectCommandsPayload(findProject(project.id)));
+    deps.touchProject(project.id, { commands, selectedCommandId });
+    sendJson(ctx.res, 200, projectCommandsPayload(deps.findProject(project.id)));
     return;
   }
 
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/commands/select"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_commands_select(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
+    const project = deps.findProject(String(body?.projectId ?? ""));
     const selectedCommandId = normalizeSelectedCommandId(body?.commandId, project.commands ?? []);
-    touchProject(project.id, { selectedCommandId });
-    sendJson(ctx.res, 200, projectCommandsPayload(findProject(project.id)));
+    deps.touchProject(project.id, { selectedCommandId });
+    sendJson(ctx.res, 200, projectCommandsPayload(deps.findProject(project.id)));
     return;
   }
 
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/commands/detect"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_commands_detect(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
-    const cwd = requestWorkspaceCwd(project, body);
+    const project = deps.findProject(String(body?.projectId ?? ""));
+    const cwd = deps.requestWorkspaceCwd(project, body);
     sendJson(ctx.res, 200, { candidates: detectProjectCommands(createProjectProbe(cwd)) });
     return;
   }
@@ -373,12 +340,12 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/commands/run"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_commands_run(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
+    const project = deps.findProject(String(body?.projectId ?? ""));
     const command = selectedProjectCommand(project.commands ?? [], String(body?.commandId ?? ""));
     if (!command) {
       throw new Error("这条命令已经不在列表里了，请重新选择。");
     }
-    const cwd = resolveCommandCwd(requestWorkspaceCwd(project, body), command.cwd);
+    const cwd = resolveCommandCwd(deps.requestWorkspaceCwd(project, body), command.cwd);
     const terminalApp = typeof body?.terminal === "string" ? body.terminal : "";
     const background = body?.background === true || terminalApp === "background";
     const result = await runProjectCommand(command.command, cwd, {
@@ -442,11 +409,11 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/projects/git/commit-message"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_projects_git_commit_message(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
-    const cwd = requestWorkspaceCwd(project, body);
+    const project = deps.findProject(String(body?.projectId ?? ""));
+    const cwd = deps.requestWorkspaceCwd(project, body);
     const context = await readCommitDiff(cwd, body?.paths);
-    const model = getRuntimeForRequest(body).session.model;
-    if (!isUsableModel(model)) {
+    const model = deps.getRuntimeForRequest(body).session.model;
+    if (!deps.isUsableModel(model)) {
       throw new Error("请先选择 provider 和 model。");
     }
     if (!modelRuntime.hasConfiguredAuth(model.provider)) {
@@ -491,7 +458,7 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/sessions"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_sessions(ctx) {
     const body = await readJson(ctx.req);
-    const result = await createProjectSession(
+    const result = await deps.createProjectSession(
       String(body?.projectId ?? state.activeProjectId),
       body?.name,
       body?.worktree,
@@ -502,11 +469,11 @@ export function createRoutesProjects(state, deps) {
 
   /** 路由处理器：req.method === "GET" && url.pathname === "/api/sessions/worktree"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_get_api_sessions_worktree(ctx) {
-    const project = findProject(String(ctx.url.searchParams.get("projectId") ?? ""));
+    const project = deps.findProject(String(ctx.url.searchParams.get("projectId") ?? ""));
     sendJson(
       ctx.res,
       200,
-      await readSessionWorktreeInfo(project, String(ctx.url.searchParams.get("sessionPath") ?? "")),
+      await deps.readSessionWorktreeInfo(project, String(ctx.url.searchParams.get("sessionPath") ?? "")),
     );
     return;
   }
@@ -514,22 +481,22 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/sessions/worktree/branch"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_sessions_worktree_branch(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
+    const project = deps.findProject(String(body?.projectId ?? ""));
     const sessionPath = String(body?.sessionPath ?? "");
-    const cwd = requireSessionWorktreeCwd(project, sessionPath);
+    const cwd = deps.requireSessionWorktreeCwd(project, sessionPath);
     await createGitBranch(cwd, String(body?.name ?? ""));
-    sendJson(ctx.res, 200, await readSessionWorktreeInfo(project, sessionPath));
+    sendJson(ctx.res, 200, await deps.readSessionWorktreeInfo(project, sessionPath));
     return;
   }
 
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/sessions/worktree/remove"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_sessions_worktree_remove(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
+    const project = deps.findProject(String(body?.projectId ?? ""));
     sendJson(
       ctx.res,
       200,
-      await removeSessionWorktree(project, String(body?.sessionPath ?? ""), body?.force),
+      await deps.removeSessionWorktree(project, String(body?.sessionPath ?? ""), body?.force),
     );
     return;
   }
@@ -537,8 +504,8 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/sessions/worktree/reveal"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_sessions_worktree_reveal(ctx) {
     const body = await readJson(ctx.req);
-    const project = findProject(String(body?.projectId ?? ""));
-    await revealFolder(requireSessionWorktreeCwd(project, String(body?.sessionPath ?? "")));
+    const project = deps.findProject(String(body?.projectId ?? ""));
+    await revealFolder(deps.requireSessionWorktreeCwd(project, String(body?.sessionPath ?? "")));
     sendJson(ctx.res, 200, { ok: true });
     return;
   }
@@ -547,7 +514,7 @@ export function createRoutesProjects(state, deps) {
   async function handle_post_api_sessions_select(ctx) {
     const body = await readJson(ctx.req);
     const traceId = String(body?.traceId ?? ctx.clientTraceId ?? "").trim() || undefined;
-    const result = await selectProjectSession(
+    const result = await deps.selectProjectSession(
       String(body?.projectId ?? state.activeProjectId),
       String(body?.sessionPath ?? ""),
       ctx.requestId,
@@ -567,7 +534,7 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/sessions/update"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_sessions_update(ctx) {
     const body = await readJson(ctx.req);
-    const result = await updateProjectSession(
+    const result = await deps.updateProjectSession(
       String(body?.projectId ?? state.activeProjectId),
       String(body?.sessionPath ?? ""),
       body?.name,
@@ -579,7 +546,7 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/sessions/pin"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_sessions_pin(ctx) {
     const body = await readJson(ctx.req);
-    const result = await pinProjectSession(
+    const result = await deps.pinProjectSession(
       String(body?.projectId ?? state.activeProjectId),
       String(body?.sessionPath ?? ""),
       Boolean(body?.pinned),
@@ -591,7 +558,7 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/sessions/archive"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_sessions_archive(ctx) {
     const body = await readJson(ctx.req);
-    const result = await archiveProjectSession(
+    const result = await deps.archiveProjectSession(
       String(body?.projectId ?? state.activeProjectId),
       String(body?.sessionPath ?? ""),
       body?.archived !== false,
@@ -603,7 +570,7 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/sessions/delete"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_sessions_delete(ctx) {
     const body = await readJson(ctx.req);
-    const result = await deleteProjectSession(
+    const result = await deps.deleteProjectSession(
       String(body?.projectId ?? state.activeProjectId),
       String(body?.sessionPath ?? ""),
     );
@@ -614,7 +581,7 @@ export function createRoutesProjects(state, deps) {
   /** 路由处理器：req.method === "POST" && url.pathname === "/api/sessions/delete-archived"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
   async function handle_post_api_sessions_delete_archived(ctx) {
     const body = await readJson(ctx.req);
-    const result = await deleteArchivedSessions(body?.projectId ? String(body.projectId) : "");
+    const result = await deps.deleteArchivedSessions(body?.projectId ? String(body.projectId) : "");
     sendJson(ctx.res, 200, result);
     return;
   }

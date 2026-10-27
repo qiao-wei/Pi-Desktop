@@ -85,10 +85,9 @@ import { createBridgeBoot } from "./boot.mjs";
 // result on stdout instead of each inventing their own port policy.
 // 已抽到: server/boot.mjs
 /**
- * 各域工厂的依赖容器。**同一个对象引用**，组合区里逐域填满；工厂在创建时按名字解构走
- * （跨域引用则生成转发函数，调用时才取），所以组合区要排在非提升的 deps 之后。
+ * 各域工厂的依赖袋由 `server/domainContainer.mjs` 自己持有（外部注入的常量作为初始袋），
+ * 入口不再维护这个对象：装配时按名字解构、跨域引用生成转发函数这些事都在容器里。
  */
-const deps = {};
 
 /**
  * 启动块：路径/环境常量 + `state` + PI 运行时装配。
@@ -115,10 +114,10 @@ const { sessionStore, activePackageCommands, agentSkillsDir, agentsSkillsDir, ap
 // 包命令注册表（纯内存结构）：要早于组合区，因为技能/包域在组合时就注入它。
 // 已抽到: server/boot.mjs
 /**
- * 组合区：把各域工厂建起来（见 `server/domains.mjs`），只解构**入口自己用得到**的名字 ——
- * 域之间通过共享的 `deps` 互相取用，不经过这里。
+ * 组合区：把各域工厂建起来（见 `server/domains.mjs` / `server/domainContainer.mjs`），
+ * 只解构**入口自己用得到**的名字 —— 域之间通过容器里的共享袋互相取用，不经过这里。
  */
-const domains = createBridgeDomains(state, deps, { activePackageCommands, agentSkillsDir, agentsSkillsDir, appCwd, appPackagesDir, appSkillsDir, authFile, capabilitiesConfigVersion, capabilitiesDefaultsFile, capabilitiesFile, commandRunsFile, directoryMimeType, extensionUiAnsiAccent, generatedTitleMaxChars, hostSystemPrompt, http429StatusPatterns, maxAttachmentBytes, maxAttachmentCount, maxAttachmentTotalBytes, mcpToolProbeTimeoutMs, modelLoginBroker, modelRuntime, modelsJsonFile, normalizeExtensionUiMode, normalizePersonalizationStyle, openRuntimes, personalizationFile, personalizationStyles, piDesktopCapabilitiesCustomType, projectAttachmentRoot, projectsFile, searchDocumentCache, searchDocumentCacheLimit, sessionStore });
+const domains = createBridgeDomains(state, { activePackageCommands, agentSkillsDir, agentsSkillsDir, appCwd, appPackagesDir, appSkillsDir, authFile, capabilitiesConfigVersion, capabilitiesDefaultsFile, capabilitiesFile, commandRunsFile, directoryMimeType, extensionUiAnsiAccent, generatedTitleMaxChars, hostSystemPrompt, http429StatusPatterns, maxAttachmentBytes, maxAttachmentCount, maxAttachmentTotalBytes, mcpToolProbeTimeoutMs, modelLoginBroker, modelRuntime, modelsJsonFile, normalizeExtensionUiMode, normalizePersonalizationStyle, openRuntimes, personalizationFile, personalizationStyles, piDesktopCapabilitiesCustomType, projectAttachmentRoot, projectsFile, searchDocumentCache, searchDocumentCacheLimit, sessionStore });
 /* 入口自己用得到的导出（路由处理器不在这里解构：路由表按名字从 `domains` 取）。 */
 const { activeProject, createRuntime, updateSessionStoreFromRuntime } = domains;
 

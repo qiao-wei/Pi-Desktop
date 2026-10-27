@@ -37,7 +37,7 @@ test("受管根包含 .agents（用户的与项目的），能力页才能显示
   // 写死成数组就又把它们漏成「查无此技能」。
   assert.match(
     serverSource,
-    /function isManagedSkillPath\(filePath, project = activeProject\(\)\) \{\s*return isSkillPathUnderRoots\(filePath, managedSkillRoots\(project\)\);/,
+    /function isManagedSkillPath\(filePath, project = deps\.activeProject\(\)\) \{\s*return isSkillPathUnderRoots\(filePath, managedSkillRoots\(project\)\);/,
   );
   const roots = region(
     serverSource,
@@ -56,7 +56,7 @@ test("受管根包含 .agents（用户的与项目的），能力页才能显示
   // 项目那份必须和 pi 同源（同一个遍历规则），否则分类会和 pi 报的路径对不上。
   assert.match(
     serverSource,
-    /function projectAgentsSkillsDirs\(project = activeProject\(\)\) \{\s*return projectAgentsSkillRoots\(project\.cwd, homedir\(\)\);/,
+    /function projectAgentsSkillsDirs\(project = deps\.activeProject\(\)\) \{\s*return projectAgentsSkillRoots\(project\.cwd, homedir\(\)\);/,
   );
 });
 
@@ -64,18 +64,18 @@ test("能力清单按 skillSourceForPath 分类，并据此给出 readonly", () 
   const payload = region(
     serverSource,
     "const source = skillSourceForPath(",
-    ".sort(compareCapabilityCards)",
+    ".sort(deps.compareCapabilityCards)",
   );
   assert.match(payload, /builtin: appSkillsDir,/);
   assert.match(payload, /piAgent: agentSkillsDir,/);
   assert.match(payload, /agents: agentsSkillsDir,/);
-  assert.match(payload, /projectAgents: projectAgentsSkillsDirs\(project\),/);
+  assert.match(payload, /projectAgents: deps\.projectAgentsSkillsDirs\(project\),/);
   assert.match(payload, /source,\n/, "payload 用算好的 source，而不是就地二选一");
   assert.match(payload, /readonly: isReadOnlySkillSource\(source\),/);
   // 旧的二选一分类必须消失，否则 .agents 永远落不到自己的 chip。
   assert.doesNotMatch(
     serverSource,
-    /isBuiltinSkillPath\(skill\.filePath\)[\s\S]{0,40}\? "builtin"/,
+    /deps\.isBuiltinSkillPath\(skill\.filePath\)[\s\S]{0,40}\? "builtin"/,
   );
 });
 

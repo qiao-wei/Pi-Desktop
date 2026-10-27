@@ -42,6 +42,9 @@
  *   shell-commands      preload whitelist == declared host commands == invoke() call sites.
  *   route-table         routes are data: one table is the only source of truth, matching is by an
  *                       explicit priority field, and nothing else in server/ branches on a path.
+ *   domain-deps         the domain table (which domain reads which names, at build time vs in a
+ *                       closure) is generated from the modules and byte-checked, so a domain can
+ *                       neither silently read an undeclared name nor drift from its declaration.
  *   protocol-seam       every boundary in the seam registry is a real, tested swap point.
  *   no-bypass           globals/raw fetch/raw host invoke stay inside their seam (with reasons).
  *   docs-regions        generated doc regions match the policy.
@@ -63,6 +66,7 @@ import {
 import { renderDocRegions } from "./lib/render.mjs";
 import { checkProcessBoundaries } from "./lib/boundaries.mjs";
 import { routeTableViolations } from "./lib/routeRules.mjs";
+import { domainDepsViolations, generatedDomainTable } from "./lib/domainRules.mjs";
 import { buildSurface } from "./lib/surface.mjs";
 import { matchGlob } from "./lib/glob.mjs";
 import { renderConfig as renderLintConfig } from "./lint-config.mjs";
@@ -661,6 +665,9 @@ export function runCheck(root = REPO_ROOT, policy = loadPolicy(root)) {
   // --- route-table (why it exists and what it bites: scripts/architecture/lib/routeRules.mjs) ---
   violations.push(...routeTableViolations(policy.routeTable, { root, violation, listSourceFiles, relativeTo }));
 
+  // --- domain-deps (why it exists and what it bites: scripts/architecture/lib/domainRules.mjs) ---
+  violations.push(...domainDepsViolations(policy.domainDeps, { root, violation }));
+
   // --- node-typecheck -------------------------------------------------------------------
   // The non-renderer half is checked by a separate tsconfig (not referenced by `tsc -b`, so the
   // build stays fast and green). Enabling `checkJs` over 18k untyped lines produces a pile, so the
@@ -739,6 +746,7 @@ export function runCheck(root = REPO_ROOT, policy = loadPolicy(root)) {
       surface: buildSurface(bridgeRoutes, clientPaths, frozen),
       docRegions,
       nodeTypecheck,
+      domainTable: generatedDomainTable(root, policy.domainDeps),
     },
   };
 }
@@ -790,6 +798,13 @@ export function writeGenerated(result, policy = loadPolicy(REPO_ROOT)) {
   const surfacePath = join(REPO_ROOT, "architecture/generated/bridge-surface.json");
   mkdirSync(dirname(surfacePath), { recursive: true });
   writeFileSync(surfacePath, `${JSON.stringify(result.generated.surface, null, 2)}\n`);
+
+  // The domain table is generated for the same reason the surface is: it must be the truth about
+  // what the modules read, and hand-editing it would recreate the drift this rule exists to stop.
+  if (result.generated.domainTable) {
+    const tablePath = policy.domainDeps?.table ?? "server/domainTable.mjs";
+    writeFileSync(join(REPO_ROOT, tablePath), result.generated.domainTable);
+  }
 
   // Ratchet record for the node-side typecheck pile. Deleted automatically once it empties, so
   // the end state (zero diagnostics, no baseline file) is reached without anyone remembering to

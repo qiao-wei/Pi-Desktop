@@ -18,31 +18,9 @@ import { resolve } from "node:path";
  */
 export function createRuntimeDomain(state, deps) {
   const { hostSystemPrompt, modelRuntime, openRuntimes, sessionStore } = deps;
-  const findProject = /** @type {any} */ ((...args) => deps.findProject(...args));
-  const createPiDesktopRuntimeExtension = /** @type {any} */ ((...args) => deps.createPiDesktopRuntimeExtension(...args));
   // 跨域引用：由别的域工厂提供，且两边可能互相调用 —— 转发到共享的 deps，调用时才取。
-  const discoverAllProjectSkills = /** @type {any} */ ((...args) => deps.discoverAllProjectSkills(...args));
-  const discoverBuiltinPackagePaths = /** @type {any} */ ((...args) => deps.discoverBuiltinPackagePaths(...args));
-  const isManagedSkillPath = /** @type {any} */ ((...args) => deps.isManagedSkillPath(...args));
-  const managedSkills = /** @type {any} */ ((...args) => deps.managedSkills(...args));
-  const reportSkillInventoryMismatch = /** @type {any} */ ((...args) => deps.reportSkillInventoryMismatch(...args));
   // 跨域引用：由别的域工厂提供，且两边可能互相调用 —— 转发到共享的 deps，调用时才取。
-  const ensureWorktreePiLink = /** @type {any} */ ((...args) => deps.ensureWorktreePiLink(...args));
-  const listProjectSessions = /** @type {any} */ ((...args) => deps.listProjectSessions(...args));
-  const touchProject = /** @type {any} */ ((...args) => deps.touchProject(...args));
   // 跨域引用：由别的域工厂提供，且两边可能互相调用 —— 转发到共享的 deps，调用时才取。
-  const defaultComposerModel = /** @type {any} */ ((...args) => deps.defaultComposerModel(...args));
-  const isHttp429ProviderError = /** @type {any} */ ((...args) => deps.isHttp429ProviderError(...args));
-  const isUsableModel = /** @type {any} */ ((...args) => deps.isUsableModel(...args));
-  const resolveModel = /** @type {any} */ ((...args) => deps.resolveModel(...args));
-  const usableDefaultModel = /** @type {any} */ ((...args) => deps.usableDefaultModel(...args));
-  const bindPiDesktopSessionExtensions = /** @type {any} */ ((...args) => deps.bindPiDesktopSessionExtensions(...args));
-  const createExtensionUiBridge = /** @type {any} */ ((...args) => deps.createExtensionUiBridge(...args));
-  const createPiDesktopSkillTools = /** @type {any} */ ((...args) => deps.createPiDesktopSkillTools(...args));
-  const ensureCapabilitiesConfigInitialized = /** @type {any} */ ((...args) => deps.ensureCapabilitiesConfigInitialized(...args));
-  const refreshRuntimeCapabilityPaths = /** @type {any} */ ((...args) => deps.refreshRuntimeCapabilityPaths(...args));
-  const refreshSnapshot = /** @type {any} */ ((...args) => deps.refreshSnapshot(...args));
-  const resolveRuntimeCapabilityPaths = /** @type {any} */ ((...args) => deps.resolveRuntimeCapabilityPaths(...args));
 
 async function createRuntime(project, sessionPath, trace = {}) {
   const startedAt = Date.now();
@@ -93,7 +71,7 @@ async function createRuntime(project, sessionPath, trace = {}) {
   // worktree 会话靠一条 `<worktree>/.pi` 软链看项目的 skills / extensions / 包配置。建 worktree
   // 时会链好，这里再幂等保一次：项目 `.pi` 是 worktree 建完才出现的、软链被别的东西删过、
   // 或者 worktree 是早先版本建的，都会在这里补上。
-  ensureWorktreePiLink(project, workspaceCwd, trace);
+  deps.ensureWorktreePiLink(project, workspaceCwd, trace);
   diagnosticLog("session.switch.runtime.workspace_resolved", {
     ...trace,
     sessionPath: sessionManager.getSessionFile(),
@@ -105,7 +83,7 @@ async function createRuntime(project, sessionPath, trace = {}) {
     sessionPath: sessionManager.getSessionFile(),
     durationMs: Date.now() - startedAt,
   });
-  const uiBridge = createExtensionUiBridge();
+  const uiBridge = deps.createExtensionUiBridge();
   /** @type {{ current: any }} */
   const runtimeRef = { current: null };
   const trustStore = new ProjectTrustStore(agentDir);
@@ -121,7 +99,7 @@ async function createRuntime(project, sessionPath, trace = {}) {
     projectTrustContext: uiBridge.createProjectTrustContext(project.cwd),
   });
   settingsManager.setProjectTrusted(projectTrusted);
-  const capabilityPaths = await resolveRuntimeCapabilityPaths({
+  const capabilityPaths = await deps.resolveRuntimeCapabilityPaths({
     project,
     settingsManager,
     sessionManager,
@@ -165,16 +143,16 @@ async function createRuntime(project, sessionPath, trace = {}) {
           // state, same instant. That set is the inventory, so the capability page and the
           // session agree without a second, potentially disagreeing, discovery pass.
           const { skills, inventory } = applySkillSelection(base.skills, capabilityPaths.skillSelection, {
-            isManaged: (path) => isManagedSkillPath(path, project),
+            isManaged: (path) => deps.isManagedSkillPath(path, project),
             isDisabledPath: (path) => capabilityPaths.disabledPackageRoots.some((root) => isPathInside(root, canonicalPath(path))),
-            onMismatch: (skill) => reportSkillInventoryMismatch(skill, project),
+            onMismatch: (skill) => deps.reportSkillInventoryMismatch(skill, project),
           });
           capabilityPaths.skillInventory = inventory;
           return { ...base, skills };
         },
         appendSystemPromptOverride: (base) => [...base, hostSystemPrompt],
         extensionFactories: [
-          createPiDesktopRuntimeExtension(project, workspaceCwd),
+          deps.createPiDesktopRuntimeExtension(project, workspaceCwd),
           // pi 的 CLI 把这几个当内置扩展加载；SDK 宿主必须自己加进 factories
           // （docs/sdk.md#codemode-mcp）。加进来才能和 TUI 用同一份内核：
           // - codemode：QuickJS 沙箱里跑模型写的 JS，可并行调工具；
@@ -209,9 +187,9 @@ async function createRuntime(project, sessionPath, trace = {}) {
     // 项目记录可能只有等级（用户只改过等级、还没换过模型）：这时候别拿空 provider/model 去
     // 查模型，让 pi 继续用它的全局默认模型，只把等级带上。
     const storedModelRef = composerDefaultModelReference(storedDefaults);
-    const storedModel = storedModelRef ? resolveModel(storedModelRef.provider, storedModelRef.model) : undefined;
+    const storedModel = storedModelRef ? deps.resolveModel(storedModelRef.provider, storedModelRef.model) : undefined;
     const startingModel =
-      storedModel && isUsableModel(storedModel) && services.modelRuntime.hasConfiguredAuth(storedModel.provider)
+      storedModel && deps.isUsableModel(storedModel) && services.modelRuntime.hasConfiguredAuth(storedModel.provider)
         ? storedModel
         : undefined;
 
@@ -220,7 +198,7 @@ async function createRuntime(project, sessionPath, trace = {}) {
       services,
       sessionManager: runtimeSessionManager,
       sessionStartEvent,
-      customTools: createPiDesktopSkillTools(project, services.resourceLoader),
+      customTools: deps.createPiDesktopSkillTools(project, services.resourceLoader),
       model: startingModel,
       thinkingLevel: storedDefaults?.thinkingLevel,
     });
@@ -255,9 +233,9 @@ async function createRuntime(project, sessionPath, trace = {}) {
   });
 
   runtimeRef.current = runtime;
-  await bindPiDesktopSessionExtensions(runtime.session, runtimeRef, uiBridge);
+  await deps.bindPiDesktopSessionExtensions(runtime.session, runtimeRef, uiBridge);
   runtime.setRebindSession(async (session) => {
-    await bindPiDesktopSessionExtensions(session, runtimeRef, uiBridge);
+    await deps.bindPiDesktopSessionExtensions(session, runtimeRef, uiBridge);
   });
   runtime.setBeforeSessionInvalidate(() => {
     uiBridge.clearPendingRequests();
@@ -285,7 +263,7 @@ async function createRuntime(project, sessionPath, trace = {}) {
   // runs during the loader's own reload. If that pass disagreed with the trust we used to
   // build the inventory, re-align once and let pi re-run its skill pass.
   if (targetRuntime.settingsManager.isProjectTrusted() !== projectTrusted) {
-    await refreshRuntimeCapabilityPaths(targetRuntime);
+    await deps.refreshRuntimeCapabilityPaths(targetRuntime);
     reloadRuntimeSkills(targetRuntime);
   }
   // createAgentSessionServices already loaded the resource loader with these
@@ -299,7 +277,7 @@ async function createRuntime(project, sessionPath, trace = {}) {
 }
 
 function ensureBuiltinPackages(settingsManager) {
-  const builtinPackages = discoverBuiltinPackagePaths();
+  const builtinPackages = deps.discoverBuiltinPackagePaths();
   if (!builtinPackages.length) {
     return;
   }
@@ -335,7 +313,7 @@ function allowHttp429Retry(session) {
       return false;
     }
 
-    return isHttp429ProviderError(message.errorMessage);
+    return deps.isHttp429ProviderError(message.errorMessage);
   };
 }
 
@@ -346,7 +324,7 @@ async function replaceRuntime(project, sessionPath, trace = {}) {
   // 不拦的话重启/切项目会打开一个侧栏里看不见的会话。退回到列表里最新的未归档会话。
   const resolvedSessionPath =
     requestedSessionPath && sessionStore.isArchived(project.id, requestedSessionPath)
-      ? listProjectSessions(project)[0]?.path
+      ? deps.listProjectSessions(project)[0]?.path
       : requestedSessionPath;
   let nextRuntime = resolvedSessionPath ? openRuntimes.get(resolvedSessionPath) : undefined;
   diagnosticLog("session.switch.runtime.start", {
@@ -362,8 +340,8 @@ async function replaceRuntime(project, sessionPath, trace = {}) {
 
   state.runtime = nextRuntime;
   state.activeProjectId = project.id;
-  touchProject(project.id, { lastSessionPath: state.runtime.session.sessionFile });
-  const snapshot = await refreshSnapshot({ traceSessionSwitch: true });
+  deps.touchProject(project.id, { lastSessionPath: state.runtime.session.sessionFile });
+  const snapshot = await deps.refreshSnapshot({ traceSessionSwitch: true });
   diagnosticLog("session.switch.runtime.response_ready", {
     projectId: project.id,
     sessionPath: state.runtime.session.sessionFile,
@@ -411,19 +389,19 @@ function disposeRuntime(sessionPath) {
  */
 async function ensureModelSelection(session, settingsManager) {
   if (session.model) {
-    if (isUsableModel(session.model) && modelRuntime.hasConfiguredAuth(session.model.provider)) {
+    if (deps.isUsableModel(session.model) && modelRuntime.hasConfiguredAuth(session.model.provider)) {
       return;
     }
     await applyModelToSession({
       session,
       settingsManager,
-      model: usableDefaultModel(settingsManager) ?? defaultComposerModel(),
+      model: deps.usableDefaultModel(settingsManager) ?? deps.defaultComposerModel(),
       reason: MODEL_APPLY_REASONS.sessionOpen,
     }).catch(() => undefined);
     return;
   }
 
-  const defaults = usableDefaultModel(settingsManager);
+  const defaults = deps.usableDefaultModel(settingsManager);
   if (defaults) {
     try {
       await applyModelToSession({ session, settingsManager, model: defaults, reason: MODEL_APPLY_REASONS.sessionOpen });
@@ -434,7 +412,7 @@ async function ensureModelSelection(session, settingsManager) {
   }
 
   // 没记住任何选择：用输入框下拉列表的第一项（自定义模型优先）。
-  const available = defaultComposerModel();
+  const available = deps.defaultComposerModel();
   if (available) {
     try {
       await applyModelToSession({ session, settingsManager, model: available, reason: MODEL_APPLY_REASONS.sessionOpen });
@@ -445,10 +423,10 @@ async function ensureModelSelection(session, settingsManager) {
 }
 
 async function readRuntimeCapabilityContext(targetRuntime) {
-  const project = findProject(targetRuntime.projectId);
+  const project = deps.findProject(targetRuntime.projectId);
   const allSkills = targetRuntime.capabilityPaths?.skillInventory
-    ?? await discoverAllProjectSkills(project, targetRuntime.settingsManager);
-  const config = ensureCapabilitiesConfigInitialized(managedSkills(allSkills, project));
+    ?? await deps.discoverAllProjectSkills(project, targetRuntime.settingsManager);
+  const config = deps.ensureCapabilitiesConfigInitialized(deps.managedSkills(allSkills, project));
   return {
     project,
     config,

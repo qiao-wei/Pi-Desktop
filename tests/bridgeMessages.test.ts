@@ -103,7 +103,7 @@ test("桥在两条快照出口都调用了报文自检（不调就没人检查�
   );
   assert.match(
     bridgeSource,
-    /assertBridgePayload\(buildAmbientSnapshot\(state\.runtime\), "ambient"\)/,
+    /assertBridgePayload\(deps\.buildAmbientSnapshot\(state\.runtime\), "ambient"\)/,
     "ambient 出口必须自检",
   );
   assert.match(

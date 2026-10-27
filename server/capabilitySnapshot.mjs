@@ -21,50 +21,23 @@ import { basename, dirname, join } from "node:path";
  */
 export function createCapabilitySnapshot(state, deps) {
   const { agentSkillsDir, agentsSkillsDir, appSkillsDir, capabilitiesConfigVersion, capabilitiesDefaultsFile, capabilitiesFile } = deps;
-  const findProject = /** @type {any} */ ((...args) => deps.findProject(...args));
-  const reportUnhealthyLoads = /** @type {any} */ ((...args) => deps.reportUnhealthyLoads(...args));
-  const discoverStandaloneExtensionPaths = /** @type {any} */ ((...args) => deps.discoverStandaloneExtensionPaths(...args));
-  const extensionDefaultEnabled = /** @type {any} */ ((...args) => deps.extensionDefaultEnabled(...args));
-  const loadedExtensionReport = /** @type {any} */ ((...args) => deps.loadedExtensionReport(...args));
-  const activeSessionCapabilitySelection = /** @type {any} */ ((...args) => deps.activeSessionCapabilitySelection(...args));
-  const appendSessionCapabilitySelection = /** @type {any} */ ((...args) => deps.appendSessionCapabilitySelection(...args));
-  const applyMissingDefaultEnabledSkillNames = /** @type {any} */ ((...args) => deps.applyMissingDefaultEnabledSkillNames(...args));
-  const compareCapabilityCards = /** @type {any} */ ((...args) => deps.compareCapabilityCards(...args));
-  const configuredPackagesForRuntime = /** @type {any} */ ((...args) => deps.configuredPackagesForRuntime(...args));
-  const defaultSkillIdsForSkills = /** @type {any} */ ((...args) => deps.defaultSkillIdsForSkills(...args));
-  const discoverAllProjectSkillResources = /** @type {any} */ ((...args) => deps.discoverAllProjectSkillResources(...args));
-  const isManagedSkillPath = /** @type {any} */ ((...args) => deps.isManagedSkillPath(...args));
-  const managedSkills = /** @type {any} */ ((...args) => deps.managedSkills(...args));
-  const normalizeCapabilitiesDefaults = /** @type {any} */ ((...args) => deps.normalizeCapabilitiesDefaults(...args));
-  const normalizeCapabilityId = /** @type {any} */ ((...args) => deps.normalizeCapabilityId(...args));
-  const normalizeSessionCapabilitySelection = /** @type {any} */ ((...args) => deps.normalizeSessionCapabilitySelection(...args));
-  const packageDefaultEnabled = /** @type {any} */ ((...args) => deps.packageDefaultEnabled(...args));
-  const packageResourcesForRuntime = /** @type {any} */ ((...args) => deps.packageResourcesForRuntime(...args));
-  const projectAgentsSkillsDirs = /** @type {any} */ ((...args) => deps.projectAgentsSkillsDirs(...args));
-  const reloadOpenRuntimeCapabilities = /** @type {any} */ ((...args) => deps.reloadOpenRuntimeCapabilities(...args));
-  const reloadOpenRuntimeSkills = /** @type {any} */ ((...args) => deps.reloadOpenRuntimeSkills(...args));
-  const skillCapabilityId = /** @type {any} */ ((...args) => deps.skillCapabilityId(...args));
-  const getRuntimeForRequest = /** @type {any} */ ((...args) => deps.getRuntimeForRequest(...args));
-  const mcpCapabilityEntries = /** @type {any} */ ((...args) => deps.mcpCapabilityEntries(...args));
-  const readMcpRuntimeState = /** @type {any} */ ((...args) => deps.readMcpRuntimeState(...args));
-  const readRuntimeCapabilityContext = /** @type {any} */ ((...args) => deps.readRuntimeCapabilityContext(...args));
 
 async function resolveRuntimeCapabilityPaths({ project, settingsManager, sessionManager }) {
-  const packages = configuredPackagesForRuntime({
+  const packages = deps.configuredPackagesForRuntime({
     projectId: project.id,
     settingsManager,
   });
-  const skillResources = await discoverAllProjectSkillResources(project, settingsManager);
+  const skillResources = await deps.discoverAllProjectSkillResources(project, settingsManager);
   const allSkills = skillResources.skills;
-  const config = ensureCapabilitiesConfigInitialized(managedSkills(allSkills, project));
-  const selection = activeSessionCapabilitySelection(sessionManager, allSkills, config, {
+  const config = ensureCapabilitiesConfigInitialized(deps.managedSkills(allSkills, project));
+  const selection = deps.activeSessionCapabilitySelection(sessionManager, allSkills, config, {
     projectId: project.id,
     settingsManager,
   });
   const selectedPackageIds = new Set(selection.packages ?? []);
   const selectedExtensionIds = new Set(selection.extensions ?? []);
   const defaultPackageIds = new Set(
-    packages.filter((pkg) => packageDefaultEnabled(config, pkg)).map(packageCapabilityId),
+    packages.filter((pkg) => deps.packageDefaultEnabled(config, pkg)).map(packageCapabilityId),
   );
   const extensionPaths = [];
   const skillPaths = [];
@@ -79,11 +52,11 @@ async function resolveRuntimeCapabilityPaths({ project, settingsManager, session
     skillPaths.push(...enabledResourcePaths(resolved, "skills"));
   }
 
-  const standaloneExtensionPaths = discoverStandaloneExtensionPaths(project, settingsManager);
+  const standaloneExtensionPaths = deps.discoverStandaloneExtensionPaths(project, settingsManager);
   const defaultExtensionIds = new Set(
     standaloneExtensionPaths
       .map(extensionCapabilityId)
-      .filter((id) => extensionDefaultEnabled(config, id)),
+      .filter((id) => deps.extensionDefaultEnabled(config, id)),
   );
   for (const path of standaloneExtensionPaths) {
     const extensionId = extensionCapabilityId(path);
@@ -110,7 +83,7 @@ async function resolveRuntimeCapabilityPaths({ project, settingsManager, session
       selection,
       config,
       inventorySkills: allSkills,
-      isManaged: (path) => isManagedSkillPath(path, project),
+      isManaged: (path) => deps.isManagedSkillPath(path, project),
     }),
     // The full set pi's loader discovers, captured from its own pass (seeded with the
     // pre-resolve so the page has data even before the loader runs).
@@ -122,7 +95,7 @@ async function resolveRuntimeCapabilityPaths({ project, settingsManager, session
 }
 
 async function refreshRuntimeCapabilityPaths(targetRuntime) {
-  const project = findProject(targetRuntime.projectId);
+  const project = deps.findProject(targetRuntime.projectId);
   const next = await resolveRuntimeCapabilityPaths({
     project,
     settingsManager: targetRuntime.settingsManager,
@@ -171,7 +144,7 @@ function ensureCapabilitiesConfigInitialized(allSkills) {
   const defaults = readCapabilitiesDefaults();
   let changed = false;
 
-  changed = applyMissingDefaultEnabledSkillNames(config, allSkills, defaults.defaultEnabledSkills) || changed;
+  changed = deps.applyMissingDefaultEnabledSkillNames(config, allSkills, defaults.defaultEnabledSkills) || changed;
 
   if (!existed || config.version !== capabilitiesConfigVersion) {
     config.version = capabilitiesConfigVersion;
@@ -187,7 +160,7 @@ function readCapabilitiesDefaults() {
   }
 
   try {
-    return normalizeCapabilitiesDefaults(JSON.parse(readFileSync(capabilitiesDefaultsFile, "utf8")));
+    return deps.normalizeCapabilitiesDefaults(JSON.parse(readFileSync(capabilitiesDefaultsFile, "utf8")));
   } catch {
     return createEmptyCapabilitiesDefaults();
   }
@@ -204,7 +177,7 @@ function normalizeCapabilitiesConfig(config) {
   const source = config && typeof config === "object" ? config : {};
   const skills = {};
   for (const [id, value] of Object.entries(source.skills && typeof source.skills === "object" ? source.skills : {})) {
-    const normalizedId = normalizeCapabilityId(id);
+    const normalizedId = deps.normalizeCapabilityId(id);
     if (!normalizedId) {
       continue;
     }
@@ -225,20 +198,20 @@ function normalizeCapabilitiesConfig(config) {
 }
 
 function defaultSessionCapabilitySelection(config, skills, targetRuntime = state.runtime) {
-  const packages = configuredPackagesForRuntime(targetRuntime)
-    .filter((pkg) => packageDefaultEnabled(config, pkg))
+  const packages = deps.configuredPackagesForRuntime(targetRuntime)
+    .filter((pkg) => deps.packageDefaultEnabled(config, pkg))
     .map(packageCapabilityId);
-  const project = findProject(targetRuntime.projectId);
-  const extensions = discoverStandaloneExtensionPaths(project, targetRuntime.settingsManager).map(extensionCapabilityId);
+  const project = deps.findProject(targetRuntime.projectId);
+  const extensions = deps.discoverStandaloneExtensionPaths(project, targetRuntime.settingsManager).map(extensionCapabilityId);
   return {
     version: 3,
-    skills: defaultSkillIdsForSkills(config, managedSkills(skills)),
+    skills: deps.defaultSkillIdsForSkills(config, deps.managedSkills(skills)),
     enabledSkills: [],
     disabledSkills: [],
     packages,
     enabledPackages: [],
     disabledPackages: [],
-    extensions: extensions.filter((id) => extensionDefaultEnabled(config, id)),
+    extensions: extensions.filter((id) => deps.extensionDefaultEnabled(config, id)),
     enabledExtensions: [],
     disabledExtensions: [],
     // Not `Date.now()`: a default selection has never been changed, and a
@@ -250,10 +223,10 @@ function defaultSessionCapabilitySelection(config, skills, targetRuntime = state
 }
 
 function mergeSessionCapabilitySelection(selection, skills, config, targetRuntime = state.runtime) {
-  const project = findProject(targetRuntime.projectId);
-  const managed = managedSkills(skills, project);
-  const knownSkillIds = new Set(managed.map(skillCapabilityId));
-  const defaultSkillIds = new Set(defaultSkillIdsForSkills(config, managed));
+  const project = deps.findProject(targetRuntime.projectId);
+  const managed = deps.managedSkills(skills, project);
+  const knownSkillIds = new Set(managed.map(deps.skillCapabilityId));
+  const defaultSkillIds = new Set(deps.defaultSkillIdsForSkills(config, managed));
   const enabledSkillIds = new Set(selection.enabledSkills);
   const disabledSkillIds = new Set(selection.disabledSkills);
 
@@ -267,9 +240,9 @@ function mergeSessionCapabilitySelection(selection, skills, config, targetRuntim
     activeSkillIds.delete(id);
   }
 
-  const packages = configuredPackagesForRuntime(targetRuntime);
+  const packages = deps.configuredPackagesForRuntime(targetRuntime);
   const knownPackageIds = new Set(packages.map(packageCapabilityId));
-  const defaultPackageIds = new Set(packages.filter((item) => packageDefaultEnabled(config, item)).map(packageCapabilityId));
+  const defaultPackageIds = new Set(packages.filter((item) => deps.packageDefaultEnabled(config, item)).map(packageCapabilityId));
   const enabledPackageIds = new Set(selection.enabledPackages);
   const disabledPackageIds = new Set(selection.disabledPackages);
   const activePackageIds = new Set(defaultPackageIds);
@@ -278,11 +251,11 @@ function mergeSessionCapabilitySelection(selection, skills, config, targetRuntim
   }
   for (const id of disabledPackageIds) activePackageIds.delete(id);
 
-  const extensionPaths = discoverStandaloneExtensionPaths(project, targetRuntime.settingsManager);
+  const extensionPaths = deps.discoverStandaloneExtensionPaths(project, targetRuntime.settingsManager);
   const knownExtensionIds = new Set(extensionPaths.map(extensionCapabilityId));
   const defaultExtensionIds = new Set(extensionPaths
     .map(extensionCapabilityId)
-    .filter((id) => extensionDefaultEnabled(config, id)));
+    .filter((id) => deps.extensionDefaultEnabled(config, id)));
   const enabledExtensionIds = new Set(selection.enabledExtensions);
   const disabledExtensionIds = new Set(selection.disabledExtensions);
   const activeExtensionIds = new Set(defaultExtensionIds);
@@ -294,7 +267,7 @@ function mergeSessionCapabilitySelection(selection, skills, config, targetRuntim
   return {
     ...selection,
     version: 3,
-    skills: managed.map(skillCapabilityId).filter((id) => activeSkillIds.has(id)),
+    skills: managed.map(deps.skillCapabilityId).filter((id) => activeSkillIds.has(id)),
     enabledSkills: [...enabledSkillIds],
     disabledSkills: [...disabledSkillIds],
     packages: packages.map(packageCapabilityId).filter((id) => activePackageIds.has(id)),
@@ -307,31 +280,31 @@ function mergeSessionCapabilitySelection(selection, skills, config, targetRuntim
 }
 
 async function buildCapabilitiesSnapshot(targetRuntime = state.runtime, _options = {}) {
-  const project = findProject(targetRuntime.projectId);
+  const project = deps.findProject(targetRuntime.projectId);
   // Reuse the set pi's session loader actually discovered (post-trust, post-package).
   // Re-running a discovery pass here would cost a full resource resolve per snapshot *and*
   // could disagree with what the session really loaded - which is exactly how project
   // skills went missing while the page still claimed they were active.
   const fallbackSkillResources = targetRuntime.capabilityPaths?.skillInventory
     ? null
-    : await discoverAllProjectSkillResources(project, targetRuntime.settingsManager);
+    : await deps.discoverAllProjectSkillResources(project, targetRuntime.settingsManager);
   const allSkills = targetRuntime.capabilityPaths?.skillInventory
     ?? fallbackSkillResources?.skills
     ?? [];
   // pi 加载器的诊断跟清单同源：重名冲突时它保留先发现的那份，丢掉的必须有个解释。
   const skillDiagnostics = targetRuntime.capabilityPaths?.skillDiagnostics ?? fallbackSkillResources?.diagnostics ?? [];
-  const managed = managedSkills(allSkills, project);
+  const managed = deps.managedSkills(allSkills, project);
   const config = ensureCapabilitiesConfigInitialized(managed);
-  const sessionSelection = activeSessionCapabilitySelection(targetRuntime.session.sessionManager, allSkills, config, targetRuntime);
+  const sessionSelection = deps.activeSessionCapabilitySelection(targetRuntime.session.sessionManager, allSkills, config, targetRuntime);
   const skillPolicy = targetRuntime.capabilityPaths?.skillSelection
     ?? createSkillSelectionPolicy({
       selection: sessionSelection,
       config,
       inventorySkills: allSkills,
-      isManaged: (path) => isManagedSkillPath(path, project),
+      isManaged: (path) => deps.isManagedSkillPath(path, project),
     });
-  const packages = configuredPackagesForRuntime(targetRuntime);
-  const extensionPaths = discoverStandaloneExtensionPaths(project, targetRuntime.settingsManager);
+  const packages = deps.configuredPackagesForRuntime(targetRuntime);
+  const extensionPaths = deps.discoverStandaloneExtensionPaths(project, targetRuntime.settingsManager);
   const activePackages = new Set(sessionSelection.packages ?? []);
   const activeExtensions = new Set(sessionSelection.extensions ?? []);
   const loadedPackageCommands = targetRuntime.session.extensionRunner?.getRegisteredCommands?.() ?? [];
@@ -339,12 +312,12 @@ async function buildCapabilitiesSnapshot(targetRuntime = state.runtime, _options
   // card can never claim a skill count the session's own path resolution disagrees with.
   const packageResources = new Map(
     await Promise.all(packages.map(async (pkg) =>
-      /** @type {[string, Awaited<ReturnType<typeof packageResourcesForRuntime>>]} */ ([pkg.id, await packageResourcesForRuntime(targetRuntime, pkg)]))),
+      /** @type {[string, Awaited<ReturnType<typeof deps.packageResourcesForRuntime>>]} */ ([pkg.id, await deps.packageResourcesForRuntime(targetRuntime, pkg)]))),
   );
   const packageCommandPaths = new Map(
     packages.map((pkg) => [pkg.id, new Set(enabledResourcePaths(packageResources.get(pkg.id), "extensions"))]),
   );
-  const extensionReport = loadedExtensionReport(targetRuntime);
+  const extensionReport = deps.loadedExtensionReport(targetRuntime);
   const loadHealth = summarizePackageHealth({
     loaded: extensionReport.loaded,
     errors: extensionReport.errors,
@@ -360,21 +333,21 @@ async function buildCapabilitiesSnapshot(targetRuntime = state.runtime, _options
       .filter((path) => path && !String(path).startsWith("<"))
       .map((path) => canonicalPath(path))),
   );
-  reportUnhealthyLoads(loadHealth, packages);
+  deps.reportUnhealthyLoads(loadHealth, packages);
   // MCP 不再读 capabilities.json（那里只剩 app 元数据）：服务器定义来自 pi 的 mcp.json，
   // 工具/连接状态来自会话，见 mcpCapabilityEntries。
-  const mcpServers = mcpCapabilityEntries(targetRuntime).entries;
+  const mcpServers = deps.mcpCapabilityEntries(targetRuntime).entries;
 
   return {
     skills: managed
       .map((skill) => {
-        const id = skillCapabilityId(skill);
+        const id = deps.skillCapabilityId(skill);
         const metadata = config.skills[id] ?? {};
         const source = skillSourceForPath(skill.filePath, {
           builtin: appSkillsDir,
           piAgent: agentSkillsDir,
           agents: agentsSkillsDir,
-          projectAgents: projectAgentsSkillsDirs(project),
+          projectAgents: deps.projectAgentsSkillsDirs(project),
         });
         return {
           id,
@@ -392,7 +365,7 @@ async function buildCapabilitiesSnapshot(targetRuntime = state.runtime, _options
           readonly: isReadOnlySkillSource(source),
         };
       })
-      .sort(compareCapabilityCards),
+      .sort(deps.compareCapabilityCards),
     packages: packages.map((pkg) => ({
       id: packageCapabilityId(pkg),
       kind: "package",
@@ -403,7 +376,7 @@ async function buildCapabilitiesSnapshot(targetRuntime = state.runtime, _options
       installedPath: pkg.installedPath,
       filtered: pkg.filtered,
       autoload: pkg.autoload,
-      defaultEnabled: packageDefaultEnabled(config, pkg),
+      defaultEnabled: deps.packageDefaultEnabled(config, pkg),
       active: activePackages.has(packageCapabilityId(pkg)),
       loadStatus: loadHealth.packages[pkg.id]?.status ?? "unknown",
       loadErrors: loadHealth.packages[pkg.id]?.errors ?? [],
@@ -420,7 +393,7 @@ async function buildCapabilitiesSnapshot(targetRuntime = state.runtime, _options
           hasArgumentCompletions: typeof command.getArgumentCompletions === "function",
         }))
         .sort((left, right) => left.name.localeCompare(right.name)),
-    })).sort(compareCapabilityCards),
+    })).sort(deps.compareCapabilityCards),
     extensions: extensionPaths.map((path) => ({
       id: extensionCapabilityId(path),
       kind: "extension",
@@ -432,12 +405,12 @@ async function buildCapabilitiesSnapshot(targetRuntime = state.runtime, _options
         : isPathInside(canonicalPath(agentDir), canonicalPath(path))
           ? "agent"
           : "settings",
-      defaultEnabled: extensionDefaultEnabled(config, extensionCapabilityId(path)),
+      defaultEnabled: deps.extensionDefaultEnabled(config, extensionCapabilityId(path)),
       active: activeExtensions.has(extensionCapabilityId(path)),
       loaded: loadedExtensionPaths.has(canonicalPath(path)),
       pinned: Boolean(config.extensions[extensionCapabilityId(path)]?.pinned),
       readonly: false,
-    })).sort(compareCapabilityCards),
+    })).sort(deps.compareCapabilityCards),
     mcpServers,
     builtinCommands: PI_DESKTOP_BUILTIN_COMMANDS,
     session: sessionSelection,
@@ -451,9 +424,9 @@ async function buildCapabilitiesSnapshot(targetRuntime = state.runtime, _options
 }
 
 async function setDefaultCapability(body) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   const kind = ["skill", "package", "extension", "mcp"].includes(body?.kind) ? body.kind : "skill";
-  const id = normalizeCapabilityId(body?.id);
+  const id = deps.normalizeCapabilityId(body?.id);
   const enabled = Boolean(body?.enabled);
   if (!id) {
     throw new Error("Capability id is required.");
@@ -466,13 +439,13 @@ async function setDefaultCapability(body) {
       defaultEnabled: enabled,
     };
   } else if (kind === "package") {
-    const packageItem = configuredPackagesForRuntime(targetRuntime).find((item) => item.id === id);
+    const packageItem = deps.configuredPackagesForRuntime(targetRuntime).find((item) => item.id === id);
     if (!packageItem) {
       throw new Error("Package not found.");
     }
     setPackageAutoload(targetRuntime.settingsManager, packageItem, enabled);
   } else if (kind === "extension") {
-    if (!discoverStandaloneExtensionPaths(findProject(targetRuntime.projectId), targetRuntime.settingsManager).includes(id)) {
+    if (!deps.discoverStandaloneExtensionPaths(deps.findProject(targetRuntime.projectId), targetRuntime.settingsManager).includes(id)) {
       throw new Error("Extension not found.");
     }
     config.extensions[id] = {
@@ -485,7 +458,7 @@ async function setDefaultCapability(body) {
       throw new Error("MCP server not found.");
     }
     assertMcpWriteScope(targetRuntime, parsed.scope);
-    const state = readMcpRuntimeState(targetRuntime);
+    const state = deps.readMcpRuntimeState(targetRuntime);
     const path = parsed.scope === "project" ? state.projectPath : state.globalPath;
     // MCP 的「默认」就是 pi 的 `enabled`：写回定义它的那份 mcp.json（pi 的 `/mcp` 面板同理）。
     writeMcpConfigPath(path, patchMcpServer(readMcpConfigPath(path).config, parsed.name, { enabled }));
@@ -495,17 +468,17 @@ async function setDefaultCapability(body) {
   // A default skill change only moves which skills pass the loader's filter; the heavier
   // package/extension/MCP changes still need the full runtime reload.
   if (kind === "skill") {
-    await reloadOpenRuntimeSkills("all");
+    await deps.reloadOpenRuntimeSkills("all");
   } else {
-    await reloadOpenRuntimeCapabilities("all");
+    await deps.reloadOpenRuntimeCapabilities("all");
   }
   return { capabilities: await buildCapabilitiesSnapshot(targetRuntime) };
 }
 
 async function setCapabilityPinned(body) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   const kind = ["skill", "package", "extension", "mcp"].includes(body?.kind) ? body.kind : "skill";
-  const id = normalizeCapabilityId(body?.id);
+  const id = deps.normalizeCapabilityId(body?.id);
   const pinned = Boolean(body?.pinned);
   if (!id) {
     throw new Error("Capability id is required.");
@@ -518,7 +491,7 @@ async function setCapabilityPinned(body) {
       pinned,
     };
   } else if (kind === "package") {
-    if (!configuredPackagesForRuntime(targetRuntime).some((item) => item.id === id)) {
+    if (!deps.configuredPackagesForRuntime(targetRuntime).some((item) => item.id === id)) {
       throw new Error("Package not found.");
     }
     config.packages[id] = {
@@ -526,7 +499,7 @@ async function setCapabilityPinned(body) {
       pinned,
     };
   } else if (kind === "extension") {
-    if (!discoverStandaloneExtensionPaths(findProject(targetRuntime.projectId), targetRuntime.settingsManager).includes(id)) {
+    if (!deps.discoverStandaloneExtensionPaths(deps.findProject(targetRuntime.projectId), targetRuntime.settingsManager).includes(id)) {
       throw new Error("Extension not found.");
     }
     config.extensions[id] = {
@@ -538,7 +511,7 @@ async function setCapabilityPinned(body) {
     if (!parsed) {
       throw new Error("MCP server not found.");
     }
-    const state = readMcpRuntimeState(targetRuntime);
+    const state = deps.readMcpRuntimeState(targetRuntime);
     if (!state.servers.some((server) => server.name === parsed.name && server.scope === parsed.scope)) {
       throw new Error("MCP server not found.");
     }
@@ -553,12 +526,12 @@ async function setCapabilityPinned(body) {
 }
 
 async function setSessionSkillCapability(body) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   if (isSessionBusy(targetRuntime.session)) {
     throw new Error("Stop the running response before changing this session's skills.");
   }
 
-  const id = normalizeCapabilityId(body?.id);
+  const id = deps.normalizeCapabilityId(body?.id);
   const enabled = Boolean(body?.enabled);
   if (!id) {
     throw new Error("Skill id is required.");
@@ -584,15 +557,15 @@ async function setSessionSkillCapability(body) {
 }
 
 async function updateRuntimeSessionCapabilities(targetRuntime, updateSelection) {
-  const context = await readRuntimeCapabilityContext(targetRuntime);
-  const current = activeSessionCapabilitySelection(
+  const context = await deps.readRuntimeCapabilityContext(targetRuntime);
+  const current = deps.activeSessionCapabilitySelection(
     targetRuntime.session.sessionManager,
     context.allSkills,
     context.config,
     targetRuntime,
   );
   const next = mergeSessionCapabilitySelection(
-    normalizeSessionCapabilitySelection(updateSelection(current, context)),
+    deps.normalizeSessionCapabilitySelection(updateSelection(current, context)),
     context.allSkills,
     context.config,
     targetRuntime,
@@ -603,7 +576,7 @@ async function updateRuntimeSessionCapabilities(targetRuntime, updateSelection) 
     return current;
   }
 
-  appendSessionCapabilitySelection(targetRuntime.session.sessionManager, next);
+  deps.appendSessionCapabilitySelection(targetRuntime.session.sessionManager, next);
   await refreshRuntimeCapabilityPaths(targetRuntime);
   // A skill toggle already refreshed `capabilityPaths.skillSelection` above, and pi's
   // loader re-reads it through `skillsOverride`; only a package/extension move needs the
@@ -615,11 +588,11 @@ async function updateRuntimeSessionCapabilities(targetRuntime, updateSelection) 
 }
 
 async function setSessionPackageCapability(body) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   if (isSessionBusy(targetRuntime.session)) {
     throw new Error("Stop the running response before changing this session's packages.");
   }
-  const id = normalizeCapabilityId(body?.id);
+  const id = deps.normalizeCapabilityId(body?.id);
   if (!id) throw new Error("Package id is required.");
 
   await updateRuntimeSessionCapabilities(targetRuntime, (selection) => {
@@ -638,11 +611,11 @@ async function setSessionPackageCapability(body) {
 }
 
 async function setSessionExtensionCapability(body) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   if (isSessionBusy(targetRuntime.session)) {
     throw new Error("Stop the running response before changing this session's extensions.");
   }
-  const id = normalizeCapabilityId(body?.id);
+  const id = deps.normalizeCapabilityId(body?.id);
   if (!id) throw new Error("Extension id is required.");
 
   await updateRuntimeSessionCapabilities(targetRuntime, (selection) => {

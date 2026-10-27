@@ -30,15 +30,15 @@ function topLevelFunctionSource(source, name) {
 
 test("bridge exposes archive / bulk-delete endpoints, and bootstrap carries the archived list", () => {
   assert.match(server, /url\.pathname === "\/api\/sessions\/archive"/);
-  assert.match(server, /await archiveProjectSession\(/);
+  assert.match(server, /await deps\.archiveProjectSession\(/);
   assert.match(server, /url\.pathname === "\/api\/sessions\/delete-archived"/);
-  assert.match(server, /await deleteArchivedSessions\(/);
-  assert.match(server, /archivedSessions: listArchivedSessions\(\)/);
+  assert.match(server, /await deps\.deleteArchivedSessions\(/);
+  assert.match(server, /archivedSessions: deps\.listArchivedSessions\(\)/);
   // 归档只打标记，文件仍在；侧栏列表由 SQL 层排除归档行（见 sessionArchive.mjs）。
   assert.match(server, /sessionStore\.setArchived\(project\.id, resolvedPath, archived\)/);
   // 归档的是当前会话时必须切走，否则会在一个不可见的会话上继续对话。
   assert.match(server, /if \(archived && isActiveSession\)/);
-  assert.match(server, /removeSessionRecord\(project, resolvedPath\)/);
+  assert.match(server, /deps\.removeSessionRecord\(project, resolvedPath\)/);
   // 归档会话不能被当成可打开的会话：项目 lastSessionPath 可能还指着它。
   assert.match(server, /sessionStore\.isArchived\(project\.id, requestedSessionPath\)/);
 });

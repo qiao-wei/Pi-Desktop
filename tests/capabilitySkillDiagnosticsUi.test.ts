@@ -28,7 +28,7 @@ test("服务端：诊断与清单同源，并进快照；重载时跟着更新",
   const paths = functionBody(server, "resolveRuntimeCapabilityPaths");
   assert.match(
     paths,
-    /const skillResources = await discoverAllProjectSkillResources\(project, settingsManager\)/,
+    /const skillResources = await deps\.discoverAllProjectSkillResources\(project, settingsManager\)/,
   );
   assert.match(paths, /skillDiagnostics: skillResources\.diagnostics/);
   assert.match(

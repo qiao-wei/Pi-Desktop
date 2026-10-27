@@ -15,19 +15,12 @@ import { join } from "node:path";
  */
 export function createMcpServers(state, deps) {
   const { appCwd, openRuntimes } = deps;
-  const reloadOpenRuntimeCapabilities = /** @type {any} */ ((...args) => deps.reloadOpenRuntimeCapabilities(...args));
   // 跨域引用：由别的域工厂提供，且两边可能互相调用 —— 转发到共享的 deps，调用时才取。
-  const buildCapabilitiesSnapshot = /** @type {any} */ ((...args) => deps.buildCapabilitiesSnapshot(...args));
-  const buildSnapshot = /** @type {any} */ ((...args) => deps.buildSnapshot(...args));
-  const writeCapabilitiesConfig = /** @type {any} */ ((...args) => deps.writeCapabilitiesConfig(...args));
   // 跨域引用：由别的域工厂提供，且两边可能互相调用 —— 转发到共享的 deps，调用时才取。
-  const getRuntimeForRequest = /** @type {any} */ ((...args) => deps.getRuntimeForRequest(...args));
-  const readCapabilitiesConfig = /** @type {any} */ ((...args) => deps.readCapabilitiesConfig(...args));
-  const readMcpRuntimeState = /** @type {any} */ ((...args) => deps.readMcpRuntimeState(...args));
 
 /** 能力清单的 MCP 条目：文件事实（mcp.json）× 会话事实（已注册工具）× app 元数据。 */
 function mcpCapabilityEntries(targetRuntime) {
-  const state = readMcpRuntimeState(targetRuntime);
+  const state = deps.readMcpRuntimeState(targetRuntime);
   const toolsByNamespace = mcpToolsByNamespace(targetRuntime);
   const entries = state.servers.map((server) => {
     // 服务器名 → 命名空间：带 `-` 的名字在会话里已被 pi 换成 `_`，必须换算后再查。
@@ -187,7 +180,7 @@ async function saveToolSettings(body) {
   applyToolToggleToRuntimes({ projectId: project?.id, scope });
   // 回整份 bootstrap：开关一变，`toolSettings` 和项目清单里的 `codemode` 都要跟着变，
   // 而且这是一次用户动作（不是每次敲键），不值得为它单搞一个增量 patch 通道。
-  return buildSnapshot(getRuntimeForRequest(body));
+  return deps.buildSnapshot(deps.getRuntimeForRequest(body));
 }
 
 /** 按能力 id 找到一条服务器的完整归一化配置（编辑器 / 探测用）。 */
@@ -196,7 +189,7 @@ function findMcpServer(targetRuntime, id) {
   if (!parsed) {
     return null;
   }
-  const state = readMcpRuntimeState(targetRuntime);
+  const state = deps.readMcpRuntimeState(targetRuntime);
   const server = state.servers.find((entry) => entry.name === parsed.name && entry.scope === parsed.scope);
   return server ? { state, server } : null;
 }
@@ -240,7 +233,7 @@ function saveMcpServerDefinition(targetRuntime, body) {
   }
   const scope = mcpFileScope(body?.scope);
   assertMcpWriteScope(targetRuntime, scope);
-  const state = readMcpRuntimeState(targetRuntime);
+  const state = deps.readMcpRuntimeState(targetRuntime);
   const normalized = normalizeMcpServerEntry(name, mcpRawConfigFromBody(body));
   if (normalized.error) {
     throw new Error(normalized.error);
@@ -256,10 +249,10 @@ function saveMcpServerDefinition(targetRuntime, body) {
     if (removed.removed) {
       writeMcpConfigPath(originPath, removed.config);
     }
-    const originConfig = readCapabilitiesConfig();
+    const originConfig = deps.readCapabilitiesConfig();
     if (originConfig.mcp) {
       delete originConfig.mcp[mcpMetaKey(original.scope, original.name)];
-      writeCapabilitiesConfig(originConfig);
+      deps.writeCapabilitiesConfig(originConfig);
     }
   }
 
@@ -267,7 +260,7 @@ function saveMcpServerDefinition(targetRuntime, body) {
   // 重新读一遍：上面可能刚写过别的文件，用最新内容做 upsert 更稳。
   writeMcpConfigPath(path, upsertMcpServer(readMcpConfigPath(path).config, name, normalized.server));
 
-  const config = readCapabilitiesConfig();
+  const config = deps.readCapabilitiesConfig();
   const key = mcpMetaKey(scope, name);
   config.mcp = {
     ...(config.mcp ?? {}),
@@ -276,13 +269,13 @@ function saveMcpServerDefinition(targetRuntime, body) {
       description: String(body?.description ?? "").trim(),
     },
   };
-  writeCapabilitiesConfig(config);
+  deps.writeCapabilitiesConfig(config);
   return { scope, name, path };
 }
 
 /** 编辑器用的原始字段（含 env / headers 这类可能含密钥的值，所以只在点开时按需读）。 */
 function readMcpServerCapability(body) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   const id = String(body?.id ?? "");
   const found = findMcpServer(targetRuntime, id);
   if (!found) {
@@ -313,33 +306,33 @@ function readMcpServerCapability(body) {
 }
 
 async function saveMcpServer(body) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   const saved = saveMcpServerDefinition(targetRuntime, body);
-  await reloadOpenRuntimeCapabilities("all");
-  return { capabilities: await buildCapabilitiesSnapshot(targetRuntime), saved };
+  await deps.reloadOpenRuntimeCapabilities("all");
+  return { capabilities: await deps.buildCapabilitiesSnapshot(targetRuntime), saved };
 }
 
 async function removeMcpServer(body) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   const parsed = parseMcpCapabilityId(body?.id)
     ?? (normalizeMcpServerName(body?.name) ? { scope: mcpFileScope(body?.scope), name: normalizeMcpServerName(body?.name) } : null);
   if (!parsed) {
     throw new Error("MCP server id is required.");
   }
   assertMcpWriteScope(targetRuntime, parsed.scope);
-  const state = readMcpRuntimeState(targetRuntime);
+  const state = deps.readMcpRuntimeState(targetRuntime);
   const path = parsed.scope === "project" ? state.projectPath : state.globalPath;
   const removed = removeMcpServerEntry(readMcpConfigPath(path).config, parsed.name);
   if (removed.removed) {
     writeMcpConfigPath(path, removed.config);
   }
-  const config = readCapabilitiesConfig();
+  const config = deps.readCapabilitiesConfig();
   if (config.mcp) {
     delete config.mcp[mcpMetaKey(parsed.scope, parsed.name)];
   }
-  writeCapabilitiesConfig(config);
-  await reloadOpenRuntimeCapabilities("all");
-  return { capabilities: await buildCapabilitiesSnapshot(targetRuntime) };
+  deps.writeCapabilitiesConfig(config);
+  await deps.reloadOpenRuntimeCapabilities("all");
+  return { capabilities: await deps.buildCapabilitiesSnapshot(targetRuntime) };
 }
 
   return { applyToolToggleToRuntimes, findMcpServer, mcpCapabilityEntries, mcpNeedsCodemode, mcpRawConfigFromBody, projectToolToggleState, projectTrustForWrite, readMcpServerCapability, removeMcpServer, saveMcpServer, saveMcpServerDefinition, saveToolSettings, toolSettingsSnapshotFor };

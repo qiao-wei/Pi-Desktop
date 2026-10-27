@@ -28,17 +28,6 @@ import { resolve } from "node:path";
  */
 export function createSessionSnapshots(state, deps) {
   const { directoryMimeType, generatedTitleMaxChars, modelRuntime, openRuntimes, projectAttachmentRoot, searchDocumentCache, searchDocumentCacheLimit, sessionStore } = deps;
-  const activeProject = /** @type {any} */ ((...args) => deps.activeProject(...args));
-  const fallbackSessionTitle = /** @type {any} */ ((...args) => deps.fallbackSessionTitle(...args));
-  const findProject = /** @type {any} */ ((...args) => deps.findProject(...args));
-  const listArchivedSessions = /** @type {any} */ ((...args) => deps.listArchivedSessions(...args));
-  const localMediaRoots = /** @type {any} */ ((...args) => deps.localMediaRoots(...args));
-  const setSessionTitleIfEmpty = /** @type {any} */ ((...args) => deps.setSessionTitleIfEmpty(...args));
-  const listProjectsWithSessions = /** @type {any} */ ((...args) => deps.listProjectsWithSessions(...args));
-  const isUsableModel = /** @type {any} */ ((...args) => deps.isUsableModel(...args));
-  const listAvailableModels = /** @type {any} */ ((...args) => deps.listAvailableModels(...args));
-  const buildCapabilitiesSnapshot = /** @type {any} */ ((...args) => deps.buildCapabilitiesSnapshot(...args));
-  const toolSettingsSnapshotFor = /** @type {any} */ ((...args) => deps.toolSettingsSnapshotFor(...args));
 
 const sessionAbortPromises = new WeakMap();
 
@@ -198,7 +187,7 @@ async function refreshSnapshot(options = {}) {
  */
 function buildAmbientSnapshot(targetRuntime = state.runtime) {
   const session = targetRuntime.session;
-  const model = isUsableModel(session.model) ? session.model : undefined;
+  const model = deps.isUsableModel(session.model) ? session.model : undefined;
 
   return {
     ambient: true,
@@ -247,7 +236,7 @@ function sessionIsStreaming(targetRuntime, options = {}) {
 async function buildSnapshot(targetRuntime = state.runtime, options = {}) {
   const traceSessionSwitch = options.traceSessionSwitch === true;
   const startedAt = traceSessionSwitch ? Date.now() : 0;
-  const project = findProject(targetRuntime.projectId);
+  const project = deps.findProject(targetRuntime.projectId);
   const visibleMessages = buildChatBubbles(displayTranscript(targetRuntime.session), {
     isStreaming: targetRuntime.session.isStreaming,
     now: Date.now(),
@@ -272,7 +261,7 @@ async function buildSnapshot(targetRuntime = state.runtime, options = {}) {
   }
   const compactionEntries = entries.filter((entry) => entry.type === "compaction");
   const latestCompaction = compactionEntries.at(-1);
-  const model = isUsableModel(targetRuntime.session.model) ? targetRuntime.session.model : undefined;
+  const model = deps.isUsableModel(targetRuntime.session.model) ? targetRuntime.session.model : undefined;
   const modelProvider = model?.provider ? String(model.provider) : targetRuntime.settingsManager.getDefaultProvider() ?? "";
   const modelId = model?.id ?? targetRuntime.settingsManager.getDefaultModel() ?? "";
   const messageCount = visibleMessages.length;
@@ -316,18 +305,18 @@ async function buildSnapshot(targetRuntime = state.runtime, options = {}) {
         lastMessageAt: visibleMessages.at(-1)?.createdAt,
       },
     },
-    projects: listProjectsWithSessions(),
-    archivedSessions: listArchivedSessions(),
+    projects: deps.listProjectsWithSessions(),
+    archivedSessions: deps.listArchivedSessions(),
     activeProjectId: project.id,
     activeSessionPath: targetRuntime.session.sessionFile,
-    availableModels: listAvailableModels(),
+    availableModels: deps.listAvailableModels(),
     skills: targetRuntime.resourceLoader.getSkills().skills.map((skill) => ({
       name: skill.name,
       description: skill.description,
       path: skill.filePath,
       disableModelInvocation: skill.disableModelInvocation,
     })),
-    capabilities: await buildCapabilitiesSnapshot(targetRuntime),
+    capabilities: await deps.buildCapabilitiesSnapshot(targetRuntime),
     server: {
       url: state.apiBase,
       ready: true,
@@ -337,7 +326,7 @@ async function buildSnapshot(targetRuntime = state.runtime, options = {}) {
     protocolVersion: PROTOCOL_VERSION,
     projectTrusted: targetRuntime.settingsManager.isProjectTrusted(),
     // 工具开关（codemode）：全局层 + 当前项目层 + 实际生效，和 pi 自己的 defaultTools 同一个算法。
-    toolSettings: toolSettingsSnapshotFor(targetRuntime),
+    toolSettings: deps.toolSettingsSnapshotFor(targetRuntime),
     canPrompt: Boolean(model && modelRuntime.hasConfiguredAuth(model.provider)) && !sessionIsStreaming(targetRuntime, options),
     sessionFile: targetRuntime.session.sessionFile,
     streamingSessionPaths: liveStreamingSessionPaths(targetRuntime, options),
@@ -394,9 +383,9 @@ async function generateInitialSessionTitle(targetRuntime) {
   const visibleMessages = buildChatBubbles(displayTranscript(targetRuntime.session), { isStreaming: false, toAttachment: toConversationAttachment });
   const userMessage = visibleMessages.find((message) => message.role === "user");
   const assistantMessage = visibleMessages.find((message) => message.role === "assistant");
-  const fallbackTitle = fallbackSessionTitle(userMessage ? messageToText(userMessage) : "") || "New session";
-  if (!userMessage || !assistantMessage || !isUsableModel(targetRuntime.session.model)) {
-    setSessionTitleIfEmpty(targetRuntime, fallbackTitle);
+  const fallbackTitle = deps.fallbackSessionTitle(userMessage ? messageToText(userMessage) : "") || "New session";
+  if (!userMessage || !assistantMessage || !deps.isUsableModel(targetRuntime.session.model)) {
+    deps.setSessionTitleIfEmpty(targetRuntime, fallbackTitle);
     return;
   }
 
@@ -438,9 +427,9 @@ async function generateInitialSessionTitle(targetRuntime) {
       },
     );
     const generatedTitle = normalizeGeneratedTitle(assistantContentText(response));
-    setSessionTitleIfEmpty(targetRuntime, generatedTitle || fallbackTitle);
+    deps.setSessionTitleIfEmpty(targetRuntime, generatedTitle || fallbackTitle);
   } catch {
-    setSessionTitleIfEmpty(targetRuntime, fallbackTitle);
+    deps.setSessionTitleIfEmpty(targetRuntime, fallbackTitle);
   }
 }
 
@@ -499,8 +488,8 @@ function sendAttachment(res, filePath) {
  */
 function sendLocalMedia(res, rawPath, rangeHeader) {
   const decision = resolveLocalMediaPath(rawPath, {
-    roots: localMediaRoots(),
-    cwd: activeProject()?.cwd,
+    roots: deps.localMediaRoots(),
+    cwd: deps.activeProject()?.cwd,
     homedir: homedir(),
   });
   if (!decision.ok) {
@@ -540,7 +529,7 @@ function updateSessionStoreFromSession(project, sessionManager, options) {
 }
 
 function updateSessionStoreFromRuntime(targetRuntime) {
-  const project = findProject(targetRuntime.projectId);
+  const project = deps.findProject(targetRuntime.projectId);
   updateSessionStoreFromSession(project, targetRuntime.session.sessionManager);
 }
 

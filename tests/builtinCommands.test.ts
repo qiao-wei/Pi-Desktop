@@ -72,20 +72,20 @@ test("the bridge exposes POST /api/builtin-command", () => {
   // （见 tests/lib/bridgeSource.ts#routeBody）。`ctx.req`/`ctx.res` 就是原来回调里的 req/res。
   const route = routeBody(server, 'url.pathname === "/api/builtin-command"');
   assert.match(route, /await readJson\(ctx\.req\)/);
-  assert.match(route, /sendJson\(ctx\.res, 200, await runBuiltinCommand\(body\)\)/);
+  assert.match(route, /sendJson\(ctx\.res, 200, await deps\.runBuiltinCommand\(body\)\)/);
 });
 
 test("runBuiltinCommand: plans, refuses busy sessions, reloads the target runtime", () => {
   const body = functionBody(server, "runBuiltinCommand");
 
-  assert.match(body, /getRuntimeForRequest\(body\)/);
+  assert.match(body, /deps\.getRuntimeForRequest\(body\)/);
   assert.match(body, /planBuiltinCommand\(body\?\.command, body\?\.args\)/);
   assert.match(body, /plan\.kind === "unknown"[\s\S]*?throw new Error\("Unknown built-in command\."\)/);
   assert.match(body, /plan\.kind === "invalid"[\s\S]*?throw new Error\(plan\.reason\)/);
   // 回合中途 reload 会在半途换掉工具/提示词，必须先停。
   assert.match(body, /isSessionBusy\(targetRuntime\.session\)[\s\S]*?throw new Error\("Stop the running response before reloading\."\)/);
-  assert.match(body, /await reloadRuntimeTargets\(\[targetRuntime\]\)/);
-  assert.match(body, /return \{ command: plan\.command\.name, snapshot: await buildSnapshot\(targetRuntime\) \}/);
+  assert.match(body, /await deps\.reloadRuntimeTargets\(\[targetRuntime\]\)/);
+  assert.match(body, /return \{ command: plan\.command\.name, snapshot: await deps\.buildSnapshot\(targetRuntime\) \}/);
 });
 
 /* ---------------------------------------------------------- client wiring */

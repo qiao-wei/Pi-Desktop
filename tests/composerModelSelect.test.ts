@@ -295,7 +295,7 @@ test("「重新读取 models.json」是重读盘 + 重算 runtime，而不是只
   // 而不是跨分支切口去匹配 `if (…) { … }` 的整体形状。
   assert.match(
     routeBody(bridgeSource, 'url.pathname === "/api/custom-models/reload"'),
-    /await reloadCustomModelProviders\(\[\]\)/,
+    /await deps\.reloadCustomModelProviders\(\[\]\)/,
     "reload 路由必须让 runtime 重算 provider（全量重建才能把手删的供应商清掉）",
   );
   assert.match(
@@ -338,11 +338,11 @@ test("没记住过选择时，新会话从列表第一个模型开始（两端�
   const ensureBody = bridgeFunctionBody("ensureModelSelection");
   assert.match(
     ensureBody,
-    /model: usableDefaultModel\(settingsManager\) \?\? defaultComposerModel\(\),/,
+    /model: deps\.usableDefaultModel\(settingsManager\) \?\? deps\.defaultComposerModel\(\),/,
   );
   assert.match(
     ensureBody,
-    /const defaults = usableDefaultModel\(settingsManager\);[\s\S]{0,400}const available = defaultComposerModel\(\);/,
+    /const defaults = deps\.usableDefaultModel\(settingsManager\);[\s\S]{0,400}const available = deps\.defaultComposerModel\(\);/,
   );
   // 记住的默认值临时用不了（key 被删等）不能当成“没有默认值”，得先试能用的默认再退到列表第一项。
   assert.match(
@@ -696,9 +696,9 @@ test("桥暴露 provider 目录与模型发现", () => {
     /warning = error instanceof Error \? error\.message : String\(error\);/,
   );
   // 内置供应商 id 只认 pi 的目录，models.json 里的条目不算；这个判定同时决定要不要逼用户填 key。
-  if (!/const builtinTarget = builtInProviderIds\(\)\.has\(resolvedId\);/.test(bridgeSource)) {
+  if (!/const builtinTarget = deps\.builtInProviderIds\(\)\.has\(resolvedId\);/.test(bridgeSource)) {
     // 别把 20 万字符的源码打进失败输出里。
-    assert.fail("桥里没有 `const builtinTarget = builtInProviderIds().has(resolvedId);`");
+    assert.fail("桥里没有 `const builtinTarget = deps.builtInProviderIds().has(resolvedId);`");
   }
   assert.ok(
     bridgeSource.includes('providerMode: builtinTarget ? "builtin" : "custom"'),
@@ -870,7 +870,7 @@ test("内置供应商只能改 key，自定义 provider 全字段可编辑", () 
   );
   assert.match(bridgeSource, /url\.pathname === "\/api\/custom-models\/key"/);
   // 桥告诉前端哪条是内置的。
-  assert.match(bridgeSource, /builtin: builtInProviderIds\(\)\.has\(entry\.providerId\)/);
+  assert.match(bridgeSource, /builtin: deps\.builtInProviderIds\(\)\.has\(entry\.providerId\)/);
   assert.match(apiSource, /builtin\?: boolean;/);
 });
 
@@ -1253,7 +1253,7 @@ test("编辑 provider 的 footer 报明会加几条删几条，删空整家会�
 
 test("已存的 key 回填到框里（默认密文，点眼睛看明文），且只有单家详情口回传", () => {
   // 桥：单家详情带明文 key；供应商列表口 / discover 都不带（一次吐 40 多家的 key 没必要也不安全）
-  assert.match(bridgeSource, /\{ \.\.\.normalized, apiKey: readStoredApiKey\(row\.id\) \}/);
+  assert.match(bridgeSource, /\{ \.\.\.normalized, apiKey: deps\.readStoredApiKey\(row\.id\) \}/);
   assert.match(
     bridgeSource,
     /provider: row \? \{ \.\.\.row, models: undefined, apiKey: undefined \} : null/,

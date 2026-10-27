@@ -19,59 +19,6 @@ import { searchResultLimit, sendJson } from "./smallHelpers.mjs";
  */
 export function createRoutesApp(state, deps) {
   const { modelLoginBroker, modelRuntime } = deps;
-  const addCapabilityExtension = /** @type {any} */ ((...args) => deps.addCapabilityExtension(...args));
-  const buildAmbientSnapshot = /** @type {any} */ ((...args) => deps.buildAmbientSnapshot(...args));
-  const buildCapabilitiesSnapshot = /** @type {any} */ ((...args) => deps.buildCapabilitiesSnapshot(...args));
-  const buildSnapshot = /** @type {any} */ ((...args) => deps.buildSnapshot(...args));
-  const customModelsPayload = /** @type {any} */ ((...args) => deps.customModelsPayload(...args));
-  const deleteCustomModel = /** @type {any} */ ((...args) => deps.deleteCustomModel(...args));
-  const deleteSkillFromCapabilityPage = /** @type {any} */ ((...args) => deps.deleteSkillFromCapabilityPage(...args));
-  const discoverProviderModels = /** @type {any} */ ((...args) => deps.discoverProviderModels(...args));
-  const getRuntimeForRequest = /** @type {any} */ ((...args) => deps.getRuntimeForRequest(...args));
-  const importSkillFromCapabilityPage = /** @type {any} */ ((...args) => deps.importSkillFromCapabilityPage(...args));
-  const inspectMcpServerCapability = /** @type {any} */ ((...args) => deps.inspectMcpServerCapability(...args));
-  const installCapabilityPackage = /** @type {any} */ ((...args) => deps.installCapabilityPackage(...args));
-  const listAvailableModels = /** @type {any} */ ((...args) => deps.listAvailableModels(...args));
-  const modelProviderCatalog = /** @type {any} */ ((...args) => deps.modelProviderCatalog(...args));
-  const providerCatalogRow = /** @type {any} */ ((...args) => deps.providerCatalogRow(...args));
-  const readCapabilityCommandArguments = /** @type {any} */ ((...args) => deps.readCapabilityCommandArguments(...args));
-  const readCapabilityPackageFile = /** @type {any} */ ((...args) => deps.readCapabilityPackageFile(...args));
-  const readCapabilityPackageResources = /** @type {any} */ ((...args) => deps.readCapabilityPackageResources(...args));
-  const readMcpServerCapability = /** @type {any} */ ((...args) => deps.readMcpServerCapability(...args));
-  const readSkillContent = /** @type {any} */ ((...args) => deps.readSkillContent(...args));
-  const readStoredApiKey = /** @type {any} */ ((...args) => deps.readStoredApiKey(...args));
-  const refreshSnapshot = /** @type {any} */ ((...args) => deps.refreshSnapshot(...args));
-  const reloadCustomModelProviders = /** @type {any} */ ((...args) => deps.reloadCustomModelProviders(...args));
-  const reloadPiDesktopSkills = /** @type {any} */ ((...args) => deps.reloadPiDesktopSkills(...args));
-  const removeCapabilityExtension = /** @type {any} */ ((...args) => deps.removeCapabilityExtension(...args));
-  const removeCapabilityPackage = /** @type {any} */ ((...args) => deps.removeCapabilityPackage(...args));
-  const removeMcpServer = /** @type {any} */ ((...args) => deps.removeMcpServer(...args));
-  const repairDefaultModelAfterRemoval = /** @type {any} */ ((...args) => deps.repairDefaultModelAfterRemoval(...args));
-  const respondToExtensionUiRequest = /** @type {any} */ ((...args) => deps.respondToExtensionUiRequest(...args));
-  const runBuiltinCommand = /** @type {any} */ ((...args) => deps.runBuiltinCommand(...args));
-  const saveCustomModel = /** @type {any} */ ((...args) => deps.saveCustomModel(...args));
-  const saveMcpServer = /** @type {any} */ ((...args) => deps.saveMcpServer(...args));
-  const saveProviderApiKey = /** @type {any} */ ((...args) => deps.saveProviderApiKey(...args));
-  const saveToolSettings = /** @type {any} */ ((...args) => deps.saveToolSettings(...args));
-  const searchSessionDocuments = /** @type {any} */ ((...args) => deps.searchSessionDocuments(...args));
-  const sendAttachment = /** @type {any} */ ((...args) => deps.sendAttachment(...args));
-  const sendLocalMedia = /** @type {any} */ ((...args) => deps.sendLocalMedia(...args));
-  const setCapabilityPinned = /** @type {any} */ ((...args) => deps.setCapabilityPinned(...args));
-  const setDefaultCapability = /** @type {any} */ ((...args) => deps.setDefaultCapability(...args));
-  const setModelConfiguration = /** @type {any} */ ((...args) => deps.setModelConfiguration(...args));
-  const setPersonalization = /** @type {any} */ ((...args) => deps.setPersonalization(...args));
-  const setSessionExtensionCapability = /** @type {any} */ ((...args) => deps.setSessionExtensionCapability(...args));
-  const setSessionPackageCapability = /** @type {any} */ ((...args) => deps.setSessionPackageCapability(...args));
-  const setSessionSkillCapability = /** @type {any} */ ((...args) => deps.setSessionSkillCapability(...args));
-  const setSessionThinkingLevel = /** @type {any} */ ((...args) => deps.setSessionThinkingLevel(...args));
-  const stopSession = /** @type {any} */ ((...args) => deps.stopSession(...args));
-  const streamCapabilityPackageAction = /** @type {any} */ ((...args) => deps.streamCapabilityPackageAction(...args));
-  const streamCapabilityPackageCommand = /** @type {any} */ ((...args) => deps.streamCapabilityPackageCommand(...args));
-  const streamModelLogin = /** @type {any} */ ((...args) => deps.streamModelLogin(...args));
-  const streamPrompt = /** @type {any} */ ((...args) => deps.streamPrompt(...args));
-  const testCustomModelConnection = /** @type {any} */ ((...args) => deps.testCustomModelConnection(...args));
-  const updateCapabilityPackage = /** @type {any} */ ((...args) => deps.updateCapabilityPackage(...args));
-  const updateProvider = /** @type {any} */ ((...args) => deps.updateProvider(...args));
 
 /** 路由处理器：req.method === "GET" && url.pathname === "/api/protocol"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_get_api_protocol(ctx) {
@@ -92,11 +39,11 @@ async function handle_get_api_bootstrap(ctx) {
       // `?view=ambient` is the watchdog shape: everything that moves independently of
       // the transcript, and none of the transcript. See `buildAmbientSnapshot`.
       if (ctx.url.searchParams.get("view") === "ambient") {
-        sendJson(ctx.res, 200, assertBridgePayload(buildAmbientSnapshot(state.runtime), "ambient"));
+        sendJson(ctx.res, 200, assertBridgePayload(deps.buildAmbientSnapshot(state.runtime), "ambient"));
         return;
       }
       diagnosticLog("bootstrap.start", { requestId: ctx.requestId, sessionPath: state.runtime.session.sessionFile, ...sessionDetails(state.runtime) });
-      const snapshot = await refreshSnapshot();
+      const snapshot = await deps.refreshSnapshot();
       diagnosticLog("bootstrap.success", {
         requestId: ctx.requestId,
         durationMs: Date.now() - ctx.requestStartedAt,
@@ -115,7 +62,7 @@ async function handle_get_api_search(ctx) {
       const limit = searchResultLimit(ctx.url.searchParams.get("limit"));
       // 空查询直接短路：扫全部会话文件是这个接口最贵的部分，不该被“清空输入框”触发。
       const payload = query
-        ? await searchSessionDocuments(query, limit)
+        ? await deps.searchSessionDocuments(query, limit)
         : { results: [], truncated: false };
       diagnosticLog("search.query", {
         requestId: ctx.requestId,
@@ -143,7 +90,7 @@ async function handle_post_api_diagnostic(ctx) {
 /** 路由处理器：req.method === "GET" && url.pathname === "/api/models"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_get_api_models(ctx) {
       sendJson(ctx.res, 200, {
-        availableModels: listAvailableModels(),
+        availableModels: deps.listAvailableModels(),
         providerIds: modelRuntime.getRegisteredProviderIds(),
       });
       return;
@@ -151,14 +98,14 @@ async function handle_get_api_models(ctx) {
 
 /** 路由处理器：req.method === "GET" && url.pathname === "/api/capabilities"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_get_api_capabilities(ctx) {
-      sendJson(ctx.res, 200, await buildCapabilitiesSnapshot(state.runtime));
+      sendJson(ctx.res, 200, await deps.buildCapabilitiesSnapshot(state.runtime));
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/default"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_default(ctx) {
       const body = await readJson(ctx.req);
-      const result = await setDefaultCapability(body);
+      const result = await deps.setDefaultCapability(body);
       sendJson(ctx.res, 200, result);
       return;
 }
@@ -166,7 +113,7 @@ async function handle_post_api_capabilities_default(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/pin"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_pin(ctx) {
       const body = await readJson(ctx.req);
-      const result = await setCapabilityPinned(body);
+      const result = await deps.setCapabilityPinned(body);
       sendJson(ctx.res, 200, result);
       return;
 }
@@ -174,7 +121,7 @@ async function handle_post_api_capabilities_pin(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/session/skill"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_session_skill(ctx) {
       const body = await readJson(ctx.req);
-      const result = await setSessionSkillCapability(body);
+      const result = await deps.setSessionSkillCapability(body);
       sendJson(ctx.res, 200, result);
       return;
 }
@@ -182,7 +129,7 @@ async function handle_post_api_capabilities_session_skill(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/session/package"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_session_package(ctx) {
       const body = await readJson(ctx.req);
-      const result = await setSessionPackageCapability(body);
+      const result = await deps.setSessionPackageCapability(body);
       sendJson(ctx.res, 200, result);
       return;
 }
@@ -190,7 +137,7 @@ async function handle_post_api_capabilities_session_package(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/session/extension"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_session_extension(ctx) {
       const body = await readJson(ctx.req);
-      const result = await setSessionExtensionCapability(body);
+      const result = await deps.setSessionExtensionCapability(body);
       sendJson(ctx.res, 200, result);
       return;
 }
@@ -198,7 +145,7 @@ async function handle_post_api_capabilities_session_extension(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/skills/import"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_skills_import(ctx) {
       const body = await readJson(ctx.req);
-      const result = await importSkillFromCapabilityPage(body);
+      const result = await deps.importSkillFromCapabilityPage(body);
       sendJson(ctx.res, 200, result);
       return;
 }
@@ -206,35 +153,35 @@ async function handle_post_api_capabilities_skills_import(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/skills/delete"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_skills_delete(ctx) {
       const body = await readJson(ctx.req);
-      const result = await deleteSkillFromCapabilityPage(body);
+      const result = await deps.deleteSkillFromCapabilityPage(body);
       sendJson(ctx.res, 200, result);
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/package/install"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_package_install(ctx) {
-      await streamCapabilityPackageAction(ctx.req, ctx.res, (body, onProgress) => installCapabilityPackage(body, onProgress));
+      await deps.streamCapabilityPackageAction(ctx.req, ctx.res, (body, onProgress) => deps.installCapabilityPackage(body, onProgress));
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/package/remove"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_package_remove(ctx) {
       const body = await readJson(ctx.req);
-      const result = await removeCapabilityPackage(body);
+      const result = await deps.removeCapabilityPackage(body);
       sendJson(ctx.res, 200, result);
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/package/update"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_package_update(ctx) {
-      await streamCapabilityPackageAction(ctx.req, ctx.res, (body, onProgress) => updateCapabilityPackage(body, onProgress));
+      await deps.streamCapabilityPackageAction(ctx.req, ctx.res, (body, onProgress) => deps.updateCapabilityPackage(body, onProgress));
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/package/resources"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_package_resources(ctx) {
       const body = await readJson(ctx.req);
-      const result = await readCapabilityPackageResources(body);
+      const result = await deps.readCapabilityPackageResources(body);
       sendJson(ctx.res, 200, result);
       return;
 }
@@ -242,20 +189,20 @@ async function handle_post_api_capabilities_package_resources(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/package/file"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_package_file(ctx) {
       const body = await readJson(ctx.req);
-      const result = await readCapabilityPackageFile(body);
+      const result = await deps.readCapabilityPackageFile(body);
       sendJson(ctx.res, 200, result);
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/package/command/arguments"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_package_command_arguments(ctx) {
-      await readCapabilityCommandArguments(ctx.req, ctx.res);
+      await deps.readCapabilityCommandArguments(ctx.req, ctx.res);
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/package/command"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_package_command(ctx) {
-      await streamCapabilityPackageCommand(ctx.req, ctx.res);
+      await deps.streamCapabilityPackageCommand(ctx.req, ctx.res);
       return;
 }
 
@@ -305,14 +252,14 @@ async function handle_post_api_runs_stream(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/builtin-command"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_builtin_command(ctx) {
       const body = await readJson(ctx.req);
-      sendJson(ctx.res, 200, await runBuiltinCommand(body));
+      sendJson(ctx.res, 200, await deps.runBuiltinCommand(body));
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/extension/add"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_extension_add(ctx) {
       const body = await readJson(ctx.req);
-      const result = await addCapabilityExtension(body);
+      const result = await deps.addCapabilityExtension(body);
       sendJson(ctx.res, 200, result);
       return;
 }
@@ -320,7 +267,7 @@ async function handle_post_api_capabilities_extension_add(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/extension/remove"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_extension_remove(ctx) {
       const body = await readJson(ctx.req);
-      const result = await removeCapabilityExtension(body);
+      const result = await deps.removeCapabilityExtension(body);
       sendJson(ctx.res, 200, result);
       return;
 }
@@ -328,28 +275,28 @@ async function handle_post_api_capabilities_extension_remove(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/mcp/save"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_mcp_save(ctx) {
       const body = await readJson(ctx.req);
-      sendJson(ctx.res, 200, await saveMcpServer(body));
+      sendJson(ctx.res, 200, await deps.saveMcpServer(body));
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/mcp/remove"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_mcp_remove(ctx) {
       const body = await readJson(ctx.req);
-      sendJson(ctx.res, 200, await removeMcpServer(body));
+      sendJson(ctx.res, 200, await deps.removeMcpServer(body));
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/mcp/inspect"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_mcp_inspect(ctx) {
       const body = await readJson(ctx.req);
-      sendJson(ctx.res, 200, await inspectMcpServerCapability(body));
+      sendJson(ctx.res, 200, await deps.inspectMcpServerCapability(body));
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/capabilities/mcp/read"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_capabilities_mcp_read(ctx) {
       const body = await readJson(ctx.req);
-      sendJson(ctx.res, 200, readMcpServerCapability(body));
+      sendJson(ctx.res, 200, deps.readMcpServerCapability(body));
       return;
 }
 
@@ -363,35 +310,35 @@ async function handle_post_api_capabilities_mcp_import(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/tools/settings"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_tools_settings(ctx) {
       const body = await readJson(ctx.req);
-      sendJson(ctx.res, 200, await saveToolSettings(body));
+      sendJson(ctx.res, 200, await deps.saveToolSettings(body));
       return;
 }
 
 /** 路由处理器：req.method === "GET" && url.pathname === "/api/skills/content"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_get_api_skills_content(ctx) {
-      const result = readSkillContent(String(ctx.url.searchParams.get("path") ?? ""));
+      const result = deps.readSkillContent(String(ctx.url.searchParams.get("path") ?? ""));
       sendJson(ctx.res, 200, result);
       return;
 }
 
 /** 路由处理器：req.method === "GET" && url.pathname === "/api/attachments"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_get_api_attachments(ctx) {
-      sendAttachment(ctx.res, String(ctx.url.searchParams.get("path") ?? ""));
+      deps.sendAttachment(ctx.res, String(ctx.url.searchParams.get("path") ?? ""));
       return;
 }
 
 /** 路由处理器：req.method === "GET" && url.pathname === "/api/local-media"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_get_api_local_media(ctx) {
-      sendLocalMedia(ctx.res, String(ctx.url.searchParams.get("path") ?? ""), ctx.req.headers.range);
+      deps.sendLocalMedia(ctx.res, String(ctx.url.searchParams.get("path") ?? ""), ctx.req.headers.range);
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/skills/reload"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_skills_reload(ctx) {
-      const result = await reloadPiDesktopSkills({ scope: "all" });
+      const result = await deps.reloadPiDesktopSkills({ scope: "all" });
       sendJson(ctx.res, 200, {
         ...result,
-        snapshot: await refreshSnapshot(),
+        snapshot: await deps.refreshSnapshot(),
       });
       return;
 }
@@ -399,28 +346,28 @@ async function handle_post_api_skills_reload(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/extension-ui/response"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_extension_ui_response(ctx) {
       const body = await readJson(ctx.req);
-      const result = await respondToExtensionUiRequest(body);
+      const result = await deps.respondToExtensionUiRequest(body);
       sendJson(ctx.res, 200, result);
       return;
 }
 
 /** 路由处理器：req.method === "GET" && url.pathname === "/api/custom-models"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_get_api_custom_models(ctx) {
-      sendJson(ctx.res, 200, customModelsPayload());
+      sendJson(ctx.res, 200, deps.customModelsPayload());
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/custom-models"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_custom_models(ctx) {
       const body = await readJson(ctx.req);
-      sendJson(ctx.res, 200, await saveCustomModel(body));
+      sendJson(ctx.res, 200, await deps.saveCustomModel(body));
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/custom-models/remove"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_custom_models_remove(ctx) {
       const body = await readJson(ctx.req);
-      sendJson(ctx.res, 200, await deleteCustomModel(body));
+      sendJson(ctx.res, 200, await deps.deleteCustomModel(body));
       return;
 }
 
@@ -428,15 +375,15 @@ async function handle_post_api_custom_models_remove(ctx) {
 async function handle_post_api_custom_models_reload(ctx) {
       await readJson(ctx.req);
       // 不列 provider = 全量重建：手删掉的供应商也能从 runtime 里清出去。
-      await reloadCustomModelProviders([]);
-      repairDefaultModelAfterRemoval();
-      sendJson(ctx.res, 200, { ...customModelsPayload(), availableModels: listAvailableModels() });
+      await deps.reloadCustomModelProviders([]);
+      deps.repairDefaultModelAfterRemoval();
+      sendJson(ctx.res, 200, { ...deps.customModelsPayload(), availableModels: deps.listAvailableModels() });
       return;
 }
 
 /** 路由处理器：req.method === "GET" && url.pathname === "/api/model-providers"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_get_api_model_providers(ctx) {
-      sendJson(ctx.res, 200, { providers: modelProviderCatalog() });
+      sendJson(ctx.res, 200, { providers: deps.modelProviderCatalog() });
       return;
 }
 
@@ -445,7 +392,7 @@ async function handle_get_api_model_providers_x(ctx) {
       const pathParts = ctx.url.pathname.split("/").filter(Boolean);
       if (pathParts.length === 3) {
         const providerId = decodeURIComponent(pathParts[2]);
-        const row = providerCatalogRow(providerId);
+        const row = deps.providerCatalogRow(providerId);
         if (!row) {
           sendJson(ctx.res, 404, { error: "Provider not found." });
           return;
@@ -458,7 +405,7 @@ async function handle_get_api_model_providers_x(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/model-providers/discover"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_model_providers_discover(ctx) {
       const body = await readJson(ctx.req);
-      sendJson(ctx.res, 200, await discoverProviderModels(body));
+      sendJson(ctx.res, 200, await deps.discoverProviderModels(body));
       return;
 }
 
@@ -469,12 +416,12 @@ async function handle_post(ctx) {
         const providerId = decodeURIComponent(pathParts[2]);
         const body = await readJson(ctx.req);
         // 留空 = 验已存的那份（“我存的还能用吗”），填了 = 验新填的。
-        const apiKey = resolveListingApiKey({ apiKey: body?.apiKey, storedKey: readStoredApiKey(providerId) });
+        const apiKey = resolveListingApiKey({ apiKey: body?.apiKey, storedKey: deps.readStoredApiKey(providerId) });
         if (!apiKey) {
           sendJson(ctx.res, 200, { ok: false, error: "Enter an API key first." });
           return;
         }
-        const row = providerCatalogRow(providerId);
+        const row = deps.providerCatalogRow(providerId);
         if (!row) {
           sendJson(ctx.res, 200, { ok: false, error: "Unknown provider." });
           return;
@@ -499,7 +446,7 @@ async function handle_post(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/model-providers/update"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_model_providers_update(ctx) {
       const body = await readJson(ctx.req);
-      sendJson(ctx.res, 200, await updateProvider(body));
+      sendJson(ctx.res, 200, await deps.updateProvider(body));
       return;
 }
 
@@ -528,7 +475,7 @@ async function handle_post_x(ctx) {
           return;
         }
         await modelRuntime.logout(providerId, { signal: AbortSignal.timeout(15_000) });
-        sendJson(ctx.res, 200, { ok: true, providers: modelProviderCatalog() });
+        sendJson(ctx.res, 200, { ok: true, providers: deps.modelProviderCatalog() });
         return;
       }
 }
@@ -538,7 +485,7 @@ async function handle_post_x_x(ctx) {
       const pathParts = ctx.url.pathname.split("/").filter(Boolean);
       if (pathParts.length === 4 && pathParts[1] === "model-providers" && pathParts[3] === "login") {
         const providerId = decodeURIComponent(pathParts[2]);
-        await streamModelLogin(ctx.req, ctx.res, providerId, ctx.requestId);
+        await deps.streamModelLogin(ctx.req, ctx.res, providerId, ctx.requestId);
         return;
       }
 }
@@ -546,21 +493,21 @@ async function handle_post_x_x(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/custom-models/key"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_custom_models_key(ctx) {
       const body = await readJson(ctx.req);
-      sendJson(ctx.res, 200, await saveProviderApiKey(body));
+      sendJson(ctx.res, 200, await deps.saveProviderApiKey(body));
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/custom-models/test"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_custom_models_test(ctx) {
       const body = await readJson(ctx.req);
-      sendJson(ctx.res, 200, await testCustomModelConnection(body));
+      sendJson(ctx.res, 200, await deps.testCustomModelConnection(body));
       return;
 }
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/model"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_model(ctx) {
       const body = await readJson(ctx.req);
-      const result = await setModelConfiguration(body);
+      const result = await deps.setModelConfiguration(body);
       sendJson(ctx.res, 200, result);
       return;
 }
@@ -568,7 +515,7 @@ async function handle_post_api_model(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/personalization"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_personalization(ctx) {
       const body = await readJson(ctx.req);
-      const result = await setPersonalization(body);
+      const result = await deps.setPersonalization(body);
       sendJson(ctx.res, 200, result);
       return;
 }
@@ -576,7 +523,7 @@ async function handle_post_api_personalization(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/thinking-level"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_thinking_level(ctx) {
       const body = await readJson(ctx.req);
-      const result = await setSessionThinkingLevel(body);
+      const result = await deps.setSessionThinkingLevel(body);
       sendJson(ctx.res, 200, result);
       return;
 }
@@ -584,14 +531,14 @@ async function handle_post_api_thinking_level(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/compact"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_compact(ctx) {
       const body = await readJson(ctx.req);
-      const targetRuntime = getRuntimeForRequest(body);
+      const targetRuntime = deps.getRuntimeForRequest(body);
       if (targetRuntime.session.isStreaming || targetRuntime.session.isCompacting) {
         throw new Error("Stop the running response before compacting context.");
       }
       const result = await targetRuntime.session.compact(body?.instructions?.trim() || undefined);
       sendJson(ctx.res, 200, {
         result,
-        snapshot: await buildSnapshot(targetRuntime),
+        snapshot: await deps.buildSnapshot(targetRuntime),
       });
       return;
 }
@@ -599,8 +546,8 @@ async function handle_post_api_compact(ctx) {
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/stop"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_stop(ctx) {
       const body = await readJson(ctx.req);
-      const targetRuntime = getRuntimeForRequest(body);
-      const result = await stopSession(targetRuntime, {
+      const targetRuntime = deps.getRuntimeForRequest(body);
+      const result = await deps.stopSession(targetRuntime, {
         clearQueues: body?.clearQueues !== false,
         requestId: ctx.requestId,
       });
@@ -616,7 +563,7 @@ async function handle_post_api_stop(ctx) {
 
 /** 路由处理器：req.method === "POST" && url.pathname === "/api/prompt"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_post_api_prompt(ctx) {
-      await streamPrompt(ctx.req, ctx.res, ctx.requestId);
+      await deps.streamPrompt(ctx.req, ctx.res, ctx.requestId);
       return;
 }
 
@@ -629,7 +576,7 @@ async function handle_post_api_messages_edit(ctx) {
       if (!ref || ref.role !== "user") {
         throw new Error("targetMessageId must be a user bubble id like t3#user.");
       }
-      await streamPrompt(ctx.req, ctx.res, ctx.requestId, { body, rewindTurn: ref.turn });
+      await deps.streamPrompt(ctx.req, ctx.res, ctx.requestId, { body, rewindTurn: ref.turn });
       return;
 }
 

@@ -61,7 +61,7 @@ test("登录路由按 :id + authType 分派，respond / cancel 是独立口", ()
   assert.ok(hasRoute("POST", "/login", "suffix"), "登录入口按 :id/login 收");
   // 分支体已抽成处理器函数：按处理器取体（见 tests/lib/bridgeSource.ts#routeBody）。
   const login = routeBody(serverSource, 'url.pathname.endsWith("/login")');
-  assert.match(login, /await streamModelLogin\(ctx\.req, ctx\.res, providerId, ctx\.requestId\)/);
+  assert.match(login, /await deps\.streamModelLogin\(ctx\.req, ctx\.res, providerId, ctx\.requestId\)/);
   // 固定路由必须排在参数化路由之前，否则 respond 会被当成某家的登录 —— 现在问匹配结果，
   // 而不是比较两条分支在源码里的先后（顺序已由路由表里的显式 priority 决定）。
   assert.equal(

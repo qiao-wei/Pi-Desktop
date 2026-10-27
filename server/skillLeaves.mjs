@@ -24,19 +24,6 @@ import { basename, dirname, join, resolve } from "node:path";
  */
 export function createSkillLeaves(state, deps) {
   const { agentSkillsDir, agentsSkillsDir, appPackagesDir, appSkillsDir, openRuntimes, piDesktopCapabilitiesCustomType } = deps;
-  const activeProject = /** @type {any} */ ((...args) => deps.activeProject(...args));
-  const basePiDesktopResourceLoaderOptions = /** @type {any} */ ((...args) => deps.basePiDesktopResourceLoaderOptions(...args));
-  const findProject = /** @type {any} */ ((...args) => deps.findProject(...args));
-  const normalizeStringArray = /** @type {any} */ ((...args) => deps.normalizeStringArray(...args));
-  const buildCapabilitiesSnapshot = /** @type {any} */ ((...args) => deps.buildCapabilitiesSnapshot(...args));
-  const buildSnapshot = /** @type {any} */ ((...args) => deps.buildSnapshot(...args));
-  const defaultSessionCapabilitySelection = /** @type {any} */ ((...args) => deps.defaultSessionCapabilitySelection(...args));
-  const findCapabilityPackageCommand = /** @type {any} */ ((...args) => deps.findCapabilityPackageCommand(...args));
-  const getRuntimeForRequest = /** @type {any} */ ((...args) => deps.getRuntimeForRequest(...args));
-  const installPiDesktopSkill = /** @type {any} */ ((...args) => deps.installPiDesktopSkill(...args));
-  const mergeSessionCapabilitySelection = /** @type {any} */ ((...args) => deps.mergeSessionCapabilitySelection(...args));
-  const refreshSnapshot = /** @type {any} */ ((...args) => deps.refreshSnapshot(...args));
-  const reloadRuntimeTargets = /** @type {any} */ ((...args) => deps.reloadRuntimeTargets(...args));
 
 function discoverBuiltinPackagePaths() {
   if (!existsSync(appPackagesDir)) {
@@ -53,12 +40,12 @@ function normalizeCapabilitiesDefaults(value) {
   const source = value && typeof value === "object" ? value : {};
   return {
     version: Number(source.version ?? 1),
-    defaultEnabledSkills: normalizeStringArray(source.defaultEnabledSkills),
+    defaultEnabledSkills: deps.normalizeStringArray(source.defaultEnabledSkills),
   };
 }
 
 function applyMissingDefaultEnabledSkillNames(config, allSkills, skillNames) {
-  const names = new Set(normalizeStringArray(skillNames));
+  const names = new Set(deps.normalizeStringArray(skillNames));
   let changed = false;
   for (const skill of allSkills) {
     if (!names.has(skill.name)) {
@@ -104,15 +91,15 @@ function normalizeSessionCapabilitySelection(value) {
   const source = value && typeof value === "object" ? value : {};
   return {
     version: Number(source.version ?? 3),
-    skills: normalizeStringArray(source.skills),
-    enabledSkills: normalizeStringArray(source.enabledSkills),
-    disabledSkills: normalizeStringArray(source.disabledSkills),
-    packages: normalizeStringArray(source.packages),
-    enabledPackages: normalizeStringArray(source.enabledPackages),
-    disabledPackages: normalizeStringArray(source.disabledPackages),
-    extensions: normalizeStringArray(source.extensions),
-    enabledExtensions: normalizeStringArray(source.enabledExtensions),
-    disabledExtensions: normalizeStringArray(source.disabledExtensions),
+    skills: deps.normalizeStringArray(source.skills),
+    enabledSkills: deps.normalizeStringArray(source.enabledSkills),
+    disabledSkills: deps.normalizeStringArray(source.disabledSkills),
+    packages: deps.normalizeStringArray(source.packages),
+    enabledPackages: deps.normalizeStringArray(source.enabledPackages),
+    disabledPackages: deps.normalizeStringArray(source.disabledPackages),
+    extensions: deps.normalizeStringArray(source.extensions),
+    enabledExtensions: deps.normalizeStringArray(source.enabledExtensions),
+    disabledExtensions: deps.normalizeStringArray(source.disabledExtensions),
     updatedAt: Number(source.updatedAt ?? Date.now()),
   };
 }
@@ -120,9 +107,9 @@ function normalizeSessionCapabilitySelection(value) {
 function activeSessionCapabilitySelection(sessionManager, skills, config, targetRuntime = state.runtime) {
   const selection = readSessionCapabilitySelection(sessionManager);
   if (!selection) {
-    return defaultSessionCapabilitySelection(config, skills, targetRuntime);
+    return deps.defaultSessionCapabilitySelection(config, skills, targetRuntime);
   }
-  return mergeSessionCapabilitySelection(selection, skills, config, targetRuntime);
+  return deps.mergeSessionCapabilitySelection(selection, skills, config, targetRuntime);
 }
 
 function appendSessionCapabilitySelection(sessionManager, selection) {
@@ -136,11 +123,11 @@ function defaultSkillIdsForSkills(config, skills) {
   return skills.filter((skill) => defaultSkillEnabled(config, skillCapabilityId(skill))).map(skillCapabilityId);
 }
 
-function managedSkills(skills, project = activeProject()) {
+function managedSkills(skills, project = deps.activeProject()) {
   return skills.filter((skill) => isManagedSkillPath(skill.filePath, project));
 }
 
-function isManagedSkillPath(filePath, project = activeProject()) {
+function isManagedSkillPath(filePath, project = deps.activeProject()) {
   return isSkillPathUnderRoots(filePath, managedSkillRoots(project));
 }
 
@@ -149,11 +136,11 @@ function isManagedSkillPath(filePath, project = activeProject()) {
  * `<dir>/.agents/skills`（pi 从 cwd 一路收到 git 仓库根，见 projectAgentsSkillRoots 的注释）。
  * 不把后者算进来，这类技能在能力页里就是「查无此技能」：来源、会话开关、删除守卫全都对不上号。
  */
-function managedSkillRoots(project = activeProject()) {
+function managedSkillRoots(project = deps.activeProject()) {
   return [appSkillsDir, agentSkillsDir, agentsSkillsDir, ...projectAgentsSkillsDirs(project), join(project.cwd, ".pi", "skills")];
 }
 
-function projectAgentsSkillsDirs(project = activeProject()) {
+function projectAgentsSkillsDirs(project = deps.activeProject()) {
   return projectAgentsSkillRoots(project.cwd, homedir());
 }
 
@@ -162,7 +149,7 @@ function packageDefaultEnabled(config, pkg) {
 }
 
 function configuredPackagesForRuntime(targetRuntime = state.runtime) {
-  const project = findProject(targetRuntime.projectId);
+  const project = deps.findProject(targetRuntime.projectId);
   const settingsManager = targetRuntime.settingsManager;
   const packageManager = new DefaultPackageManager({ cwd: project.cwd, agentDir, settingsManager });
   return packageManager.listConfiguredPackages().map((pkg) => ({
@@ -174,7 +161,7 @@ function configuredPackagesForRuntime(targetRuntime = state.runtime) {
 
 async function packageResourcesForRuntime(targetRuntime, pkg) {
   return resolvePackageResources({
-    project: findProject(targetRuntime.projectId),
+    project: deps.findProject(targetRuntime.projectId),
     settingsManager: targetRuntime.settingsManager,
     agentDir,
     pkg,
@@ -191,7 +178,7 @@ function straightenInstalledPackage(targetRuntime, installSource) {
   return absolutizeInstalledUserPackage({
     settingsManager: targetRuntime.settingsManager,
     installSource,
-    projectCwd: findProject(targetRuntime.projectId).cwd,
+    projectCwd: deps.findProject(targetRuntime.projectId).cwd,
     agentDir,
   });
 }
@@ -214,7 +201,7 @@ async function discoverAllProjectSkills(project, settingsManager = undefined) {
 async function discoverAllProjectSkillResources(project, settingsManager = undefined) {
   const effectiveSettingsManager = settingsManager ?? SettingsManager.create(project.cwd, agentDir, { projectTrusted: false });
   const loader = new DefaultResourceLoader({
-    ...basePiDesktopResourceLoaderOptions(project, effectiveSettingsManager),
+    ...deps.basePiDesktopResourceLoaderOptions(project, effectiveSettingsManager),
     // Inventory only: importing the packages' extensions is the bulk of this pass' cost
     // and none of it feeds skill discovery (package skills still resolve either way).
     noExtensions: true,
@@ -244,11 +231,11 @@ function reportSkillInventoryMismatch(skill, project) {
 }
 
 async function resolveCapabilityPackageCommand(body) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   const packageId = normalizeCapabilityId(body?.packageId);
   const commandName = String(body?.command ?? "").trim().replace(/^\/+/, "");
   const args = String(body?.args ?? "").trim();
-  const { command } = await findCapabilityPackageCommand(targetRuntime, packageId, commandName);
+  const { command } = await deps.findCapabilityPackageCommand(targetRuntime, packageId, commandName);
 
   return {
     targetRuntime,
@@ -258,11 +245,11 @@ async function resolveCapabilityPackageCommand(body) {
 
 async function readCapabilityCommandArguments(req, res) {
   const body = await readJson(req);
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   const packageId = normalizeCapabilityId(body?.packageId);
   const commandName = String(body?.command ?? "").trim().replace(/^\/+/, "");
   const prefix = typeof body?.prefix === "string" ? body.prefix : "";
-  const { command } = await findCapabilityPackageCommand(targetRuntime, packageId, commandName);
+  const { command } = await deps.findCapabilityPackageCommand(targetRuntime, packageId, commandName);
   const raw = typeof command.getArgumentCompletions === "function"
     ? await command.getArgumentCompletions(prefix)
     : [];
@@ -274,7 +261,7 @@ function compareCapabilityCards(left, right) {
 }
 
 function capabilityPackageManager(targetRuntime, onProgress) {
-  const project = findProject(targetRuntime.projectId);
+  const project = deps.findProject(targetRuntime.projectId);
   const manager = new DefaultPackageManager({
     cwd: project.cwd,
     agentDir,
@@ -289,15 +276,15 @@ function capabilityPackageManager(targetRuntime, onProgress) {
 }
 
 async function updateCapabilityPackage(body, onProgress) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   const source = String(body?.source ?? "").trim() || undefined;
   await capabilityPackageManager(targetRuntime, onProgress).update(source);
   await reloadOpenRuntimeCapabilities("all");
-  return refreshSnapshot();
+  return deps.refreshSnapshot();
 }
 
 async function readCapabilityPackageResources(body) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   const packageId = normalizeCapabilityId(body?.packageId);
   if (!packageId) {
     throw new Error("Package id is required.");
@@ -316,9 +303,9 @@ async function readCapabilityPackageResources(body) {
 }
 
 async function importSkillFromCapabilityPage(body) {
-  const targetRuntime = getRuntimeForRequest(body);
-  const project = findProject(targetRuntime.projectId);
-  const result = await installPiDesktopSkill(project, targetRuntime.resourceLoader, {
+  const targetRuntime = deps.getRuntimeForRequest(body);
+  const project = deps.findProject(targetRuntime.projectId);
+  const result = await deps.installPiDesktopSkill(project, targetRuntime.resourceLoader, {
     sourcePath: body?.sourcePath,
     scope: body?.scope === "user" ? "user" : "project",
     name: body?.name,
@@ -327,8 +314,8 @@ async function importSkillFromCapabilityPage(body) {
   }, project.cwd);
   return {
     ...result,
-    capabilities: await buildCapabilitiesSnapshot(targetRuntime),
-    snapshot: await buildSnapshot(targetRuntime),
+    capabilities: await deps.buildCapabilitiesSnapshot(targetRuntime),
+    snapshot: await deps.buildSnapshot(targetRuntime),
   };
 }
 
@@ -343,7 +330,7 @@ function readSkillContent(filePath) {
   // 匹配要按真实路径（worktree 会话里同一条技能报的是软链那侧），
   // 兜底发现则传原始路径：用户的技能本身就是软链，只比 realpath 会找不到。
   const normalizedPath = canonicalPath(filePath);
-  const project = findProject(state.runtime.projectId);
+  const project = deps.findProject(state.runtime.projectId);
   const allSkills = allDiscoveredSkillsForLoader(state.runtime.resourceLoader);
   const skill = allSkills.find((candidate) => canonicalPath(candidate.filePath) === normalizedPath)
     ?? discoverSkillFromKnownRoots(project, filePath);
@@ -390,7 +377,7 @@ async function reloadPiDesktopSkills({ scope = "all", projectId, sourceLoader } 
     const targets = [...openRuntimes.values()].filter((candidate) =>
       scope === "all" || scope === "user" || candidate.projectId === projectId,
     );
-    await reloadRuntimeTargets(targets);
+    await deps.reloadRuntimeTargets(targets);
 
     const summaryLoader = sourceLoader ?? targets[0]?.resourceLoader ?? state.runtime.resourceLoader;
     return {
@@ -411,7 +398,7 @@ async function reloadOpenRuntimeCapabilities(scope = "all") {
   const targets = [...openRuntimes.values()].filter((candidate) =>
     scope === "all" || candidate.projectId === scope,
   );
-  await reloadRuntimeTargets(targets);
+  await deps.reloadRuntimeTargets(targets);
 }
 
 /**
@@ -423,7 +410,7 @@ async function reloadOpenRuntimeSkills(scope = "all") {
   const targets = [...openRuntimes.values()].filter((candidate) =>
     scope === "all" || candidate.projectId === scope,
   );
-  await reloadRuntimeTargets(targets, { skillsOnly: true });
+  await deps.reloadRuntimeTargets(targets, { skillsOnly: true });
 }
 
 function assertWritableSkillRoot(skillRoot) {

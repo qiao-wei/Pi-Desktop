@@ -16,16 +16,6 @@ import { displayAgentPath, isSessionBusy, normalizeThinkingLevel } from "./small
  */
 export function createModelProviders(state, deps) {
   const { http429StatusPatterns, modelLoginBroker, modelRuntime, modelsJsonFile } = deps;
-  const rememberProjectComposerDefaults = /** @type {any} */ ((...args) => deps.rememberProjectComposerDefaults(...args));
-  const builtInProviderIds = /** @type {any} */ ((...args) => deps.builtInProviderIds(...args));
-  const dropStoredApiKey = /** @type {any} */ ((...args) => deps.dropStoredApiKey(...args));
-  const persistModelApiKey = /** @type {any} */ ((...args) => deps.persistModelApiKey(...args));
-  const readCustomModelsConfig = /** @type {any} */ ((...args) => deps.readCustomModelsConfig(...args));
-  const readStoredApiKey = /** @type {any} */ ((...args) => deps.readStoredApiKey(...args));
-  const reloadCustomModelProviders = /** @type {any} */ ((...args) => deps.reloadCustomModelProviders(...args));
-  const writeCustomModelsConfig = /** @type {any} */ ((...args) => deps.writeCustomModelsConfig(...args));
-  const buildSnapshot = /** @type {any} */ ((...args) => deps.buildSnapshot(...args));
-  const getRuntimeForRequest = /** @type {any} */ ((...args) => deps.getRuntimeForRequest(...args));
 
 function isHttp429ProviderError(errorMessage) {
   const message = String(errorMessage ?? "");
@@ -69,7 +59,7 @@ function listAvailableModels() {
 }
 
 async function setModelConfiguration(body) {
-  const targetRuntime = getRuntimeForRequest(body);
+  const targetRuntime = deps.getRuntimeForRequest(body);
   const provider = String(body?.provider ?? "").trim();
   const modelId = String(body?.model ?? "").trim();
   const thinkingLevel = normalizeThinkingLevel(body?.thinkingLevel ?? targetRuntime.session.thinkingLevel ?? "off");
@@ -83,7 +73,7 @@ async function setModelConfiguration(body) {
   }
 
   if (apiKey) {
-    persistModelApiKey(provider, apiKey);
+    deps.persistModelApiKey(provider, apiKey);
     await modelRuntime.setRuntimeApiKey(provider, apiKey);
   }
 
@@ -104,18 +94,18 @@ async function setModelConfiguration(body) {
     restore();
   }
   if (remember) {
-    rememberProjectComposerDefaults(targetRuntime.projectId, {
+    deps.rememberProjectComposerDefaults(targetRuntime.projectId, {
       provider: model.provider,
       model: model.id,
       thinkingLevel: targetRuntime.session.thinkingLevel,
     });
   }
   await targetRuntime.settingsManager.flush();
-  return buildSnapshot(targetRuntime);
+  return deps.buildSnapshot(targetRuntime);
 }
 
 function customModelsPayload() {
-  const config = readCustomModelsConfig();
+  const config = deps.readCustomModelsConfig();
   const available = new Set(modelRuntime.getAvailableSnapshot().map((model) => `${model.provider}/${model.id}`));
   return {
     modelsPath: displayAgentPath(modelsJsonFile),
@@ -135,7 +125,7 @@ function customModelsPayload() {
           api: runtime.api || entry.api,
         } : {}),
         apiKeyConfigured: modelRuntime.hasConfiguredAuth(entry.providerId),
-        builtin: builtInProviderIds().has(entry.providerId),
+        builtin: deps.builtInProviderIds().has(entry.providerId),
         available: available.has(`${entry.providerId}/${entry.model}`),
       };
     }),
@@ -155,7 +145,7 @@ function providerCatalogRow(providerId) {
     return null;
   }
   const normalized = normalizeProviderCatalog([row], { withModels: true })[0];
-  return normalized ? { ...normalized, apiKey: readStoredApiKey(row.id) } : null;
+  return normalized ? { ...normalized, apiKey: deps.readStoredApiKey(row.id) } : null;
 }
 
 /**
@@ -164,9 +154,9 @@ function providerCatalogRow(providerId) {
  * 模型列表按 `withModelsFor` 只展开需要的那一家，41 家全展开一次就是上千条。
  */
 function providerRows({ withModelsFor = "" } = {}) {
-  const configProviders = readCustomModelsConfig().providers ?? {};
+  const configProviders = deps.readCustomModelsConfig().providers ?? {};
   const inModelsJson = new Set(Object.keys(configProviders));
-  const builtins = builtInProviderIds();
+  const builtins = deps.builtInProviderIds();
   return modelRuntime.getProviders().map((provider) => {
     const authConfigured = modelRuntime.hasConfiguredAuth(provider.id);
     return {
@@ -213,7 +203,7 @@ async function discoverProviderModels(body) {
     if (!isProbablyKeyValue(apiKey)) {
       throw new Error("The API key must not contain spaces or line breaks.");
     }
-    persistModelApiKey(providerId, apiKey);
+    deps.persistModelApiKey(providerId, apiKey);
     await modelRuntime.setRuntimeApiKey(providerId, apiKey).catch(() => undefined);
   }
 
@@ -253,7 +243,7 @@ async function discoverProviderModels(body) {
       const listing = await requestModelListing({
         api: providerListingApi(providerId, models),
         baseUrl: listingBaseUrl,
-        apiKey: apiKey || readStoredApiKey(providerId),
+        apiKey: apiKey || deps.readStoredApiKey(providerId),
       });
       if (listing.ok) {
         models = mergeListingRows({
@@ -351,7 +341,7 @@ function providerConfigBaseUrl(providerId) {
 }
 
 function providerConfigValue(providerId, key) {
-  const providers = readCustomModelsConfig().providers ?? {};
+  const providers = deps.readCustomModelsConfig().providers ?? {};
   const id = Object.keys(providers).find((candidate) => candidate.toLowerCase() === providerId.toLowerCase());
   const value = id ? providers[id]?.[key] : undefined;
   return value === undefined || value === null ? "" : String(value).trim();
@@ -368,7 +358,7 @@ async function updateProvider(body) {
   if (!providerId) {
     throw new Error("Pick a provider first.");
   }
-  if (builtInProviderIds().has(providerId)) {
+  if (deps.builtInProviderIds().has(providerId)) {
     throw new Error("Built-in providers are managed by pi — only the API key can be changed.");
   }
   // key 格式先校：不然报错之前已经把 models.json 写了半截。
@@ -376,18 +366,18 @@ async function updateProvider(body) {
   if (apiKey && !isProbablyKeyValue(apiKey)) {
     throw new Error("The API key must not contain spaces or line breaks.");
   }
-  const result = updateProviderSettings(readCustomModelsConfig(), {
+  const result = updateProviderSettings(deps.readCustomModelsConfig(), {
     providerId,
     name: body?.name,
     baseUrl: body?.baseUrl,
     api: body?.api,
   });
-  writeCustomModelsConfig(result.config);
+  deps.writeCustomModelsConfig(result.config);
   if (apiKey) {
-    persistModelApiKey(result.providerId, apiKey);
+    deps.persistModelApiKey(result.providerId, apiKey);
     await modelRuntime.setRuntimeApiKey(result.providerId, apiKey).catch(() => undefined);
   }
-  await reloadCustomModelProviders([result.providerId]);
+  await deps.reloadCustomModelProviders([result.providerId]);
   return {
     ...customModelsPayload(),
     providerId: result.providerId,
@@ -426,7 +416,7 @@ function repairDefaultModelAfterRemoval() {
  */
 function defaultComposerModel() {
   const available = new Set(modelRuntime.getAvailableSnapshot().map((model) => `${model.provider}/${model.id}`));
-  for (const entry of listCustomModels(readCustomModelsConfig())) {
+  for (const entry of listCustomModels(deps.readCustomModelsConfig())) {
     if (!entry.managed || !entry.model) {
       continue;
     }
@@ -439,7 +429,7 @@ function defaultComposerModel() {
 }
 
 async function saveCustomModel(body) {
-  const config = readCustomModelsConfig();
+  const config = deps.readCustomModelsConfig();
   const targetProviderId = String(body?.targetProviderId ?? "").trim();
   const targetModel = String(body?.targetModel ?? "").trim();
   const existing = targetProviderId && targetModel
@@ -454,14 +444,14 @@ async function saveCustomModel(body) {
   const target = existing ? { providerId: targetProviderId, model: targetModel } : undefined;
   // 探一次“这条草稿会落到哪家”：内置供应商在 models.json 里根本没有 baseUrl，probe 不能拿它当
   // 必填 —— 否则“往内置供应商加模型”在这步就 500（真正的 builtin/custom 判定仍在下面按 resolvedId 做）。
-  const probeBody = builtInProviderIds().has(String(body?.providerId ?? "").trim())
+  const probeBody = deps.builtInProviderIds().has(String(body?.providerId ?? "").trim())
     ? { ...body, providerMode: "builtin" }
     : body;
   const probe = normalizeCustomModelInputs(probeBody, { requireApiKey: false })[0];
   const resolvedId = resolveProviderTarget(config, probe, target).providerId;
-  const hasStoredKey = Boolean(readStoredApiKey(resolvedId)) || modelRuntime.hasConfiguredAuth(resolvedId);
+  const hasStoredKey = Boolean(deps.readStoredApiKey(resolvedId)) || modelRuntime.hasConfiguredAuth(resolvedId);
   // 落到 pi 内置供应商上时只补模型行，baseUrl/authHeader 由内置 provider 自己管。
-  const builtinTarget = builtInProviderIds().has(resolvedId);
+  const builtinTarget = deps.builtInProviderIds().has(resolvedId);
   const bodyWithMode = { ...body, providerMode: builtinTarget ? "builtin" : "custom" };
   // 内置供应商的鉴权是 pi 自己的事（env / OAuth / 之后 /login 都行），没 key 也允许先把模型加进来，
   // 列表里会标成 "no API key"。自定义端点没 key 就什么都调不了，必须填。
@@ -478,15 +468,15 @@ async function saveCustomModel(body) {
   }
   const result = upsertCustomModels(config, entries, { target, seeds });
 
-  writeCustomModelsConfig(result.config);
+  deps.writeCustomModelsConfig(result.config);
   const apiKey = entries[0]?.apiKey.trim() ?? "";
   if (apiKey) {
     for (const providerId of result.providerIds) {
-      persistModelApiKey(providerId, apiKey);
+      deps.persistModelApiKey(providerId, apiKey);
       await modelRuntime.setRuntimeApiKey(providerId, apiKey).catch(() => undefined);
     }
   }
-  await reloadCustomModelProviders([...result.providerIds, result.previousProviderId]);
+  await deps.reloadCustomModelProviders([...result.providerIds, result.previousProviderId]);
 
   return {
     ...customModelsPayload(),
@@ -498,18 +488,18 @@ async function saveCustomModel(body) {
 }
 
 async function deleteCustomModel(body) {
-  const config = readCustomModelsConfig();
+  const config = deps.readCustomModelsConfig();
   const result = removeCustomModel(config, {
     providerId: String(body?.providerId ?? "").trim(),
     model: String(body?.model ?? "").trim(),
   });
 
-  writeCustomModelsConfig(result.config);
+  deps.writeCustomModelsConfig(result.config);
   if (result.providerRemoved) {
     await modelRuntime.removeRuntimeApiKey(result.providerId).catch(() => undefined);
-    dropStoredApiKey(result.providerId);
+    deps.dropStoredApiKey(result.providerId);
   }
-  await reloadCustomModelProviders([result.providerId]);
+  await deps.reloadCustomModelProviders([result.providerId]);
   repairDefaultModelAfterRemoval();
 
   return { ...customModelsPayload(), availableModels: listAvailableModels() };
@@ -521,7 +511,7 @@ async function testCustomModelConnection(body) {
   // 没填就用已存的那份；两边都没有也不是错：拉列表本身可以不带鉴权（本地网关），
   // 真需要 key 的端点会回 401，那句报错比在门口拦下来更说得清。以前这里空 key 直接报错，
   // 结果用户填完地址也按不动 Fetch，看上去就像这个弹窗干不了事。
-  const apiKey = String(body?.apiKey ?? "").trim() || readStoredApiKey(providerId);
+  const apiKey = String(body?.apiKey ?? "").trim() || deps.readStoredApiKey(providerId);
 
   // 不同 api 类型的列表端点/鉴权头都不一样（Anthropic 不认 Bearer，Google 走 x-goog-api-key）。
   const plan = listingPlan(body?.api, baseUrl, apiKey);
