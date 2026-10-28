@@ -201,6 +201,24 @@ reviewers: ["@qiaowei"]
      `执行中 / 已执行` 二级词删掉了，动作词本身已经表达了状态。
    - 终端退出码从硬编码的 `exit {code}` 改走 `process.tool.exitCode`（`退出码 {code}` / `exit {code}`）。
 
+19. **「N 个文件已更改」是一张卡片，位置在正文之后、操作栏之前**。参考实现是 ZCode 的
+   `ConversationFileSummaryPanel`（`packages/ui/src/v4/ConversationFileSummaryPanel.tsx`）：外壳
+   `rounded-xl border border-border bg-card`，表头 `h-10`（chevron + 「N 个文件已更改」+ 聚合
+   `+X −Y`），展开后每行「文件图标 + 文件名 + 目录 + 自己的 `+N −M` + 审查 / 打开」。
+   - **原先两处都不对**：真是一行淡灰小字 + 缩进的等宽路径列表（没有汇总数字、没有单行增删、没有
+     打开入口），而且挂在 `<AssistantMessage />` **后面** —— 也就是消息操作栏下面，读起来像消息的
+     装饰而不是这一轮回答的一部分。现在走消息内部的 `trailing` 槽位（`AssistantMessageTrailingContext`），
+     落在 content 列里、`aui_assistant-message-footer` 之前。
+   - **行数只从投影层的 `display.files` 读**，不从 patch 文本里数（`collectTurnChangedFilesWithCounts`
+     在 `src/shared/turnChangedFiles.ts`）。同一个文件被改多次时**取最后一次**：`edit` 的 display 只
+     描述那一次补丁，把两次相加会把同一段代码算两遍（+3 再 −3 相加 = 「改了 6 行」）。
+   - **"0" 和"数不出来"分开**：`counted: false`（大文件正文被预算裁掉、`display.kind === "none"`）时
+     这一行不显示数字，表头也不显示 `+0 −0`；确实是 0（新增文件）就照 ZCode 显示 `+20 −0`。
+   - **`撤销` 没做**：ZCode 表头右侧的 rewind 依赖"按轮回滚文件"的接口，本仓没有（`sessionBranch.ts`
+     只回滚会话条目，不动工作区文件）。不画一个点了只会弹"暂不支持"的按钮；等接口有了再加。
+   - 为腾出棘轮空间，`AssistantActionBar`（含 `useActionsDisabled`）从 `thread.aui.tsx` 拆到
+     `elements/assistant-action-bar.tsx`：**拆而不是抬 ceiling**。
+
 ## 理由
 
 1. **投影边界是唯一同时拿到「参数」和「结果信封」的地方**，也是**合并身份**（同一块要不要复用）
@@ -235,7 +253,8 @@ reviewers: ["@qiaowei"]
   `src/features/chat/assistantUiParts.ts`（块 → assistant-ui part 的映射，从 `ChatThread.tsx` 拆出）、
   `src/shared/diffHighlight.ts` + `src/features/chat/useDiffHighlight.ts` + `useThemeMode.ts`（内联 diff 的第二遍高亮，见决策 17）、
   `elements/tool-row-presentation.tsx`（每个 family 的图标 / 动作词 / 目标文本 / 正文选择，从 `tool-row.tsx` 拆出：
-  行文件要留在 700 行棘轮内）。
+  行文件要留在 700 行棘轮内）、`elements/assistant-action-bar.tsx`（消息操作栏，从 `thread.aui.tsx` 拆出：
+  给消息内的「变更文件」槽位腾出棘轮空间）。
 - **删除**：`elements/reasoning.aui.tsx`、`elements/reasoning.tsx`、`elements/reasoningState.ts`、
   `elements/tool-call.tsx`、`elements/tool-group.aui.tsx`、`elements/tool-fallback.aui.tsx`（627 行的
   `ai-elements` 兜底组件，行换成 ZCode 语法后没有消费者了）、`tests/reasoningGroupStreaming.test.ts`
@@ -281,6 +300,11 @@ reviewers: ["@qiaowei"]
   时才有意义 —— 旧版是流式里逐 chunk 重跑解析。
 
 ## 修订记录
+
+- **2026-10-28 用户实测：「变更文件的显示应该像截图那样，现在在正文后面，样式也不对」**。
+  结论是**两件事都不对**，而且都不是样式微调：形态差一个层级（一行小字 vs 一张卡片）、位置差一个
+  容器（消息脚注 vs 消息正文）。落地见 §19。**教训**：判断"参考实现长什么样"要看它所在的**容器**，
+  而不是只看我们自己那个组件的 class —— 卡片挂在操作栏下面就永远长不出卡片的样子。
 
 - **2026-10-27（同日，第二轮）用户实测两处「没改完」**。
   1. 「思考后面还是没有显示时间」——行自己的秒表在**行被卸载时就没了**（整轮结束过程区自动折叠，

@@ -14,6 +14,10 @@ import { collapsePanel, useScrollPositionLock } from "@/components/assistant-ui/
 import { useDeferredCollapse } from "@/components/assistant-ui/elements/deferredCollapse";
 import { ToolRow } from "@/components/assistant-ui/elements/tool-row";
 import { perfCount } from "@/lib/perf";
+import {
+  AssistantActionBar,
+  useActionsDisabled,
+} from "@/components/assistant-ui/elements/assistant-action-bar";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import {
   Collapsible,
@@ -32,7 +36,6 @@ import {
 } from "@/features/chat/badgeClipboard";
 import type { ChatAttachment, ChatMessagePart } from "@/types";
 import {
-  ActionBarMorePrimitive,
   ActionBarPrimitive,
   AuiIf,
   type AssistantState,
@@ -54,13 +57,10 @@ import {
   ChevronRightIcon,
   CheckIcon,
   CopyIcon,
-  DownloadIcon,
   FileTextIcon,
   FolderIcon,
   MicIcon,
-  MoreHorizontalIcon,
   PencilIcon,
-  RefreshCwIcon,
   SquareIcon,
 } from "lucide-react";
 import {
@@ -70,6 +70,7 @@ import {
   type ComponentType,
   type FC,
   type PropsWithChildren,
+  type ReactNode,
   useCallback,
   useMemo,
   useRef,
@@ -127,6 +128,33 @@ const ToolRowTyped = ToolRow as unknown as ToolCallMessagePartComponent;
 
 const ThreadComponentsContext =
   createContext<ThreadComponents>(EMPTY_COMPONENTS);
+
+/**
+ * What a host wants rendered *inside* the assistant message, after the text and
+ * before the action bar (the changed-files card).
+ *
+ * It is a slot rather than a prop because the message component is produced by the
+ * assistant-ui registry and takes no props; and it is a slot rather than "render it
+ * after the message" because flow order matters: a card below the copy/reload row
+ * reads as message chrome, one above it reads as part of the answer (ZCode's
+ * `ConversationFileSummaryPanel` sits in the turn content, not in its footer).
+ * Keeping it a ReactNode keeps `components/` free of feature imports.
+ */
+const AssistantMessageTrailingContext = createContext<ReactNode>(null);
+
+export function AssistantMessageTrailingProvider({
+  children,
+  trailing,
+}: {
+  children: ReactNode;
+  trailing?: ReactNode;
+}) {
+  return (
+    <AssistantMessageTrailingContext.Provider value={trailing ?? null}>
+      {children}
+    </AssistantMessageTrailingContext.Provider>
+  );
+}
 
 export type UserMessageInlineAttachmentHandlers = {
   onAttachmentHoverStart?: (attachment: ChatAttachment, element: HTMLElement) => void;
@@ -620,6 +648,7 @@ const AssistantMessage: FC = () => {
   // Keep the action bar inside the contained root's paint box, then cancel its reserved space in flow.
   const ACTION_BAR_HEIGHT = `min-h-7.5 ${ACTION_BAR_PT}`;
   const entrance = useMessageEntrance();
+  const trailing = useContext(AssistantMessageTrailingContext);
   const parts = useAuiState((s) => s.message.parts);
 
   // The process region spans the parts up to the *last* thinking/tool part, including
@@ -726,6 +755,7 @@ const AssistantMessage: FC = () => {
           }}
         </MessagePrimitive.GroupedParts>
         <MessageError />
+        {trailing}
       </div>
 
       <div
@@ -738,65 +768,6 @@ const AssistantMessage: FC = () => {
   );
 };
 
-/**
- * While a turn is streaming every message action is inert: copying a half-written
- * answer, regenerating mid-run or editing a question that is still being answered
- * all corrupt the transcript. The bars stay in place but grey out (native
- * `disabled` → `disabled:opacity-50` on the buttons) instead of the old
- * `hideWhenRunning` disappearing act, which re-flowed the footer.
- */
-const useActionsDisabled = () => useAuiState((s) => s.thread.isRunning);
-
-const AssistantActionBar: FC = () => {
-  const t = useT();
-  const actionsDisabled = useActionsDisabled();
-  return (
-    <ActionBarPrimitive.Root
-      autohide="not-last"
-      className="aui-assistant-action-bar-root text-muted-foreground animate-in fade-in col-start-3 row-start-2 -ms-1 flex gap-1 duration-200"
-    >
-      <ActionBarPrimitive.Copy asChild>
-        <TooltipIconButton tooltip={t("message.copy")} disabled={actionsDisabled}>
-          <AuiIf condition={(s) => s.message.isCopied}>
-            <CheckIcon className="animate-in zoom-in-50 fade-in duration-200 ease-out" />
-          </AuiIf>
-          <AuiIf condition={(s) => !s.message.isCopied}>
-            <CopyIcon className="animate-in zoom-in-75 fade-in duration-150" />
-          </AuiIf>
-        </TooltipIconButton>
-      </ActionBarPrimitive.Copy>
-      <ActionBarPrimitive.Reload asChild>
-        <TooltipIconButton tooltip={t("message.refresh")} className="aui-assistant-action-refresh" disabled={actionsDisabled}>
-          <RefreshCwIcon />
-        </TooltipIconButton>
-      </ActionBarPrimitive.Reload>
-      <ActionBarMorePrimitive.Root>
-        <ActionBarMorePrimitive.Trigger asChild>
-          <TooltipIconButton
-            tooltip={t("message.more")}
-            className="data-[state=open]:bg-accent"
-            disabled={actionsDisabled}
-          >
-            <MoreHorizontalIcon />
-          </TooltipIconButton>
-        </ActionBarMorePrimitive.Trigger>
-        <ActionBarMorePrimitive.Content
-          side="bottom"
-          align="start"
-          sideOffset={6}
-          className="aui-action-bar-more-content bg-popover text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[8rem] overflow-hidden rounded-xl border p-1.5"
-        >
-          <ActionBarPrimitive.ExportMarkdown asChild>
-            <ActionBarMorePrimitive.Item className="aui-action-bar-more-item hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none">
-              <DownloadIcon className="size-4" />
-              {t("message.exportMarkdown")}
-            </ActionBarMorePrimitive.Item>
-          </ActionBarPrimitive.ExportMarkdown>
-        </ActionBarMorePrimitive.Content>
-      </ActionBarMorePrimitive.Root>
-    </ActionBarPrimitive.Root>
-  );
-};
 
 const UserFilePart: FileMessagePartComponent = (part) => (
   <div data-slot="aui_user-message-file" className="py-1">

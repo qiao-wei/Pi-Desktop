@@ -537,3 +537,80 @@ test("展开的思考正文跟着流式输出吸底", async ({ page, harness }) 
   const resumed = await body.evaluate((node) => node.scrollHeight - node.clientHeight - node.scrollTop);
   assert.ok(resumed <= 4, `滚回底部后没有恢复跟随（距底 ${resumed}px）`);
 });
+
+/**
+ * 一轮结束后的「N 个文件已更改」卡片（ZCode 的 `ConversationFileSummaryPanel`）。
+ *
+ * 用户 2026-10-28 的反馈：「变更文件的显示应该像截图那样，现在在正文后面，样式也不对」——
+ * 两件事分开验：
+ * - **样式**：不是一行淡灰小字，而是 `rounded-xl` 卡片；表头有聚合 `+X −Y`，展开后每行有
+ *   文件名 + 目录 + 自己的增删 + 审查/打开。
+ * - **位置**：卡片在正文列里、消息操作栏**之前**。挂到操作栏下面会被读成消息装饰。
+ */
+test("一轮结束后出现变更文件卡片：聚合增删、单行增删、审查入口", async ({ page, harness }) => {
+  writeFileSync(join(harness.workspaceDir, "demo.ts"), "const greek = 'alpha';\n");
+  await openProject(page, harness);
+
+  await sendMessage(page, "E2E-TOOL-EDIT 改一下 demo.ts");
+  await expect(page.locator("[data-message-id$='#assistant']").last()).toContainText("E2E-3 done", {
+    timeout: 30_000,
+  });
+  await turnFinished(page);
+
+  const message = page.locator("[data-message-id$='#assistant']").last();
+  const card = message.locator('[data-slot="aui_turn-changed-files"]');
+  await expect(card).toBeVisible({ timeout: 15_000 });
+
+  // 位置：在正文列内，且在操作栏之前（同一个祖先里比较文档顺序）。
+  // 这份 tsconfig 没有 DOM lib（`Node` / `Element` 都是 TS2304），所以用结构化类型
+  // 和 `DOCUMENT_POSITION_FOLLOWING` 的字面量 4 —— 走 ownerDocument 也不行，
+  // 常量挂在 window 上而 window 同样没有类型。
+  const order = await card.evaluate((node: {
+    closest(selector: string): {
+      querySelector(selector: string): { tagName: string } | null;
+    } | null;
+    compareDocumentPosition(other: unknown): number;
+  }) => {
+    const content = node.closest('[data-slot="aui_assistant-message-content"]');
+    const footer = node
+      .closest("[data-message-id]")
+      ?.querySelector('[data-slot="aui_assistant-message-footer"]');
+    if (!content || !footer) return { inContent: false, beforeFooter: false };
+    return {
+      inContent: true,
+      // 4 = DOCUMENT_POSITION_FOLLOWING：footer 在卡片之后。
+      beforeFooter: (node.compareDocumentPosition(footer) & 4) !== 0,
+    };
+  });
+  assert.deepEqual(order, { inContent: true, beforeFooter: true }, "卡片必须在正文列里、操作栏之前");
+
+  // 表头：标题 + 聚合增删（demo.ts 换一行 → +1 −1）。
+  const trigger = card.locator('[data-slot="aui_turn-changed-files-trigger"]');
+  await expect(trigger).toContainText("1 个文件已更改");
+  await expect(trigger).toContainText("+1");
+  await expect(trigger).toContainText("−1");
+  // 收起态：行不在 DOM 里（ZCode 默认收起）。
+  await expect(card.locator('[data-slot="aui_turn-changed-file"]')).toHaveCount(0);
+
+  await trigger.click();
+  const row = card.locator('[data-slot="aui_turn-changed-file"]');
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText("demo.ts");
+  await expect(row).toContainText("+1");
+  await expect(row).toContainText("−1");
+  await expect(row.locator('[data-slot="aui_turn-changed-file-review"]')).toHaveText("审查");
+  await expect(row.locator('[data-slot="aui_turn-changed-file-open"]')).toHaveText("打开");
+
+  await page.waitForTimeout(200);
+  await shoot(page, "changed-files-card-light");
+  // 走应用自己的主题开关，截图拍的是用户能到达的状态（两张图拍的都是收起后展开的静态卡片，
+  // 不先点「审查」—— 右面板会跟着变，卡片就淹没在一屏 diff 里了）。
+  await page.getByRole("button", { name: "切换到深色主题" }).click();
+  await page.waitForTimeout(200);
+  await shoot(page, "changed-files-card-dark");
+  await page.getByRole("button", { name: "切换到浅色主题" }).click();
+
+  // 「审查」把它在右面板打开（和工具行点文件名同一个落点）。
+  await row.locator('[data-slot="aui_turn-changed-file-review"]').click();
+  await expect(page.getByRole("tab", { name: /demo\.ts/ })).toHaveAttribute("aria-selected", "true");
+});

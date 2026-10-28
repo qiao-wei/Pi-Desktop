@@ -187,6 +187,12 @@ React、npm 这类通用词。
 - _避免_：说成「计时器」。它是**读出来的**跨度，不是跑着的表；「不知道」和「瞬间」是两回事，前者退回无时长文案，后者才取 1 秒下限。
 - 代码：`src/shared/chatTurnTiming.ts`（`turnDurationOf` / `observedTurnDuration` / `settleStreamingAnswer`）、`src/shared/thinkingTiming.ts`（逐块观测与搬运）、消费方 `thread.aui.tsx` 的 `PiDesktopProcessGroup`。
 
+**change summary card（变更文件卡片）**
+- 是什么：一轮结束后、答案下面那张「N 个文件已更改」卡片（ZCode 的 `ConversationFileSummaryPanel`）。表头是 chevron + 标题 + 聚合 `+X −Y`，展开后每行「图标 + 文件名 + 目录 + 自己的 `+N −M` + 审查 / 打开」。
+- 边界：**在消息正文列里、操作栏之前**（走消息内部的 `trailing` 槽位）；只在落定后出现（流式途中列表会一行行往外蹦）；默认收起（它是索引，不是正文）。数据只认 `write` / `edit` 两个工具 —— `bash` 改文件没有可信路径，宁可不列。
+- _避免_：说成「git 改动」。它答的是「**这一轮**改了什么」，git 只知道「相对 HEAD 有什么改动」，两轮改同一个文件时会混在一起。
+- 代码：`src/features/chat/TurnChangedFiles.tsx`、数据 `src/shared/turnChangedFiles.ts` 的 `collectTurnChangedFilesWithCounts`（行数只从 `display.files` 读；同一文件取最后一次调用；`counted: false` = 数不出来，不显示数字）。
+
 **process block（过程块）**
 - 是什么：助手气泡里 `kind` 不是 `text` 的那些块 —— `thinking` / `tool` / `notice`。它们有顺序、可合并（流式里同一块会被反复重算），是过程区的**唯一数据形状**。
 - _避免_：说成「工具组」「步骤」。分组是旧实现的渲染概念（已删），块本身是平铺的。

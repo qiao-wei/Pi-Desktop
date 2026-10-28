@@ -295,7 +295,10 @@ export const zh = {
   /* ---- 消息操作与行内编辑 ---- */
   "message.copy": "复制消息",
   "message.copyCode": "复制代码",
-  "chat.changedFiles.title": "本轮更改了 {count} 个文件",
+  "chat.changedFiles.title": "{count} 个文件已更改",
+  "chat.changedFiles.review": "审查",
+  "chat.changedFiles.open": "打开",
+  "chat.changedFiles.openInIde": "在编辑器中打开",
   "chat.loadOlder.action": "加载更早的消息",
   "chat.loadOlder.loading": "正在加载…",
   "chat.stream.lostBusy": "与桥的连接中断了，已改用快照同步；这一轮仍在继续。",

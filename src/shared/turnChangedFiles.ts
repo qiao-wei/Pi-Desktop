@@ -10,6 +10,8 @@
  * —— 列错一个文件比少列一个更坏：用户会去右面板找那个根本不存在的改动。
  */
 
+import type { ToolDisplay } from "./toolDisplay.ts";
+
 /** 参数里带 `path` 的写文件工具。 */
 export const FILE_MUTATING_TOOLS = ["write", "edit"] as const;
 
@@ -25,6 +27,19 @@ export interface ToolCallLike {
   args?: unknown;
   /** 原始参数字符串（assistant-ui 会给；`args` 解析失败时兜底用）。 */
   argsText?: string;
+  /** 投影层派生出来的展示模型；`fileDiff` 里带着每个文件真实的增删行数。 */
+  display?: ToolDisplay;
+}
+
+/** 一行「这一轮改了什么」：路径 + 增删行数。 */
+export interface TurnChangedFile {
+  path: string;
+  /** 新增行数；拿不到真实 patch 时是 0（不是"没改"，是"数不出来"）。 */
+  added: number;
+  /** 删除行数；同上。 */
+  removed: number;
+  /** 这条数字是不是真的来自 diff（false 时界面上只显示文件名）。 */
+  counted: boolean;
 }
 
 function pathFromArgs(args: unknown): string {
@@ -106,4 +121,50 @@ export function toWorkspaceRelativePath(path: unknown, root: unknown): string {
     return value;
   }
   return value.slice(base.length + 1);
+}
+
+/**
+ * 一轮改动的**行数**：从投影层派生出的 `display.files` 读，不从 patch 文本里数。
+ *
+ * 两个刻意的规则：
+ * - **同一个文件取最后一次**调用。`edit` 的 display 只描述那一次补丁，把两次 edit 的
+ *   行数相加会把同一段代码算两遍（改一次 +3、再改回来 −3，相加得到"改了 6 行"）；
+ *   而"这一轮这个文件最后变成什么样"正是读者要的。顺序仍按**第一次出现**排。
+ * - **数不出来就说数不出来**（`counted: false`）。大文件的正文被预算裁掉时 patch 为空，
+ *   此时 `added`/`removed` 都可能是 0，界面不能把它显示成"没有增删"。
+ */
+export function collectTurnChangedFilesWithCounts(
+  parts: readonly ToolCallLike[] | null | undefined,
+): TurnChangedFile[] {
+  if (!Array.isArray(parts)) {
+    return [];
+  }
+
+  const byPath = new Map<string, TurnChangedFile>();
+  for (const part of parts) {
+    const path = toolCallChangedPath(part);
+    if (!path) {
+      continue;
+    }
+    const file = part.display?.kind === "fileDiff" ? matchingChangedFile(part.display, path) : undefined;
+    byPath.set(path, {
+      path,
+      added: file?.added ?? 0,
+      removed: file?.removed ?? 0,
+      counted: file !== undefined,
+    });
+  }
+  return [...byPath.values()];
+}
+
+/** display 里的那一项：优先精确匹配路径，只有一个文件时才退而求其次。 */
+function matchingChangedFile(display: ToolDisplay, path: string) {
+  if (display.kind !== "fileDiff") {
+    return undefined;
+  }
+  const exact = display.files.find((file) => file.path === path);
+  if (exact) {
+    return exact;
+  }
+  return display.files.length === 1 ? display.files[0] : undefined;
 }

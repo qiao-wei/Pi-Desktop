@@ -3,6 +3,7 @@ import { createContext, useContext, useMemo, useRef } from "react";
 
 import {
   AssistantMessage,
+  AssistantMessageTrailingProvider,
   UserMessage,
 } from "../../components/assistant-ui/elements/thread.aui";
 import type { ToolCallLike } from "../../shared/turnChangedFiles";
@@ -100,19 +101,24 @@ export function AssistantMessageSlot() {
   const parts = useAuiState((s) => s.message.parts);
   const isRunning = useAuiState((s) => s.message.status?.type === "running");
 
+  // 卡片由消息自己渲染（`trailing` 槽位），位置在正文之后、操作栏之前 —— 挂在
+  // `<AssistantMessage />` 外面会落到操作栏下面，读起来像消息的装饰而不是这一轮的内容。
   return (
-    <>
+    <AssistantMessageTrailingProvider
+      trailing={
+        actions && !isRunning ? (
+          <TurnChangedFiles
+            parts={parts as readonly ToolCallLike[]}
+            workspaceRoot={actions.workspaceRoot}
+            onOpenDiff={actions.onOpenDiff}
+            onOpenContent={actions.onOpenContent}
+            onOpenInIde={actions.onOpenInIde}
+          />
+        ) : null
+      }
+    >
       <AssistantMessage />
-      {actions && !isRunning ? (
-        <TurnChangedFiles
-          parts={parts as readonly ToolCallLike[]}
-          workspaceRoot={actions.workspaceRoot}
-          onOpenDiff={actions.onOpenDiff}
-          onOpenContent={actions.onOpenContent}
-          onOpenInIde={actions.onOpenInIde}
-        />
-      ) : null}
-    </>
+    </AssistantMessageTrailingProvider>
   );
 }
 

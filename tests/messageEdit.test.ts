@@ -20,6 +20,11 @@ const chatThread = readFileSync(new URL("../src/features/chat/ChatThread.tsx", i
 const chatThreadProps = readFileSync(new URL("../src/features/chat/chatThreadProps.ts", import.meta.url), "utf8");
 const editBox = sourceDir("src/features/chat");
 const thread = readFileSync(new URL("../src/components/assistant-ui/elements/thread.aui.tsx", import.meta.url), "utf8");
+// 助手操作栏已拆到独立模块（棘轮），Reload / 文案的接线在那里。
+const actionBar = readFileSync(
+  new URL("../src/components/assistant-ui/elements/assistant-action-bar.tsx", import.meta.url),
+  "utf8",
+);
 const app = appSource();
 const useApp = readFileSync(new URL("../src/features/chat/usePiDesktopApp.ts", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../src/app/styles.css", import.meta.url), "utf8");
@@ -234,14 +239,14 @@ test("regenerate is wired through assistant-ui's Reload with the parent user bub
   assert.match(chatThread, /onReloadMessage\(parentId\)/);
   assert.match(chatThread, /\.\.\.\(onReloadMessage \? \{ onReload \} : \{\}\)/);
   assert.match(app, /onReloadMessage=\{refreshMessage\}/);
-  assert.match(thread, /ActionBarPrimitive\.Reload/);
+  assert.match(actionBar, /ActionBarPrimitive\.Reload/);
 });
 
 test("the assistant action bar is localised, refresh included", () => {
-  assert.match(thread, /tooltip=\{t\("message\.copy"\)\}/);
-  assert.match(thread, /tooltip=\{t\("message\.refresh"\)\}/);
-  assert.match(thread, /tooltip=\{t\("message\.more"\)\}/);
-  assert.doesNotMatch(thread, /tooltip="(Copy|Refresh|More)"/, "no hardcoded English tooltips");
+  assert.match(actionBar, /tooltip=\{t\("message\.copy"\)\}/);
+  assert.match(actionBar, /tooltip=\{t\("message\.refresh"\)\}/);
+  assert.match(actionBar, /tooltip=\{t\("message\.more"\)\}/);
+  assert.doesNotMatch(actionBar, /tooltip="(Copy|Refresh|More)"/, "no hardcoded English tooltips");
 });
 
 test("regenerate re-sends the original user turn without re-uploading attachments", () => {

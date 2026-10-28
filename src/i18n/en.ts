@@ -290,7 +290,10 @@ export const en = {
   /* ---- message actions & inline editing ---- */
   "message.copy": "Copy message",
   "message.copyCode": "Copy code",
-  "chat.changedFiles.title": "{count} files changed this turn",
+  "chat.changedFiles.title": "{count} files changed",
+  "chat.changedFiles.review": "Review",
+  "chat.changedFiles.open": "Open",
+  "chat.changedFiles.openInIde": "Open in editor",
   "chat.loadOlder.action": "Load earlier messages",
   "chat.loadOlder.loading": "Loading…",
   "chat.stream.lostBusy": "The connection to the bridge dropped. Syncing from snapshots — this turn is still running.",

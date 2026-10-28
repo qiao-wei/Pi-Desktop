@@ -11,6 +11,7 @@ import test from "node:test";
 import {
   FILE_MUTATING_TOOLS,
   collectTurnChangedFiles,
+  collectTurnChangedFilesWithCounts,
   isFileMutatingTool,
   toolCallChangedPath,
   toWorkspaceRelativePath,
@@ -85,4 +86,84 @@ test("折相对路径：项目内的绝对路径折掉前缀，项目外的原�
   assert.equal(toWorkspaceRelativePath("  /Users/x/proj/a.ts  ", root), "a.ts");
   assert.equal(toWorkspaceRelativePath(null, root), "");
   assert.equal(toWorkspaceRelativePath("/Users/x/proj/a.ts", ""), "/Users/x/proj/a.ts", "没有根就原样");
+});
+
+/**
+ * 卡片要显示的**行数**：`display.files` 是投影层算好的真实 patch 统计。
+ *
+ * 三条规则各自都容易被"想当然"实现错：
+ * - **同一个文件取最后一次**：`edit` 的 display 只描述那一次补丁，相加会把同一段代码算两遍。
+ * - **顺序按第一次出现**：读者按"agent 先动哪个文件"理解这一轮。
+ * - **没有 diff 就说数不出来**（`counted: false`）：正文被预算裁掉时 patch 是空的，
+ *   把它显示成「没有增删」是编数字。
+ */
+test("行数从 display.files 读：路径精确匹配，同一文件取最后一次调用", () => {
+  const parts = [
+    {
+      type: "tool-call",
+      toolName: "edit",
+      args: { path: "src/a.ts" },
+      display: { kind: "fileDiff", files: [{ path: "src/a.ts", added: 3, removed: 1 }] },
+    },
+    {
+      type: "tool-call",
+      toolName: "write",
+      args: { path: "src/b.ts" },
+      display: { kind: "fileDiff", files: [{ path: "src/b.ts", added: 20, removed: 5 }] },
+    },
+    {
+      type: "tool-call",
+      toolName: "edit",
+      args: { path: "src/a.ts" },
+      display: { kind: "fileDiff", files: [{ path: "src/a.ts", added: 7, removed: 2 }] },
+    },
+  ];
+
+  assert.deepEqual(collectTurnChangedFilesWithCounts(parts), [
+    // 顺序是第一次出现的顺序；数字是 a.ts 最后一次编辑的（7/2），不是 3+7=10。
+    { path: "src/a.ts", added: 7, removed: 2, counted: true },
+    { path: "src/b.ts", added: 20, removed: 5, counted: true },
+  ]);
+});
+
+test("display 只有一个文件时也认它（edit 的 display 可能不带完整路径）", () => {
+  const parts = [
+    {
+      type: "tool-call",
+      toolName: "edit",
+      args: { path: "/Users/x/proj/src/a.ts" },
+      display: { kind: "fileDiff", files: [{ path: "src/a.ts", added: 1, removed: 1 }] },
+    },
+  ];
+  assert.deepEqual(collectTurnChangedFilesWithCounts(parts), [
+    { path: "/Users/x/proj/src/a.ts", added: 1, removed: 1, counted: true },
+  ]);
+});
+
+test("没有 fileDiff display（读工具 / 没 diff / 大文件省略）都是 counted:false", () => {
+  const parts = [
+    { type: "tool-call", toolName: "write", args: { path: "src/a.ts" } },
+    {
+      type: "tool-call",
+      toolName: "bash",
+      args: { command: "touch src/b.ts" },
+      display: { kind: "terminal" },
+    },
+    {
+      type: "tool-call",
+      toolName: "write",
+      args: { path: "src/c.ts" },
+      display: { kind: "none" },
+    },
+  ];
+  assert.deepEqual(collectTurnChangedFilesWithCounts(parts), [
+    { path: "src/a.ts", added: 0, removed: 0, counted: false },
+    { path: "src/c.ts", added: 0, removed: 0, counted: false },
+  ]);
+});
+
+test("行数统计也吃空输入", () => {
+  for (const value of [[], null, undefined, "x", {}, 7]) {
+    assert.deepEqual(collectTurnChangedFilesWithCounts(value as never), []);
+  }
 });

@@ -14,6 +14,12 @@ const thread = readFileSync(
   new URL("../src/components/assistant-ui/elements/thread.aui.tsx", import.meta.url),
   "utf8",
 );
+// 操作栏为了给消息里的「变更文件」槽位腾出棘轮空间，已从 thread.aui.tsx 拆出；
+// 断言跟着实现走，而不是把文件路径当成契约。
+const actionBar = readFileSync(
+  new URL("../src/components/assistant-ui/elements/assistant-action-bar.tsx", import.meta.url),
+  "utf8",
+);
 const button = readFileSync(new URL("../src/components/ui/button.tsx", import.meta.url), "utf8");
 
 /** Slice from one top-level `const name =` to the next top-level declaration. */
@@ -26,7 +32,9 @@ function topLevelBlock(source: string, name: string, next: string): string {
 }
 
 test("assistant action bar greys out instead of hiding while streaming", () => {
-  const bar = topLevelBlock(thread, "AssistantActionBar", "const UserFilePart");
+  // 从组件本体开始切：它上面那段 docblock 里正好写着旧实现的名字（`hideWhenRunning`），
+  // 整文件断会把这个说明当成违规。
+  const bar = actionBar.slice(actionBar.indexOf("export const AssistantActionBar"));
   // The old disappearing act re-flowed the footer; disabled is the contract now.
   assert.doesNotMatch(bar, /hideWhenRunning/);
   assert.match(bar, /const actionsDisabled = useActionsDisabled\(\)/);
@@ -50,8 +58,8 @@ test("user message footer copy and edit grey out while streaming", () => {
 
 test("the disabled flag follows the thread's running state", () => {
   assert.match(
-    thread,
-    /const useActionsDisabled = \(\) => useAuiState\(\(s\) => s\.thread\.isRunning\)/,
+    actionBar,
+    /export const useActionsDisabled = \(\) => useAuiState\(\(s\) => s\.thread\.isRunning\)/,
     "must key off the same running signal the runtime uses",
   );
 });
