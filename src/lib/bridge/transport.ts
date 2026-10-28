@@ -31,6 +31,36 @@ export interface BridgeRequestInit {
   signal?: AbortSignal;
 }
 
+/**
+ * A stream the bridge **refused to open** (as opposed to one that broke mid-flight).
+ *
+ * The distinction is the difference between "there is nothing to resume" and "the feed
+ * died": `404` means the run is gone, `409` means its log no longer reaches back far
+ * enough. Both callers cannot act on the text - they need the status - so it travels on
+ * the error instead of being re-parsed out of a sentence.
+ */
+export class BridgeStreamError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "BridgeStreamError";
+    this.status = status;
+  }
+}
+
+/** The HTTP status behind a refused stream, when the error carries one. */
+export function bridgeStreamStatus(error: unknown): number | undefined {
+  return error instanceof BridgeStreamError ? error.status : undefined;
+}
+
+/** `fetch`/`Response.body` abort surfaces as a `DOMException` in the browser and an `Error` in tests. */
+export function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === "AbortError"
+    : error instanceof Error && error.name === "AbortError";
+}
+
 export interface BridgeStreamOptions {
   signal?: AbortSignal;
 }
@@ -170,7 +200,7 @@ export function createHttpBridgeTransport(apiBase: string): BridgeTransport {
       });
 
       if (!response.ok || !response.body) {
-        throw new Error(await readBridgeErrorMessage(response));
+        throw new BridgeStreamError(await readBridgeErrorMessage(response), response.status);
       }
 
       const reader = response.body.getReader();

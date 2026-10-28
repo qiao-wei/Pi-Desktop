@@ -183,6 +183,7 @@ export const ROUTES = [
   // 「在访达中显示 worktree」：路径由服务端从会话解析，和项目的 reveal 一样不接受
   // 渲染层传任意路径。
   { method: "POST", kind: "exact", priority: 0, path: "/api/sessions/worktree/reveal", handler: "handle_post_api_sessions_worktree_reveal" },
+  { method: "GET", kind: "exact", priority: 0, path: "/api/sessions/messages", handler: "handle_get_api_sessions_messages" },
   { method: "POST", kind: "exact", priority: 0, path: "/api/sessions/select", handler: "handle_post_api_sessions_select" },
   { method: "POST", kind: "exact", priority: 0, path: "/api/sessions/update", handler: "handle_post_api_sessions_update" },
   { method: "POST", kind: "exact", priority: 0, path: "/api/sessions/pin", handler: "handle_post_api_sessions_pin" },

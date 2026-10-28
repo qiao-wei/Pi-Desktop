@@ -76,6 +76,25 @@ test("write 从参数合成整文件 patch（pi 的 write 不带 details）", ()
   ]);
 });
 
+test("write 的正文被预算裁掉时：计数照旧，patch 为空并说明省略", () => {
+  const display = deriveToolDisplay({
+    toolName: "write",
+    // 线上裁剪后的形状：content 只剩 head/tail，行数与字节数在 `__omitted` 里。
+    // 这里的行数（4200）与 content 里的预览行数故意不同，防止实现去数预览。
+    args: {
+      path: "huge.log",
+      content: "head\n…\ntail",
+      __omitted: [{ path: "content", bytes: 4_194_304, lines: 4200 }],
+    },
+    result: { content: [{ type: "text", text: "Successfully wrote huge.log." }] },
+  });
+  assert.equal(display.kind, "fileDiff");
+  const files = display.kind === "fileDiff" ? display.files : [];
+  assert.deepEqual(files, [
+    { path: "huge.log", added: 4200, removed: 0, patch: "", omitted: { bytes: 4_194_304 } },
+  ]);
+});
+
 test("write 没有内容时不合成空 patch", () => {
   assert.deepEqual(
     deriveToolDisplay({ toolName: "write", args: { path: "a.ts" }, result: undefined }),
@@ -364,4 +383,35 @@ test("文件行的路径永远非空：有目录用目录，没有就用项目�
   assert.equal(toolRowFolder("/elsewhere/x/a.ts", root), "/elsewhere/x/");
   // 连工作区都不知道时就别编一个（空 = 不渲染那段）。
   assert.equal(toolRowFolder("hello.py", ""), "");
+});
+
+/**
+ * 失败的行不许报数字。
+ *
+ * 预览是从**参数**推的 —— 它描述这次调用打算做什么。失败的 edit/write 一个字节都没改，
+ * 行尾却写着「+3 −1」，那就是在说一件没发生的事（ADR-006「行不撒谎」）。
+ */
+test("失败的 edit / write 不显示预览的 +/−，成功照旧", () => {
+  const args = { path: "a.ts", edits: [{ oldText: "旧", newText: "新一\n新二" }] };
+  const preview = deriveToolDisplay({ toolName: "edit", args, result: undefined });
+  assert.equal(preview.kind, "fileDiff");
+
+  const failed = deriveToolDisplay({ toolName: "edit", args, result: undefined, isError: true });
+  assert.deepEqual(failed, { kind: "none" });
+
+  const writeArgs = { path: "a.md", content: "一\n二\n" };
+  assert.equal(deriveToolDisplay({ toolName: "write", args: writeArgs, result: undefined }).kind, "fileDiff");
+  assert.deepEqual(
+    deriveToolDisplay({ toolName: "write", args: writeArgs, result: undefined, isError: true }),
+    { kind: "none" },
+  );
+
+  // 结果自带 patch 时就是「真的写过」，错误标记不该把它藏起来（比如部分成功的调用）。
+  const patched = deriveToolDisplay({
+    toolName: "write",
+    args: writeArgs,
+    result: { content: [], details: { patch: "--- a.md\n+++ a.md\n@@ -0,0 +1,1 @@\n+一" } },
+    isError: true,
+  });
+  assert.equal(patched.kind, "fileDiff");
 });

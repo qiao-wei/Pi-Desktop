@@ -3,6 +3,7 @@ import type {
   ArchivedSessionSummary,
   CapabilitiesState,
   ChatMessagePart,
+  ChatSession,
   ConversationStats,
   ExtensionUiMode,
   ModelSummary,
@@ -326,6 +327,14 @@ export interface PromptStreamEvent {
   result?: unknown;
   isError?: boolean;
   snapshot?: BootstrapResponse;
+  /**
+   * 整份快照超限时，服务端只发这一份"身份 + 省略说明"，不带 `snapshot`
+   * （见 `server/runStreams.mjs` 的 `budgetFramePayload`）。
+   *
+   * 这是**明确省略**，不是"对话被清空"：客户端收到后跳过这次 reconcile，
+   * 等 `done` 之后的 bootstrap 追平——拿半份快照去 merge 会毁掉历史。
+   */
+  snapshotOmitted?: { bytes: number; messages: number; reason: "oversize" };
   content?: string;
   behavior?: "steer" | "followUp";
   /**
@@ -574,6 +583,37 @@ export async function fetchBootstrap(options: { force?: boolean } = {}): Promise
   });
   assertProtocolVersion(next, "/api/bootstrap");
   return next;
+}
+
+/**
+ * `GET /api/sessions/messages?beforeTurn=<n>&limit=<n>`：往快照窗口之前再翻一页历史。
+ *
+ * 快照只带尾部窗口（服务端 `CONVERSATION_TAIL_TURNS`，对齐 ZCode 的
+ * `snapshotTailWindowRows`），更早的部分在这里按**页**取。返回的气泡 id 与整份转录一致
+ * （绝对轮次），所以可以直接 prepend 到现有列表前面，不需要重建整段历史。
+ */
+export interface SessionMessagesPage {
+  messages: ChatSession["messages"];
+  /** 桥的协议版本（与 bootstrap 一致），`assertProtocolVersion` 用它判断能不能用。 */
+  protocolVersion?: number;
+  /** 这一页之前还有更早的。 */
+  hasMoreBefore: boolean;
+  /** 这一页第一轮的绝对编号（1 基）。 */
+  oldestTurn: number;
+  totalTurns: number;
+}
+
+export async function fetchSessionMessages(options: { beforeTurn: number; limit?: number }): Promise<SessionMessagesPage> {
+  await ensureProtocolProbe();
+  const query = new URLSearchParams({ beforeTurn: String(options.beforeTurn) });
+  if (options.limit != null) {
+    query.set("limit", String(options.limit));
+  }
+  const page = await fetchJson<SessionMessagesPage & { protocolVersion?: number }>(
+    `/api/sessions/messages?${query.toString()}`,
+  );
+  assertProtocolVersion(page, "/api/sessions/messages");
+  return page;
 }
 
 /**

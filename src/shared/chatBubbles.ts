@@ -33,94 +33,48 @@ import type {
 import {
   toolResultAsProcessBlock,
   toolResultDisplay,
-  toolResultProcessText,
+  toolResultProcessTextWithCut,
 } from "./chatToolBlocks.ts";
 import { messageToText } from "./messageText.ts";
 import { turnDurationOf } from "./chatTurnTiming.ts";
 import { carryObservedAnswerTiming } from "./thinkingTiming.ts";
-import { callToolDisplay } from "./toolDisplay.ts";
+import {
+  assistantMessageConversationView,
+  type AssistantTextArchiveMode,
+} from "./assistantMessageView.ts";
 
 export { messageToText };
+
+// 附件元数据解析住在 `attachmentContext.ts`；这里转出以保持既有 import。
+export { ATTACHMENT_CONTEXT_END, ATTACHMENT_CONTEXT_START, messageDisplayText, parseAttachmentContext } from "./attachmentContext.ts";
+export type { ParsedAttachmentContext } from "./attachmentContext.ts";
+
+import { parseAttachmentContext } from "./attachmentContext.ts";
+
+// 气泡身份与排序住在 `chatBubbleIds.ts`（协议性格式，与渲染无关）；这里转出以保持既有 import。
+export {
+  bubbleTurnOf,
+  chatBubbleId,
+  compareBubbleIds,
+  parseChatBubbleId,
+  parseProvisionalBubbleId,
+  provisionalBubbleId,
+} from "./chatBubbleIds.ts";
+export type { ChatBubbleRef, ChatBubbleRole, ParsedProvisionalBubbleId } from "./chatBubbleIds.ts";
+
+import {
+  bubbleTurnOf,
+  chatBubbleId,
+  compareBubbleIds,
+  parseChatBubbleId,
+  parseProvisionalBubbleId,
+  provisionalBubbleId,
+} from "./chatBubbleIds.ts";
+import type { ChatBubbleRef } from "./chatBubbleIds.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Bubble identity                                                             */
 /* -------------------------------------------------------------------------- */
-
-export type ChatBubbleRole = "user" | "assistant";
-
-export interface ChatBubbleRef {
-  /** Stable identity, shared by server and client. */
-  bubbleId: string;
-  /** 1-based ordinal of the user message that opened this bubble. */
-  turn: number;
-  role: ChatBubbleRole;
-}
-
-/**
- * Ids are namespaced with `t<turn>#` so they can never collide with the legacy
- * `${timestamp}-${index}` ids (or with locally generated `msg_…` ids) that may
- * still be on screen from an older server build.
- */
-export function chatBubbleId(turn: number, role: ChatBubbleRole): string {
-  return `t${turn}#${role}`;
-}
-
-export function parseChatBubbleId(id: string | undefined): ChatBubbleRef | null {
-  const match = /^t(\d+)#(user|assistant)$/u.exec(id ?? "");
-  if (!match) {
-    return null;
-  }
-  return { bubbleId: id as string, turn: Number(match[1]), role: match[2] as ChatBubbleRole };
-}
-
-/** Turn ordinal of the bubble a message belongs to, or `null` for foreign ids. */
-export function bubbleTurnOf(id: string | undefined): number | null {
-  return parseChatBubbleId(id)?.turn ?? null;
-}
-
-/**
- * Ordering key: bubbles sort by turn, and inside a turn the user message comes
- * before the assistant answer. This is what makes placement authoritative
- * instead of "whatever order the events happened to arrive in".
- *
- * Provisional bubbles take part with the turn they predicted, so confirming a
- * message cannot drop it *above* the placeholder answer that is still waiting
- * for its own turn (that is what used to draw the loading dot before the
- * question instead of after it). Within one slot a confirmed bubble sorts
- * before a guess at the same slot; ids we cannot parse at all stay last.
- */
-export function compareBubbleIds(a: string | undefined, b: string | undefined): number {
-  const left = bubbleOrder(a);
-  const right = bubbleOrder(b);
-  if (left.turn !== right.turn) {
-    return left.turn < right.turn ? -1 : 1;
-  }
-  if (left.roleRank !== right.roleRank) {
-    return left.roleRank - right.roleRank;
-  }
-  return left.confirmed - right.confirmed;
-}
-
-const UNPLACED_TURN = Number.POSITIVE_INFINITY;
-
-interface BubbleOrder {
-  turn: number;
-  roleRank: number;
-  /** 0 = the server placed it, 1 = still an optimistic guess. */
-  confirmed: number;
-}
-
-function bubbleOrder(id: string | undefined): BubbleOrder {
-  const settled = parseChatBubbleId(id);
-  if (settled) {
-    return { turn: settled.turn, roleRank: settled.role === "user" ? 0 : 1, confirmed: 0 };
-  }
-  const guess = parseProvisionalBubbleId(id ?? "");
-  if (guess && guess.predictedTurn != null) {
-    return { turn: guess.predictedTurn, roleRank: guess.role === "user" ? 0 : 1, confirmed: 1 };
-  }
-  return { turn: UNPLACED_TURN, roleRank: 0, confirmed: 1 };
-}
 
 export interface BubbleStats {
   turnCount: number;
@@ -219,15 +173,6 @@ export function createBubbleTracker(initialTurns = 0): BubbleTracker {
 /* Transcript -> bubbles                                                       */
 /* -------------------------------------------------------------------------- */
 
-export const ATTACHMENT_CONTEXT_START = "<pi_desktop_attachments>";
-export const ATTACHMENT_CONTEXT_END = "</pi_desktop_attachments>";
-
-export interface ParsedAttachmentContext {
-  text: string;
-  attachments: ChatAttachment[];
-  messageParts: ChatMessagePart[];
-}
-
 export interface TranscriptMessage {
   role: MessageRole | string;
   content?: unknown;
@@ -250,6 +195,15 @@ export interface BuildChatBubblesOptions {
   now?: number;
   /** Server supplies the fetchable attachment view; defaults to passing metadata through. */
   toAttachment?: (attachment: ChatAttachment) => ChatAttachment;
+  /**
+   * Turn number of the message *before* `messages[0]`, so a **window** of the
+   * transcript keeps the same bubble ids as the whole thing.
+   *
+   * 这是窗口化历史的前提：气泡身份是 `t{turn}#role`，如果从中间截一段就从 1 重新编号，
+   * 客户端会认为"整段历史被换掉了"（全部 remount、滚动位置丢失），而且正在流的那条事件
+   * 会落到错的气泡上。所以窗口只截内容，编号仍按整份转录数。
+   */
+  turnOffset?: number;
 }
 
 /**
@@ -267,7 +221,7 @@ export function buildChatBubbles(
   let pendingTurn: TranscriptMessage[] = [];
   /** The question's timestamp: `pendingTurn` starts only *after* it. */
   let turnStartedAt = 0;
-  let turn = 0;
+  let turn = options.turnOffset ?? 0;
 
   const flushTurn = () => {
     if (!pendingTurn.length) {
@@ -308,7 +262,9 @@ export function buildChatBubbles(
             const toolResult = pendingTurn[lookahead];
             const existing = toolResult.toolCallId ? toolBlocks.get(toolResult.toolCallId) : undefined;
             if (existing) {
-              existing.resultText = toolResultProcessText(toolResult);
+              const result = toolResultProcessTextWithCut(toolResult);
+              existing.resultText = result.text;
+              existing.resultTruncated = result.cut ?? undefined;
               existing.display = toolResultDisplay(existing, toolResult);
               existing.status = "done";
               existing.isError = Boolean(toolResult.isError);
@@ -327,7 +283,9 @@ export function buildChatBubbles(
         if (message.role === "toolResult") {
           const existing = message.toolCallId ? toolBlocks.get(message.toolCallId) : undefined;
           if (existing) {
-            existing.resultText = toolResultProcessText(message);
+            const result = toolResultProcessTextWithCut(message);
+            existing.resultText = result.text;
+            existing.resultTruncated = result.cut ?? undefined;
             existing.display = toolResultDisplay(existing, message);
             existing.status = "done";
             existing.isError = Boolean(message.isError);
@@ -413,29 +371,6 @@ export function buildChatBubbles(
 /* Assistant message shaping (moved out of the server, unchanged semantics)     */
 /* -------------------------------------------------------------------------- */
 
-export function messageDisplayText(message: { content?: unknown }): string {
-  return parseAttachmentContext(messageToText(message)).text;
-}
-
-export function parseAttachmentContext(text: string): ParsedAttachmentContext {
-  const start = text.lastIndexOf(ATTACHMENT_CONTEXT_START);
-  const end = text.lastIndexOf(ATTACHMENT_CONTEXT_END);
-  if (start < 0 || end < start) {
-    return { text, attachments: [], messageParts: [] };
-  }
-
-  try {
-    const metadata = JSON.parse(text.slice(start + ATTACHMENT_CONTEXT_START.length, end).trim());
-    return {
-      text: String(metadata?.displayInput ?? text.slice(0, start)),
-      attachments: Array.isArray(metadata?.attachments) ? metadata.attachments : [],
-      messageParts: Array.isArray(metadata?.messageParts) ? metadata.messageParts : [],
-    };
-  } catch {
-    return { text: text.slice(0, start), attachments: [], messageParts: [] };
-  }
-}
-
 function findLastToolEventIndex(messages: readonly TranscriptMessage[]): number {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -463,165 +398,16 @@ function assistantTextArchiveMode(
   return "final";
 }
 
-type AssistantTextArchiveMode = "final" | "process" | "split-at-last-tool";
-
 function assistantHasToolCall(message: TranscriptMessage | undefined): boolean {
   const content = message?.content;
   return Array.isArray(content) && content.some((block) => block?.type === "toolCall");
 }
-
-export function assistantMessageConversationView(
-  content: unknown,
-  textArchiveMode: AssistantTextArchiveMode = "final",
-): { text: string; processBlocks: MessageProcessBlock[] } {
-  if (!Array.isArray(content)) {
-    return {
-      text: typeof content === "string" ? content.trim() : "",
-      processBlocks: [],
-    };
-  }
-
-  const processBlocks: MessageProcessBlock[] = [];
-  const blocks = content as {
-    type?: string;
-    thinking?: string;
-    id?: string;
-    name?: string;
-    arguments?: Record<string, unknown>;
-  }[];
-  const lastToolBlockIndex =
-    textArchiveMode === "split-at-last-tool" ? lastToolCallBlockIndex(blocks) : -1;
-  let finalText = "";
-
-  for (let index = 0; index < blocks.length; index += 1) {
-    const block = blocks[index];
-    if (block?.type === "thinking" && block.thinking?.trim()) {
-      processBlocks.push({ kind: "thinking", text: block.thinking.trim() });
-      continue;
-    }
-
-    if (block?.type === "toolCall") {
-      const toolName = String(block.name ?? "tool");
-      processBlocks.push({
-        kind: "tool",
-        toolCallId: String(block.id ?? ""),
-        toolName,
-        callText: JSON.stringify(block.arguments ?? {}, null, 2),
-        display: callToolDisplay(toolName, block.arguments),
-      });
-      continue;
-    }
-
-    const text = assistantContentBlockText(block);
-    if (!text) {
-      continue;
-    }
-
-    if (shouldArchiveAssistantText(textArchiveMode, index, lastToolBlockIndex)) {
-      pushNoticeProcessBlock(processBlocks, text);
-    } else {
-      finalText += text;
-    }
-  }
-
-  return { text: finalText.trim(), processBlocks };
-}
-
-function lastToolCallBlockIndex(blocks: readonly { type?: string }[]): number {
-  for (let index = blocks.length - 1; index >= 0; index -= 1) {
-    if (blocks[index]?.type === "toolCall") {
-      return index;
-    }
-  }
-  return -1;
-}
-
-function shouldArchiveAssistantText(
-  mode: AssistantTextArchiveMode,
-  blockIndex: number,
-  lastToolBlockIndex: number,
-): boolean {
-  if (mode === "process") {
-    return true;
-  }
-  if (mode === "split-at-last-tool") {
-    return lastToolBlockIndex >= 0 && blockIndex < lastToolBlockIndex;
-  }
-  return false;
-}
-
-export function pushNoticeProcessBlock(
-  processBlocks: MessageProcessBlock[],
-  textValue: string,
-): void {
-  const text = textValue.trim();
-  if (!text) {
-    return;
-  }
-
-  const previous = processBlocks.at(-1);
-  if (previous?.kind === "notice") {
-    previous.text = `${previous.text}\n\n${text}`;
-    return;
-  }
-
-  processBlocks.push({ kind: "notice", text });
-}
-
-function assistantContentBlockText(block: { type?: string; text?: string } | undefined): string {
-  if (block?.type === "text") {
-    return block.text ?? "";
-  }
-  if (block?.type === "image") {
-    return "[image]";
-  }
-  return "";
-}
-
 
 /* -------------------------------------------------------------------------- */
 /* Placement: "where does this bubble go", derived from its id only            */
 /* -------------------------------------------------------------------------- */
 
 /** Id of a bubble that only exists locally until the server confirms it. */
-/**
- * Identity of an optimistic bubble.
- *
- * It carries the turn the client *predicted* for this submission, so a server
- * event can find its own slot instead of grabbing whatever provisional happens
- * to be oldest. Two submissions in flight (a run plus a queued 插话) otherwise
- * cross claims and leave an orphan placeholder behind.
- */
-export function provisionalBubbleId(
-  clientMessageId: string,
-  role: ChatBubbleRole,
-  predictedTurn?: number,
-): string {
-  const turn = predictedTurn == null ? "" : `t${predictedTurn}:`;
-  return `prov:${role}:${turn}${clientMessageId}`;
-}
-
-const PROVISIONAL_ID = /^prov:(user|assistant):(?:t(\d+):)?(.*)$/;
-
-export interface ParsedProvisionalBubbleId {
-  role: ChatBubbleRole;
-  /** Turn the client guessed when it drew the bubble, or `null` if unknown. */
-  predictedTurn: number | null;
-  clientMessageId: string;
-}
-
-export function parseProvisionalBubbleId(id: string): ParsedProvisionalBubbleId | null {
-  const match = PROVISIONAL_ID.exec(id);
-  if (!match) {
-    return null;
-  }
-  return {
-    role: match[1] as ChatBubbleRole,
-    predictedTurn: match[2] ? Number(match[2]) : null,
-    clientMessageId: match[3],
-  };
-}
-
 /** A provisional bubble waiting for the server to confirm turn {@link turn}. */
 export function isProvisionalForTurn(bubble: ChatMessage, turn: number): boolean {
   const parsed = bubble.provisional ? parseProvisionalBubbleId(bubble.id) : null;
@@ -1034,6 +820,11 @@ export function discardProvisionalTurn(
 
 export interface MergeChatBubblesOptions {
   /**
+   * `incoming` 是一段尾部窗口时传入。**没有它，窗口滑动就等于删历史**：
+   * 合并的默认规则是"本地有、快照没有 = 已被取代"，而窗口外的气泡服务端根本没发。
+   */
+  window?: { hasMoreBefore?: boolean; oldestTurn?: number };
+  /**
    * How to reconcile the snapshot bubble with the local bubble of the same id.
    * Defaults to {@link keepAheadOfSnapshot}, which lets a stream that ran ahead
    * of the snapshot survive a reconcile.
@@ -1070,8 +861,17 @@ export function mergeChatBubbles(
     }
   }
 
+  const windowStartTurn = options.window?.hasMoreBefore ? options.window.oldestTurn : undefined;
+
   for (const bubble of local) {
     if (incomingIds.has(bubble.id)) {
+      continue;
+    }
+    // 窗口外的历史：服务端这次压根没发，不是"被删了"。保留它（含已落定的气泡），
+    // 否则每收到一次快照，用户辛苦翻出来的旧历史就会消失，滚动位置也跟着跳。
+    const turn = bubbleTurnOf(bubble.id);
+    if (windowStartTurn != null && turn != null && turn < windowStartTurn) {
+      merged = upsertBubble(merged, bubble, combine);
       continue;
     }
     // Anything else is superseded by the transcript; only work that has not

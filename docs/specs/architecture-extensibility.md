@@ -170,6 +170,8 @@ reviewers: ["@qiaowei"]
 
 ### 群 B：流式层的可扩展性（只留 affordance，不实现重连）（**B1–B7 全部已落地，2026-10-26**）
 
+> 2026-10-28 补：**渲染侧的重连已经接上**（`src/features/chat/promptFeed.ts`）。本群原本只做服务端 affordance；见 ADR-004 修订记录。
+
 落地清单（按提交）：B3 帧信封与错误分类 `b00470d`（新 `src/shared/protocol/bridgeStreamFrames.ts`，两条传输共用构造器）；B1+B4 序号与背压 `af2954f`（新 `server/frameWriter.mjs`）；B2 前半 `df4601e`（`runId` 落帧）；B2 后半 `947b913`（新 `server/runStreams.mjs` + `POST /api/runs/stream`）；B6+B5 `7d549bf`（`deliveryProfile` + `DELIVERY_POLICY` 驱动断开分支）。B7 是硬约束，由既有寻址测试（`chatBubbleId` / `mergeChatBubbles` / 丢弃计数）继续咬着，本轮没有新增代码。
 
 **B1 — 帧序号〔结构〕**

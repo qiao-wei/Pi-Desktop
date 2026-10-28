@@ -34,7 +34,7 @@ import { createSkillPackages } from "./skillPackages.mjs";
  * 实测 15 个域之间会凭空多出 130+ 条反向边和一个真环（`promptStream` ⇄ `sessionSnapshots`），
  * 而闭包读取对建厂顺序没有任何要求。
  *
- * 当前规模：15 个域 / 63 个建厂期读取 / 250 个闭包读取（去重后 206 个名字）。
+ * 当前规模：15 个域 / 63 个建厂期读取 / 251 个闭包读取（去重后 207 个名字）。
  * 今天这些建厂期读取没有一个指向别的域的导出（都是外部注入的常量，实测见 ADR-005），所以下面的顺序
  * 不被任何约束绑住 —— 但容器仍按这个顺序建，并校验每个域建厂期读到的名字都已就绪：将来真出现域间
  * 建厂期依赖，启动会点名告诉你要把哪一行往上搬。
@@ -413,6 +413,7 @@ export const DOMAINS = [
       "searchSessionDocuments",
       "sendAttachment",
       "sendLocalMedia",
+      "sessionMessagePage",
       "setCapabilityPinned",
       "setDefaultCapability",
       "setModelConfiguration",

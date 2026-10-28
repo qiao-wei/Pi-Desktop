@@ -598,3 +598,105 @@ test("问题没有时间戳时不许编一个（退回无时长）", () => {
   );
   assert.equal(bubbles[1].turnDurationMs, undefined);
 });
+
+/**
+ * 快照路径的预算：一份 4 MB 的 `write` 不能让每个快照都重发 4 MB。
+ *
+ * 这条路径同时是「磁盘转录 → 气泡」和「服务端 bootstrap」的入口，所以断言在气泡上：
+ * `callText` 变小了、`__omitted` 记下了原文行数，而 `display` 的 `+N` 仍然是真值
+ * （它是在裁剪**之前**从完整参数推出来的）。
+ */
+test("超过预算的 write 只在快照里带预览，+N 仍然来自原文", () => {
+  const content = Array.from({ length: 200_000 }, (_, index) => `line ${index}`).join("\n");
+  const messages: TranscriptMessage[] = [
+    { role: "user", content: "写一个大文件", timestamp: 1 },
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "call-big", name: "write", arguments: { path: "big.log", content } }],
+      timestamp: 2,
+    },
+    {
+      role: "toolResult",
+      toolCallId: "call-big",
+      toolName: "write",
+      content: text("Successfully wrote big.log."),
+      timestamp: 3,
+    },
+    { role: "assistant", content: text("写好了"), timestamp: 4 },
+  ];
+
+  const bubbles = buildChatBubbles(messages, { isStreaming: false });
+  const blocks = bubbles.flatMap((bubble) => bubble.processBlocks ?? []);
+  const tool = blocks.find((block) => block.kind === "tool" && block.toolCallId === "call-big");
+  assert.ok(tool && tool.kind === "tool");
+
+  // 1) 线上一帧/一个快照里不再有整份正文。
+  assert.ok(tool.callText.length < 120_000, `callText 仍然太大：${tool.callText.length}`);
+  assert.ok(tool.callText.includes("__omitted"), "裁剪信息必须随参数一起上线");
+  const parsed = JSON.parse(tool.callText) as {
+    path: string;
+    content: string;
+    __omitted: { path: string; bytes: number; lines: number }[];
+  };
+  assert.equal(parsed.path, "big.log", "路径这类短字段不受影响");
+  assert.equal(parsed.__omitted[0]?.lines, 200_000);
+  assert.equal(parsed.__omitted[0]?.bytes, Buffer.byteLength(content));
+
+  // 2) 计数来自完整参数，不是预览。
+  assert.equal(tool.display?.kind, "fileDiff");
+  const files = tool.display?.kind === "fileDiff" ? tool.display.files : [];
+  assert.equal(files[0]?.added, 200_000);
+});
+
+test("buildChatBubbles 的 turnOffset 让窗口里的气泡保持绝对编号", () => {
+  const transcript = Array.from({ length: 4 }, (_, index) => [
+    { role: "user", content: `q${index + 1}`, timestamp: index * 10 },
+    { role: "assistant", content: [{ type: "text", text: `a${index + 1}` }], timestamp: index * 10 + 1 },
+  ]).flat();
+
+  const full = buildChatBubbles(transcript, { isStreaming: false });
+  // 只发第 3、4 轮（尾部窗口），编号必须还是 t3/t4，而不是从 1 重新数。
+  const windowed = buildChatBubbles(transcript.slice(4), { isStreaming: false, turnOffset: 2 });
+
+  assert.deepEqual(
+    windowed.map((bubble) => bubble.id),
+    ["t3#user", "t3#assistant", "t4#user", "t4#assistant"],
+  );
+  assert.deepEqual(
+    windowed.map((bubble) => bubble.content),
+    full.slice(4).map((bubble) => bubble.content),
+  );
+
+  // 流式占位也落在绝对编号上，否则实时事件会和快照的气泡对不上。
+  const streaming = buildChatBubbles(transcript.slice(6), { isStreaming: true, turnOffset: 3, now: 99 });
+  assert.deepEqual(streaming.map((bubble) => bubble.id), ["t4#user", "t4#assistant"]);
+  assert.equal(streaming[1]?.status, "streaming");
+});
+
+test("mergeChatBubbles：快照是尾部窗口时，窗口之前的历史不能被当成删除", () => {
+  const transcript = Array.from({ length: 5 }, (_, index) => [
+    { role: "user", content: `q${index + 1}`, timestamp: index * 10 },
+    { role: "assistant", content: [{ type: "text", text: `a${index + 1}` }], timestamp: index * 10 + 1 },
+  ]).flat();
+
+  // 客户端手里有全量（用户已经往前翻过），服务端这次只发最后两轮。
+  const local = buildChatBubbles(transcript, { isStreaming: false });
+  const windowed = buildChatBubbles(transcript.slice(6), { isStreaming: false, turnOffset: 3 });
+
+  const merged = mergeChatBubbles(local, windowed, {
+    window: { hasMoreBefore: true, oldestTurn: 4 },
+  });
+  assert.deepEqual(merged.map((bubble) => bubble.id), local.map((bubble) => bubble.id), "窗口外的历史必须保留");
+
+  // 不带 window 信息时是旧语义：快照没有的就是被取代了（这里用来证明上面那条不是白测）。
+  const withoutWindow = mergeChatBubbles(local, windowed);
+  assert.deepEqual(withoutWindow.map((bubble) => bubble.id), windowed.map((bubble) => bubble.id));
+
+  // 窗口**内部**被删掉的气泡仍然要跟着快照走：只有更早的才豁免。
+  const shrunk = mergeChatBubbles(
+    buildChatBubbles(transcript, { isStreaming: false }).filter((bubble) => bubble.id !== "t4#assistant"),
+    windowed,
+    { window: { hasMoreBefore: true, oldestTurn: 4 } },
+  );
+  assert.ok(shrunk.some((bubble) => bubble.id === "t4#assistant"), "窗口内的气泡以服务端为准");
+});

@@ -4,10 +4,7 @@ import {
   type ExternalStoreAdapter,
   type ThreadMessageLike,
   useExternalStoreRuntime,
-  useThreadViewport,
-  useThreadViewportStore,
 } from "@assistant-ui/react";
-import { ArrowDownIcon } from "lucide-react";
 import {
   UserMessageActionsProvider,
   UserMessageInlineAttachmentProvider,
@@ -36,6 +33,11 @@ import {
   type EditController,
 } from "./ChatThreadSlots";
 import { chatJumpBus } from "../../shared/chatJumpBus";
+import { LoadOlderMessages, useOlderMessagesWindow } from "./chatHistoryWindow";
+import type { ChatThreadProps, ViewportState } from "./chatThreadProps";
+
+export type { ViewportState } from "./chatThreadProps";
+import { CustomScrollToBottom } from "./ChatScrollToBottom";
 import { chatScrollToBottomBus } from "../../shared/chatScrollBus";
 import { useThreadSearch, type ThreadViewportController } from "./useThreadSearch";
 import { liveTextTailIndex } from "../../shared/liveTextTail";
@@ -48,44 +50,7 @@ import {
   pickAnchorBlock,
   resolveFollowing,
 } from "../../shared/chatScrollPolicy";
-import { type MessageEditPayload } from "./MessageEditBox";
-import type { CapabilitiesState, ChatAttachment, ChatMessage } from "../../types";
-
-type ChatThreadProps = {
-  messages: ChatMessage[];
-  isStreaming: boolean;
-  sessionPath: string;
-  viewportStates: Map<string, ViewportState>;
-  onAttachmentHoverStart?: (attachment: ChatAttachment, element: HTMLElement) => void;
-  onAttachmentHoverEnd?: () => void;
-  editingMessageId?: string | null;
-  capabilities?: Pick<CapabilitiesState, "skills" | "packages">;
-  /** Set when a send failed, so the reopened editor keeps what was typed. */
-  editDraftText?: string | null;
-  onStartEditMessage?: (messageId: string) => void;
-  onReloadMessage?: (parentMessageId: string) => void | Promise<void>;
-  onCancelEditMessage?: () => void;
-  onSubmitEditMessage?: (messageId: string, payload: MessageEditPayload) => Promise<boolean>;
-  /** 任务内搜索的查询词；空串 = 未开启。高亮 / 计数 / 滚动都在线程内部完成。 */
-  searchQuery?: string;
-  searchActiveIndex?: number;
-  /** 命中数量回传，供浮动小条显示「第 N / 共 M」。 */
-  onSearchCountChange?: (count: number) => void;
-  /**
-   * 「N 个文件已更改」面板里的文件动作。三个都是可选的：没有宿主（比如只读回放）时
-   * 面板干脆不出现，而不是给几个点了没反应的按钮。
-   */
-  onChangedFileDiff?: (path: string) => void;
-  onChangedFileContent?: (path: string) => void;
-  onChangedFileInIde?: (path: string) => void;
-  /** 当前项目根（把工具参数里的绝对路径折成相对路径）。 */
-  workspaceRoot?: string;
-};
-
-export type ViewportState = {
-  scrollTop: number;
-  shouldFollow: boolean;
-};
+import type { ChatMessage } from "../../types";
 
 /**
  * Adapts Pi Desktop's server-owned conversation state to assistant-ui. The backend
@@ -139,6 +104,9 @@ export const ChatThread = memo(function ChatThread({
   onChangedFileContent,
   onChangedFileInIde,
   workspaceRoot = "",
+  hasMoreBefore = false,
+  loadingOlderMessages = false,
+  onLoadOlderMessages,
 }: ChatThreadProps) {
   // Idle-window probe: `render.messages` only counts store updates whose
   // `messages` identity changed, so a window with commits but no
@@ -210,7 +178,23 @@ export const ChatThread = memo(function ChatThread({
     (count: number) => onSearchCountChange?.(count),
     [onSearchCountChange],
   );
-  useThreadViewportSync(viewportRef, sessionPath, viewportStates, messages, isStreaming, viewportControllerRef);
+  const { loadOlderRef, canLoadOlderRef } = useOlderMessagesWindow(
+    viewportRef,
+    messages,
+    hasMoreBefore,
+    loadingOlderMessages,
+    onLoadOlderMessages,
+  );
+  useThreadViewportSync(
+    viewportRef,
+    sessionPath,
+    viewportStates,
+    messages,
+    isStreaming,
+    viewportControllerRef,
+    canLoadOlderRef,
+    loadOlderRef,
+  );
   useThreadSearch({
     viewportRef,
     sessionPath,
@@ -263,6 +247,9 @@ export const ChatThread = memo(function ChatThread({
                 scrollToBottomOnRunStart={false}
                 className="aui-thread-viewport"
               >
+                {hasMoreBefore ? (
+                  <LoadOlderMessages loading={loadingOlderMessages} onLoad={onLoadOlderMessages} />
+                ) : null}
                 <ThreadPrimitive.Messages components={MESSAGE_COMPONENTS} />
               </ThreadPrimitive.Viewport>
               <CustomScrollToBottom />
@@ -339,6 +326,9 @@ function useThreadViewportSync(
   messages: ChatMessage[],
   isStreaming: boolean,
   controllerRef: RefObject<ThreadViewportController | null>,
+  /** 还有更早的历史可翻；滚动到顶时触发一次。ref 形态是为了不重装监听。 */
+  canLoadOlderRef: RefObject<boolean>,
+  loadOlderRef: RefObject<(() => void) | undefined>,
 ) {
   // Snapshot of the viewport taken while the run was still streaming. It is
   // refreshed by the throttled persistence pass, so it costs nothing per token.
@@ -909,6 +899,10 @@ function useThreadViewportSync(
       if (synthetic) {
         return;
       }
+      // 到顶就续一页：窗口之外的对话只能这样拿到（服务端不再发全量）。
+      if (canLoadOlderRef.current && viewport.scrollTop <= 64) {
+        loadOlderRef.current?.();
+      }
       schedulePersist();
     };
 
@@ -1251,20 +1245,3 @@ function toAssistantUiMessage(message: ChatMessage): ThreadMessageLike {
   };
 }
 
-
-function CustomScrollToBottom() {
-  const isAtBottom = useThreadViewport((state) => state.isAtBottom);
-  const store = useThreadViewportStore();
-  
-  return (
-    <button
-      className="aui-scroll-to-bottom"
-      data-visible={!isAtBottom}
-      onClick={() => store.getState().scrollToBottom()}
-      aria-label="Scroll to latest message"
-    >
-      {/* 线宽走 `--app-icon-stroke`（styles.css 的 svg.lucide 规则），不在图标上覆写。 */}
-      <ArrowDownIcon size={18} />
-    </button>
-  );
-}

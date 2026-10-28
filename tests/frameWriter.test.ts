@@ -140,6 +140,63 @@ test("等 drain 期间进来的帧也算在待发字节里，越限就止损", a
   );
 });
 
+test("溢出那一帧不带 streamSeq：它是关于传输的一句话，不是 run 的一帧", async () => {
+  const res = fakeResponse();
+  const frames = createFrameWriter(res, { maxPendingBytes: 80, runId: "run-1" });
+
+  frames.write({ type: "delta", text: "kept" });
+  await settle();
+  res.pause();
+  for (let index = 0; index < 20; index += 1) {
+    frames.write({ type: "delta", text: "x".repeat(20) });
+  }
+  await settle();
+  res.drain();
+  await settle();
+
+  const written = parse(res.written);
+  const overflow = written.at(-1);
+  assert.equal(overflow.code, "overflow");
+  assert.equal(overflow.runId, "run-1");
+  assert.equal(
+    "streamSeq" in overflow,
+    false,
+    "带序号会把客户端的游标推到被丢掉的那条帧上，续订正好跳过它",
+  );
+  // 已经写出去的 run 帧仍然是一条连续的序号，越限不改写历史。
+  const sequenced = written.filter((frame) => "streamSeq" in frame).map((frame) => frame.streamSeq);
+  assert.deepEqual(sequenced, sequenced.map((_, index) => index + 1));
+});
+
+test("越限时把积压字节、丢帧数和最后收下的帧类型交给调用方", async () => {
+  const reports = [];
+  const res = fakeResponse();
+  const frames = createFrameWriter(res, {
+    maxPendingBytes: 80,
+    runId: "run-1",
+    onOverflow: (stats) => reports.push(stats),
+  });
+
+  frames.write({ type: "tool_execution_end", result: "x" });
+  await settle();
+  res.pause();
+  for (let index = 0; index < 20; index += 1) {
+    frames.write({ type: "delta", text: "y".repeat(20) });
+  }
+  await settle();
+  res.drain();
+  await settle();
+
+  assert.equal(reports.length, 1, "止损只该报告一次");
+  const [stats] = reports;
+  // 写端收下的最后一条是 delta：工具帧早就写在它前面了，正是这种「一大段输出之后还在吐」的
+  // 形态把队列堆过了上限。
+  assert.equal(stats.lastFrameType, "delta");
+  assert.equal(stats.maxPendingBytes, 80);
+  assert.ok(stats.pendingBytes >= 80, `报告的是越限时的待发字节（实际 ${stats.pendingBytes}）`);
+  assert.ok(stats.droppedFrames > 0, "丢掉的帧数要能对得上");
+});
+
 test("上限只产出一帧 overflow，之后不再收帧，而且它必须是最后一帧", async () => {
   const res = fakeResponse();
   const frames = createFrameWriter(res, { maxPendingBytes: 80 });

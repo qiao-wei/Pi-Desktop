@@ -126,6 +126,11 @@ export type MessageProcessBlock =
       callText: string;
       resultText?: string;
       /**
+       * `resultText` 是被预算裁过的（原文更大）。界面据此提示「已省略」——
+       * 静默截断会让读者把半份日志当成完整输出。见 `toolPayloadBudget.ts`。
+       */
+      resultTruncated?: { bytes: number; lines: number };
+      /**
        * Structured body model derived from pi's result envelope (patch, exit
        * code, …). Optional because a block can exist before any result does,
        * and because a hand-built block (tests, or a legacy snapshot) does not
@@ -152,6 +157,18 @@ export interface ChatSession {
   projectId?: string;
   workingDirectory?: string;
   sessionFile?: string;
+  /**
+   * 这份 `messages` 是会话的**尾部窗口**，不是全部。
+   *
+   * `oldestTurn` 是窗口第一轮在整份转录里的绝对编号（1 基）。合并时必须靠它区分
+   * "服务端没发" 与 "用户删了/Turn 没了"：编号比它小的本地气泡要原样保留，否则每次
+   * 快照都会把已经翻出来的旧历史删掉。`hasMoreBefore` 说服务端还有更早的，
+   * 客户端据此提供"加载更早"。
+   */
+  oldestTurn?: number;
+  hasMoreBefore?: boolean;
+  /** 整份会话的轮数（绝对），用于进度与"还差多少"。 */
+  totalTurns?: number;
 }
 
 export interface ConversationStats {

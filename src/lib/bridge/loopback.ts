@@ -27,6 +27,7 @@
  */
 
 import type { BridgeRequestInit, BridgeStreamOptions, BridgeTransport } from "./transport.ts";
+import { BridgeStreamError } from "./transport.ts";
 import type { TransportErrorCode } from "../../shared/protocol/bridgeStreamFrames.ts";
 import { transportErrorFrame } from "../../shared/protocol/bridgeStreamFrames.ts";
 
@@ -135,7 +136,7 @@ export function createLoopbackBridgeTransport(options: LoopbackTransportOptions)
       void streamOptions.signal; // aborting a channel is the dispatch half's business
       const response = await send(path, { method: "POST", body });
       if (response.status < 200 || response.status >= 300) {
-        throw new Error(messageFromBody(await readText(response)));
+        throw new BridgeStreamError(messageFromBody(await readText(response)), response.status);
       }
 
       // Same framing rules as the HTTP transport: newline-delimited, a malformed line becomes a

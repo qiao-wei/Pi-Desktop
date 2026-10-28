@@ -63,7 +63,11 @@ const state = /** @type {BridgeState} */ (/** @type {unknown} */ ({
   runtime: null,
   skillReloadQueue: Promise.resolve(),
   builtInProviderIdCache: null,
-  runStreams: createRunStreams(),
+  runStreams: createRunStreams({
+    onOverflow: (stats) => diagnosticLog("run.overflow", stats),
+    // 帧被裁过：`type` + 裁掉的 path 能让"界面少了一段"与"哪一帧、哪个字段"对上号。
+    onFrameBudget: (stats) => diagnosticLog("run.frame_budget", stats),
+  }),
 }));
 
 const searchDocumentCache = new Map();

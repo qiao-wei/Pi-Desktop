@@ -20,6 +20,10 @@ const toolRow = readFileSync(
   new URL("../src/components/assistant-ui/elements/tool-row.tsx", import.meta.url),
   "utf8",
 );
+const toolRowPresentation = readFileSync(
+  new URL("../src/components/assistant-ui/elements/tool-row-presentation.tsx", import.meta.url),
+  "utf8",
+);
 const toolRowReadouts = readFileSync(
   new URL("../src/components/assistant-ui/elements/tool-row-readouts.tsx", import.meta.url),
   "utf8",
@@ -64,10 +68,64 @@ test("行是 ZCode 的 geometry：图标在首、动作词可扫光、内容组�
   );
   assert.match(
     toolRow,
-    /running \? "shimmer motion-reduce:animate-none" : "text-foreground-subtlest"/,
-    "运行中的动作词扫光，结束后落到最淡文字（ZCode 的 animated-gradient-text）",
+    /running \? "shimmer shimmer-spread-30 shimmer-angle-0 motion-reduce:animate-none" : "text-foreground-subtlest"/,
+    "运行中的动作词扫光（窄带、不倾斜），结束后落到最淡文字",
   );
   assert.match(toolRow, /min-w-0 flex max-w-full items-center gap-2 text-foreground-subtlest/);
+});
+
+/**
+ * 运行态：动作词必须变成「正在…」并挂上扫光。
+ *
+ * 这是用户报的那条 bug 的**根因**：插槽是 `<ToolFallbackComponent {...part} />`，part 里
+ * 带的是 assistant-ui 的 `status`，而本组件只声明了一个可选的 `running`（默认 false）——
+ * 于是所有行永远停在落定态，「正在写入 / 正在编辑 / 正在执行」三条键一条都到不了屏幕。
+ * 断言的落点是**接线 + 兜底文案**两件事，缺一样用户还是看不到。
+ */
+test("运行态来自 part 的 status，动作词与扫光一起出现", () => {
+  assert.match(
+    toolRow,
+    /const isRunning = running \?\? status\?\.type === "running"/,
+    "running 必须从 assistant-ui 的 status 推出来（缺这一步等于没有运行态）",
+  );
+  assert.match(
+    toolRow,
+    /status\?: \{ type: string \};/,
+    "props 里要显式声明 status，否则 {...part} 传进来也没人读",
+  );
+  assert.match(
+    toolRow,
+    /running=\{isRunning\}/,
+    "布局层拿到的必须是推导后的值，不是那个恒为 false 的入参",
+  );
+  // 扫光仍然只在运行时挂（落定态回到最淡一档）。
+  assert.match(
+    toolRow,
+    /running \? "shimmer shimmer-spread-30 shimmer-angle-0 motion-reduce:animate-none" : "text-foreground-subtlest"/,
+    "短动作词要用窄扫光带：插件默认带宽（4ch+80px、200px 轨道、15°）比四个汉字还宽，"
+      + "整行会长期落在软色带里，看起来就是一行淡灰字",
+  );
+  // 参数还在流、display 还没派生出来的那一小段时间，动作词也必须说人话：
+  // 旧实现走 `fallbackPresentation` 的英文工具名（Write / Todo write），中文界面里露英文。
+  const fallback = toolRowPresentation.slice(
+    toolRowPresentation.indexOf("function fallbackPresentation("),
+    toolRowPresentation.indexOf("function stringArg("),
+  );
+  for (const key of [
+    "process.tool.read.running",
+    "process.tool.write.running",
+    "process.tool.edit.running",
+    "process.tool.execute.running",
+    "process.tool.search.running",
+  ]) {
+    assert.ok(fallback.includes(key), `兜底文案必须按 family 取本地化键：缺 ${key}`);
+  }
+  assert.doesNotMatch(
+    fallback,
+    /kindLabel: label,/,
+    "已知 family 不许把英文工具名当动作词（label 只留给未知工具）",
+  );
+  assert.match(fallback, /kindLabel: familyLabel \? t\(familyLabel\) : label/);
 });
 
 test("状态词只在有信息时出现：失败才带虚线下划线与可复制 tooltip", () => {
@@ -87,23 +145,26 @@ test("状态词只在有信息时出现：失败才带虚线下划线与可复�
 });
 
 test("MCP 行显示 server 作为 kindDetail，工具名去重复前缀；skill 之类没有专门行", () => {
-  assert.match(toolRow, /parseMcpToolName\(toolName\)/);
-  assert.match(toolRow, /t\("process\.tool\.mcp"\)/, "MCP 的动作词走 i18n 词表");
-  assert.match(toolRow, /stripRepeatedPrefix\(/, "server 名与 tool 名重复时只显示一次");
-  assert.match(toolRow, /kindDetail:/, "server 名走 kindDetail 槽位，不占主文本");
+  assert.match(toolRowPresentation, /parseMcpToolName\(toolName\)/);
+  assert.match(toolRowPresentation, /t\("process\.tool\.mcp"\)/, "MCP 的动作词走 i18n 词表");
+  assert.match(toolRowPresentation, /stripRepeatedPrefix\(/, "server 名与 tool 名重复时只显示一次");
+  assert.match(toolRowPresentation, /kindDetail:/, "server 名走 kindDetail 槽位，不占主文本");
   // pi 没有 skill 工具（skills 是提示资源，不是工具），所以不做 skill 行。
-  assert.doesNotMatch(toolRow, /WandSparkles|process\.tool\.skill/);
+  assert.doesNotMatch(toolRowPresentation, /WandSparkles|process\.tool\.skill/);
 });
 
 test("read / grep / ls / find 只有摘要行，没有正文", () => {
-  const readCase = toolRow.slice(toolRow.indexOf('case "read": {'), toolRow.indexOf('case "write":'));
+  const readCase = toolRowPresentation.slice(
+    toolRowPresentation.indexOf('case "read": {'),
+    toolRowPresentation.indexOf('case "write":'),
+  );
   assert.ok(readCase.length > 0, "read 分支不见了");
   assert.match(readCase, /canToggle: false/, "read 是纯摘要（ZCode canToggle={false}）");
   assert.doesNotMatch(readCase, /body:/, "read 不展开正文");
   // 搜索族整个分支都不该带 body。
-  const searchCase = toolRow.slice(
-    toolRow.indexOf('case "search": {'),
-    toolRow.indexOf('case "mcp": {'),
+  const searchCase = toolRowPresentation.slice(
+    toolRowPresentation.indexOf('case "search": {'),
+    toolRowPresentation.indexOf('case "mcp": {'),
   );
   assert.ok(searchCase.length > 0, "search 分支不见了");
   assert.doesNotMatch(searchCase, /body:/, "搜索行是纯摘要（ZCode canToggle={false}）");
@@ -116,10 +177,10 @@ test("正文按模型分派：diff / 终端 / MCP / 参数+结果，且都不解
   assert.match(toolBodies, /export function TerminalBody/);
   assert.match(toolBodies, /export function McpBody/);
   assert.match(toolBodies, /export function PartsBody/);
-  assert.match(toolRow, /<DiffBody/);
-  assert.match(toolRow, /<TerminalBody/);
-  assert.match(toolRow, /<McpBody/);
-  assert.match(toolRow, /<PartsBody/);
+  assert.match(toolRowPresentation, /<DiffBody/);
+  assert.match(toolRowPresentation, /<TerminalBody/);
+  assert.match(toolRowPresentation, /<McpBody/);
+  assert.match(toolRowPresentation, /<PartsBody/);
   // 这些组件只消费 ToolDisplay；一旦出现 JSON.parse / includes("diff ") 之类，
   // 解析就漏到渲染层了。
   assert.doesNotMatch(toolBodies, /JSON\.parse|stringifyValue/);
@@ -183,8 +244,42 @@ test("文件名是打开文件面板的链接，路径才是展开内联的开�
 });
 
 test("只有项目内的单个文件才可点（右面板拒绝项目外路径）", () => {
-  assert.match(toolRow, /function isPanelPath\(path: string\): boolean/, "路径可点性要有单独判据");
-  assert.match(toolRow, /!path\.startsWith\("\/"\)/, "绝对路径（项目外）不可点");
-  assert.match(toolRow, /filePath: isPanelPath\(relative\) \? relative : undefined/);
-  assert.match(toolRow, /filePath: !multiple && isPanelPath\(first\) \? first : undefined/, "多文件行不选一个当目标");
+  // 判据住在 presentation 模块（和「哪个 family 给什么文案」在一起）。
+  assert.match(
+    toolRowPresentation,
+    /function isPanelPath\(path: string\): boolean/,
+    "路径可点性要有单独判据",
+  );
+  assert.match(toolRowPresentation, /!path\.startsWith\("\/"\)/, "绝对路径（项目外）不可点");
+  assert.match(toolRowPresentation, /filePath: isPanelPath\(relative\) \? relative : undefined/);
+  assert.match(
+    toolRowPresentation,
+    /filePath: !multiple && isPanelPath\(first\) \? first : undefined/,
+    "多文件行不选一个当目标",
+  );
+});
+
+/**
+ * 「内容太大，没随流传输」必须**看得见**。
+ *
+ * 预算（`toolPayloadBudget`）把正文裁掉之后，行里剩下的 `+N` 仍然是真的，但正文是空的；
+ * 一个空 diff 会被读成"这个文件没有改动"。所以要钉两件事：空 patch 时渲染那句说明，
+ * 并且 `resultTruncated` 真的被传进每一个正文组件（否则说明是死代码）。
+ */
+test("正文被预算裁掉时显示说明，不是空 diff", () => {
+  assert.match(
+    toolBodies,
+    /file\.patch === "" \? file\.omitted : undefined/,
+    "只有裁过（且 patch 为空）才显示说明",
+  );
+  assert.match(toolBodies, /process\.payload\.omittedBody/);
+  // 结果正文的三种形态（终端 / MCP / 通用）都要能说出"只显示了首尾"。
+  assert.equal(
+    (toolBodies.match(/<ResultTruncatedNote truncated=\{truncated\} t=\{t\} \/>/g) ?? []).length,
+    3,
+    "每个结果正文都要带上裁剪说明",
+  );
+  const rowPasses = (toolRowPresentation.match(/truncated=\{input\.resultTruncated\}/g) ?? [])
+    .length;
+  assert.equal(rowPasses, 3, "行必须把 resultTruncated 传给三个正文组件");
 });

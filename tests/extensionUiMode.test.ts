@@ -49,7 +49,9 @@ test("默认是 tui：升级后不动老用户的面板", () => {
   // 客户端同样兜底成 tui(旧桥不下发 renderMode 时)。
   const hook = read("src/features/chat/usePiDesktopApp.ts");
   assert.match(hook, /extensionUi: bootstrap\.personalization\?\.extensionUi \?\? "tui",/);
-  assert.match(hook, /extensionUi: "tui",/, "空状态也要有默认值");
+  // 空状态(还没有任何快照)的默认值跟着 `createDefaultBootstrap` 住在 appDefaults.ts。
+  const defaults = read("src/features/chat/appDefaults.ts");
+  assert.match(defaults, /extensionUi: "tui",/, "空状态也要有默认值");
 });
 
 test("模式写入/读出 personalization.json 并随快照回到前端", () => {

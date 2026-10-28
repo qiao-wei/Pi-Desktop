@@ -95,3 +95,23 @@ test("正文的上下渐隐跟着滚动位置走（ZCode 的 scroll mask）", ()
   assert.match(thinkingRow, /style=\{scrollMaskStyle\(mask\)\}/);
   assert.match(thinkingRow, /onScroll=\{handleScroll\}/);
 });
+
+/**
+ * 运行态标签的**可见性**。
+ *
+ * `tw-shimmer` 是拿 `currentColor` 派生扫光的（亮档 = currentColor，暗档 = 20%）。
+ * 之前这里同时挂了 `text-foreground-subtlest`（40%），于是亮档只有 40%、暗档 8% ——
+ * 一行几乎不动的淡灰字，读者看到的是"没有效果"。ZCode 的 `ThinkingShimmer` 不设颜色。
+ */
+test("正在思考的扫光不被淡色压掉（亮档走全强度前景色）", () => {
+  assert.match(
+    thinkingRow,
+    /<ShimmerLabel className="shimmer-spread-30 shimmer-angle-0 font-medium">/,
+    "运行态标签只带 font-medium（外加窄扫光带）",
+  );
+  assert.doesNotMatch(
+    thinkingRow,
+    /<ShimmerLabel className="[^"]*text-foreground-subtlest/,
+    "不能给扫光再叠一档淡色：那会把扫光压到看不见",
+  );
+});

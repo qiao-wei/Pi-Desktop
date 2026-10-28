@@ -55,6 +55,31 @@ async function handle_get_api_bootstrap(ctx) {
       return;
 }
 
+/**
+ * 路由处理器：`GET /api/sessions/messages?beforeTurn=<n>&limit=<n>`
+ *
+ * 快照只带尾部窗口（`CONVERSATION_TAIL_TURNS`），这个入口把更早的历史按**页**取回来。
+ * 返回的气泡 id 与整份转录一致（绝对轮次），客户端可以直接 prepend。
+ */
+async function handle_get_api_sessions_messages(ctx) {
+      const page = deps.sessionMessagePage({
+        beforeTurn: ctx.url.searchParams.get("beforeTurn"),
+        limit: ctx.url.searchParams.get("limit"),
+      });
+      diagnosticLog("session.messages.page", {
+        requestId: ctx.requestId,
+        sessionPath: state.runtime.session.sessionFile,
+        beforeTurn: ctx.url.searchParams.get("beforeTurn"),
+        limit: ctx.url.searchParams.get("limit"),
+        messageCount: page.messages.length,
+        oldestTurn: page.oldestTurn,
+        hasMoreBefore: page.hasMoreBefore,
+      });
+      // 与 bootstrap 一样声明协议版本：客户端在碰数据之前先对版（缺了会被当成"对桥太旧"）。
+      sendJson(ctx.res, 200, { ...page, protocolVersion: PROTOCOL_VERSION });
+      return;
+}
+
 /** 路由处理器：req.method === "GET" && url.pathname === "/api/search"（原 server 回调内联分支，见 .scratch/branch-to-handlers.mjs） */
 async function handle_get_api_search(ctx) {
       const startedAt = Date.now();
@@ -580,5 +605,5 @@ async function handle_post_api_messages_edit(ctx) {
       return;
 }
 
-  return { handle_get_api_attachments, handle_get_api_bootstrap, handle_get_api_capabilities, handle_get_api_custom_models, handle_get_api_local_media, handle_get_api_model_providers, handle_get_api_model_providers_x, handle_get_api_models, handle_get_api_protocol, handle_get_api_search, handle_get_api_skills_content, handle_post, handle_post_api_builtin_command, handle_post_api_capabilities_default, handle_post_api_capabilities_extension_add, handle_post_api_capabilities_extension_remove, handle_post_api_capabilities_mcp_import, handle_post_api_capabilities_mcp_inspect, handle_post_api_capabilities_mcp_read, handle_post_api_capabilities_mcp_remove, handle_post_api_capabilities_mcp_save, handle_post_api_capabilities_package_command, handle_post_api_capabilities_package_command_arguments, handle_post_api_capabilities_package_file, handle_post_api_capabilities_package_install, handle_post_api_capabilities_package_remove, handle_post_api_capabilities_package_resources, handle_post_api_capabilities_package_update, handle_post_api_capabilities_pin, handle_post_api_capabilities_session_extension, handle_post_api_capabilities_session_package, handle_post_api_capabilities_session_skill, handle_post_api_capabilities_skills_delete, handle_post_api_capabilities_skills_import, handle_post_api_compact, handle_post_api_custom_models, handle_post_api_custom_models_key, handle_post_api_custom_models_reload, handle_post_api_custom_models_remove, handle_post_api_custom_models_test, handle_post_api_diagnostic, handle_post_api_extension_ui_response, handle_post_api_messages_edit, handle_post_api_model, handle_post_api_model_providers_discover, handle_post_api_model_providers_login_cancel, handle_post_api_model_providers_login_respond, handle_post_api_model_providers_update, handle_post_api_personalization, handle_post_api_prompt, handle_post_api_runs_stream, handle_post_api_skills_reload, handle_post_api_stop, handle_post_api_thinking_level, handle_post_api_tools_settings, handle_post_x, handle_post_x_x };
+  return { handle_get_api_attachments, handle_get_api_bootstrap, handle_get_api_sessions_messages, handle_get_api_capabilities, handle_get_api_custom_models, handle_get_api_local_media, handle_get_api_model_providers, handle_get_api_model_providers_x, handle_get_api_models, handle_get_api_protocol, handle_get_api_search, handle_get_api_skills_content, handle_post, handle_post_api_builtin_command, handle_post_api_capabilities_default, handle_post_api_capabilities_extension_add, handle_post_api_capabilities_extension_remove, handle_post_api_capabilities_mcp_import, handle_post_api_capabilities_mcp_inspect, handle_post_api_capabilities_mcp_read, handle_post_api_capabilities_mcp_remove, handle_post_api_capabilities_mcp_save, handle_post_api_capabilities_package_command, handle_post_api_capabilities_package_command_arguments, handle_post_api_capabilities_package_file, handle_post_api_capabilities_package_install, handle_post_api_capabilities_package_remove, handle_post_api_capabilities_package_resources, handle_post_api_capabilities_package_update, handle_post_api_capabilities_pin, handle_post_api_capabilities_session_extension, handle_post_api_capabilities_session_package, handle_post_api_capabilities_session_skill, handle_post_api_capabilities_skills_delete, handle_post_api_capabilities_skills_import, handle_post_api_compact, handle_post_api_custom_models, handle_post_api_custom_models_key, handle_post_api_custom_models_reload, handle_post_api_custom_models_remove, handle_post_api_custom_models_test, handle_post_api_diagnostic, handle_post_api_extension_ui_response, handle_post_api_messages_edit, handle_post_api_model, handle_post_api_model_providers_discover, handle_post_api_model_providers_login_cancel, handle_post_api_model_providers_login_respond, handle_post_api_model_providers_update, handle_post_api_personalization, handle_post_api_prompt, handle_post_api_runs_stream, handle_post_api_skills_reload, handle_post_api_stop, handle_post_api_thinking_level, handle_post_api_tools_settings, handle_post_x, handle_post_x_x };
 }

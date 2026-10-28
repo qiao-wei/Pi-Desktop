@@ -98,3 +98,27 @@ reviewers: ["@qiaowei"]
 - 需要**多客户端同时看同一轮**（多端）→ 先补 run 生命周期模块与 owner/lease，再谈传输；
 - 传输实现真的要换成非 HTTP（MessagePort / 中继 socket）→ 这是 ADR-001 决策 2 已允许的
   「换实现」，走 `setBridgeTransport()` + 一条新的 loopback 式等价测试，**不需要改本 ADR**。
+## 修订记录
+
+- **2026-10-28：决策 3 的状态从「只留 affordance」变成「affordance + 渲染侧已用上」。**
+  触发是一次止损：4 MiB 待发上限把积压清掉后发了一帧 `transport_error`，而客户端把它当业务失败
+  收尾——气泡提前 done、发一条假的「本轮完成」通知、停止按钮消失，可桥上的 run 还在跑（只有
+  owner 请求 close 才中止）。那句 `resync through bootstrap` 当时在客户端**没有任何调用点**。
+  现在：`src/features/chat/promptFeed.ts` 在 `transport_error` 或 `streamSeq` 跳号时，从
+  `(runId, 最后一条带序号的帧 + 1)` 续订 `POST /api/runs/stream`；404/409/400/403（run 已结束 /
+  日志已滚出窗口）或重试用完，才退回一次强制 bootstrap。两条配套契约：
+  ① **传输错误帧不带 `streamSeq`、也不占号**（`server/frameWriter.mjs`）——它不属于这条 run，
+  带上序号会把续订地址推过一条从未送达的帧；
+  ② **订阅者的重放帧不受待发上限约束**（`frameWriter.replay`）——否则「补上被丢掉的那一段」
+  会当场再次越限，续订永远不可能成功。
+  档位仍是 `local-live`（断开即中止 owner 那轮）；`replayable` 档位、中继、鉴权仍未实现。
+
+- **2026-10-28（同日第二条）：帧**内容**也有预算了，不再只靠待发上限兜底。** 上一个修订把"断流"接上了
+  自愈，但没解决它为什么会断：`write` 的参数就是整份文件正文，一帧几 MB，第一帧入队就把 4 MiB 待发预算
+  吃满，下一帧必然越限（`droppedFrames: 0` 的那种）。现在的三层预算（见 `CONTEXT.md` 的"载荷预算"）：
+  ① 参数字符串 32 KiB（head + tail，`__omitted` 记原文行数/字节）；② 参数流 delta 累计 64 KiB 后停发
+  （打字机不再替客户端攒 4 MB 状态）；③ 整帧 1 MiB，在 `runStreams.publish` **落日志之前**裁。
+  最后这条是协议性的：日志里存的必须是订阅者会收到的那一份，否则重放会给出 4 MB 的原帧，
+  "越限 → 续订 → 越限"成为死循环。裁掉一律带标记（`__omitted` / `__cuts` / `__dropped`），
+  界面据此显示"未随流传输"或"只显示了首尾"——空 diff 不许冒充"没有改动"。
+  全文不随流传输：`write` 的目标文件、bash 的 `fullOutputPath` 才是原文。

@@ -135,10 +135,71 @@ reviewers: ["@qiaowei"]
      （`observedTurnDuration`：气泡的 `createdAt` → 落定时刻），它是一次真实测量；
      一旦快照带上转录自己的时间戳，就换成快照的值（`carryObservedAnswerTiming` 只在快照没有值时
      才搬本地的）。
-15. **token 层按 ZCode 的名字与公式补**（`src/app/tailwind.css` 的 `@theme`）：`--text-ui-caption|base|sm|xs`、
+15. **`+/−` 跟着参数流式生长，而不是等工具跑完**。`edit`/`write` 的行尾读数是「改了
+   多少行」，而这两样信息在**参数**里就有：`edit` 的 `edits[]` 是精确替换（`oldText` 的行数 =
+   删除数、`newText` 的行数 = 新增数），`write` 的 `content` 行数就是新增数。pi 的
+   `details.patch` 要等文件落盘之后才有 —— 也就是说旧实现里数字**只在工具跑完那一刻出现**
+   （用户实测对比 ZCode：它写大文件时数字是一路涨的）。现在：
+   - `toolArgsPreview.ts` 的 `readPartialFileToolArgs` 读**半截 JSON**：被截断的字符串返回已解码
+     的前缀（那正是用户在看的增长），截断的对象/数组保留已解析的成员，悬空的 `"key":` 与尾逗号
+     丢掉；**没开始到达的字段就是没有**，不当空串。
+   - 为了让一个 `write` 不至于 O(n²) 地重算（10 万字符 ≈ 2.5 万 token），预览**按文本自我保护地
+     节流**：每跨过 128 字符才重算一次（`PREVIEW_REFRESH_CHARS`）。用文本当计时器，不引时钟，
+     所以单测确定可复现；`tool_call_stream_end` 与 `tool_execution_start` 会各补一次精确值。
+   - **权威值永远赢**：结果里带 `details.patch` 时（含 `write` 未来可能带的），用 patch；预览只在
+     没有 patch 时出现，且 `status === "done"` 的块不再被重算。
+   - **失败的行不报数字**：预览描述的是「打算做什么」，失败的 edit/write 一个字节都没改，
+     所以 `isError` 时返回 `none` —— 行尾的 `+3 −1` 配一个红色状态词是在说没发生的事。
+   - **`write` 的 `−M` 需要写入前的文件**，而 `src/shared` 是 pure 层不能做 I/O。做法是**注入**：
+     派生逻辑接受一个 `baseline?: string`，宿主把它做成一个**同步读 + 后台补**的读取器
+     （`src/features/chat/fileBaseline.ts` + `useFileBaselineReader`）：第一次问就发起 `/api/projects/file`，
+     本次返回「还不知道」，请求落地后（通常还在参数流的中段）后续每次预览就能拿到正文。
+     于是纯层仍然是纯的，`+N −M` 在工具跑之前就齐了。读不到（新文件 / 项目外 / 二进制 / 超大）就
+     只显示 `+N` —— **不编 `−0`**。换项目会清缓存（同一个相对路径是另一个文件）。
+     两个 React 层的坑（都踩了，记在这里）：读取器必须**惰性解析 source**（构造时读 app state 会撞
+     TDZ：`Cannot access 'bootstrap' before initialization`），而且 source 必须是**当前渲染**的那份
+     （把第一次渲染的闭包冻在 `useRef` 里，请求会一直带开场时的 `local-project`）。
+16. **token 层按 ZCode 的名字与公式补**（`src/app/tailwind.css` 的 `@theme`）：`--text-ui-caption|base|sm|xs`、
    `--foreground-subtle` / `--foreground-subtlest`（由**本主题**的 `--foreground` 按 60%/40% 混出，深色只把 subtlest 调到 30%）、
    `--color-diff-added/removed`、`--animate-collapsible-down/up`。深浅两档的差异只写在
    `src/themes/{default,codex}/theme.css` 的 `.dark` 里（组件里没有写死的深浅色）。
+17. **内联 diff 的语法高亮是第二遍，不是第一帧**（ZCode 同款）。第一帧永远是纯文本——高亮器要
+   动态 import、要 wasm、要 tokenize，任何一样在展开那一帧同步做都会掉帧，而"点开就看见 diff"
+   比"点开先看见彩色"重要。落法：
+   - `src/shared/diffHighlight.ts`（纯）：`diffHighlightRuns` 把行**按同一种 kind 切段**（增/删/
+     上下文各成一段，一段一次 tokenize —— 跨行语法才连得上；整篇一起喂会把新旧两版代码混成一份
+     看不懂的文档，逐行喂又会打断多行字符串与注释）；`mapHighlightTokens` 把 token 贴回行号。
+   - **贴不上就整段不画**：行数不一致、或某行 token 拼起来不等于那行正文，这一段的颜色一律丢弃。
+     颜色错行比没有颜色糟得多，而且错得看不出来。
+   - `src/features/chat/useDiffHighlight.ts`（渲染层）：复用 `@pierre/diffs` 的 **shared highlighter**
+     （和右侧代码面板同一个 `shiki-wasm` 引擎、同一份语言表，不新开 shiki 实例），语言名来自
+     `shared/codePreviewLanguage.ts` 的 `inferCodeLanguage`，主题跟着 `<html>.dark`（`useThemeMode`），
+     所以没有两份真相。`log`（纯文本）直接不跑；`catch` 里什么都不做（高亮失败 = 保持纯文本）。
+   - 折叠时不算：`DiffBody` 只在展开时挂载，未渲染的行不需要颜色。
+   - 验收：`data-diff-highlight` 只会在 token 到达后出现（e2e 轮询断言它最终出现），
+     `tests/diffHighlight.test.ts` 钉住切段与"贴不上就丢"的规则。
+
+18. **运行态是「动作词 + 扫光」，且只能由 part 自己的 `status` 决定**。ZCode 的运行中行不说话、不转
+   spinner（长流式里每行一个旋转图标会持续吃渲染资源），它只把动作词换成一个进行时的词并让文字扫光：
+   `正在思考` / `正在写入` / `正在编辑` / `正在执行`，落定后换回名词（`思考 · N 秒` / `写入` / `终端`）。
+   - **接线的坑（真 bug）**：插槽渲染是 `<ToolFallbackComponent {...part} />`，part 里带的是 assistant-ui
+     的 `status: { type: "running" | "complete" | ... }`。`ToolRow` 当时只声明了一个可选的 `running`
+     （默认 `false`），于是**永远**停在落定态 —— 三条运行态文案在词表里、在代码里，但一帧都没上屏。
+     现在 `running ?? status?.type === "running"`：显式值优先（测试与直接调用方），否则读 part。
+     教训：**「词表里有」不等于「用户看得见」**；接线要用 e2e 量计算样式，只断言类名会漏掉这种 bug。
+   - **扫光必须看得见**：`tw-shimmer` 的扫光是拿 `currentColor` 派生的（亮档 = currentColor，暗档 = 20%）。
+     所以运行态标签**不能再叠一层淡色**（曾经叠了 `text-foreground-subtlest` 40%，于是亮档 40%、暗档 8%，
+     看起来就是一行不动的淡灰字）。落定态才用淡色，那是对的。
+   - **短标签要收窄扫光带**：插件默认带宽是 `4ch + 80px`（再加 200px 轨道 × tan15°），比四个汉字还宽，
+     一个 `正在写入` 会长期整行落在软色带里 → 又变成"淡灰字"。用 `shimmer-spread-30 shimmer-angle-0`
+     把带子收到比一个词还窄：文字主体保持全强度，一条窄的淡带扫过去（两帧实测：帧 1 淡在「在」、帧 2
+     移到「入」）。
+   - **兜底行也必须本地化**：参数还在流、`display` 还没派生出来的那一小段时间，`write`/`edit` 会走
+     `fallbackPresentation`。旧实现把工具标识符首字母大写当动作词 —— 中文界面里出现 `Write`、`Todo write`。
+     现在兜底按 **family** 取同一组词表（read/write/edit/execute/search/mcp），只有**未知家族**才退回工具
+     自己的名字（那是标识符，不是文案；翻不了，也不该被一个泛动词盖掉）。成功行不多话：旧的
+     `执行中 / 已执行` 二级词删掉了，动作词本身已经表达了状态。
+   - 终端退出码从硬编码的 `exit {code}` 改走 `process.tool.exitCode`（`退出码 {code}` / `exit {code}`）。
 
 ## 理由
 
@@ -171,7 +232,10 @@ reviewers: ["@qiaowei"]
 - **新增**：`src/shared/toolDisplay.ts`（展示模型 + diff 渲染行）、`chatToolBlocks.ts`（转录侧工具结果读取）、
   `messageText.ts`（共享的 `messageToText`）、`reasoningText.ts`（思考行的两个纯函数）、
   `elements/tool-row.tsx`（行语法）、`elements/tool-bodies.tsx`（四种正文）、`elements/thinking-row.tsx`、
-  `src/features/chat/assistantUiParts.ts`（块 → assistant-ui part 的映射，从 `ChatThread.tsx` 拆出）。
+  `src/features/chat/assistantUiParts.ts`（块 → assistant-ui part 的映射，从 `ChatThread.tsx` 拆出）、
+  `src/shared/diffHighlight.ts` + `src/features/chat/useDiffHighlight.ts` + `useThemeMode.ts`（内联 diff 的第二遍高亮，见决策 17）、
+  `elements/tool-row-presentation.tsx`（每个 family 的图标 / 动作词 / 目标文本 / 正文选择，从 `tool-row.tsx` 拆出：
+  行文件要留在 700 行棘轮内）。
 - **删除**：`elements/reasoning.aui.tsx`、`elements/reasoning.tsx`、`elements/reasoningState.ts`、
   `elements/tool-call.tsx`、`elements/tool-group.aui.tsx`、`elements/tool-fallback.aui.tsx`（627 行的
   `ai-elements` 兜底组件，行换成 ZCode 语法后没有消费者了）、`tests/reasoningGroupStreaming.test.ts`
@@ -182,11 +246,7 @@ reviewers: ["@qiaowei"]
   这套语义一个字没变，所以闸门与它的用例都留着；用例里只把「三个自动折叠点」收敛成「唯一的
   过程区」，并加上 ZCode 的表头形态（常驻行 + 分隔线 + `workingFor`/`workedFor` 文案）。
 - **有意未做**：
-  1. **diff 的语法高亮**。ZCode 的内联 diff 是两遍：先纯文本 hunk，再异步补 Shiki token
-     （它的注释说明了原因：展开时同步挂载高亮器会长时间掉帧）。本仓的 diff 正文目前是纯文本，
-     落点是现成的：`DiffViewer` 的 `shiki-wasm` 高亮器 + `src/shared/codePreviewLanguage.ts` 的
-     `inferCodeLanguage`。**这是这块唯一肉眼可见的差距。**
-  2. **子代理 / agent 行**（ZCode 有独立 renderer）。子代理在本仓是「另一个会话」而不是一行，
+  1. **子代理 / agent 行**（ZCode 有独立 renderer）。子代理在本仓是「另一个会话」而不是一行，
      要做得先定「行里显示什么」；随之未做的还有 ZCode 的 `SourceLabel`（`bg-surface` /
      `bg-background-alt` 两个 token 因此有定义暂无消费者）。
   3. 每行耗时（见上表）。
@@ -198,7 +258,9 @@ reviewers: ["@qiaowei"]
      档位时不必再到处找 `gap-*` 数字。
 - **行为差异（有意的）**：行级无自动开合（区域级按 ZCode 自动折叠）；错误不再有 `Error: ` 前缀；
   `display` 是可选字段，兜底行是常态之一。
-- **测试**：新增 `tests/toolDisplay.test.ts`（24 条：信封读取、diff 派生、渲染行、截断、MCP 名解析、
+- **测试**：新增 `tests/fileBaseline.test.ts`（6 条：首次发起/在途去重/读不到不编/失败不抛/路径归一化/
+  换项目清缓存），`tests/toolArgsPreview.test.ts`（7 条：半截 JSON 的字符串/对象/转义/`edits`、
+  参数流到一半行数就在涨、节流分档、权威 patch 覆盖预览）、`tests/toolDisplay.test.ts`（25 条：信封读取、diff 派生、渲染行、截断、MCP 名解析、
   路径段非空）、`tests/thinkingTiming.test.ts`（8 条：观测判定、秒数下限、按 key/正文搬过重建）、
   `tests/chatTurnTiming.test.ts`（7 条：跨度、秒数、落定兜底）、
   `tests/toolRow.test.ts`（8 条：行语法与 token 契约）、`tests/thinkingRow.test.ts`

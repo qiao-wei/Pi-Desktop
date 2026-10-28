@@ -9,21 +9,35 @@ import type {
   PromptStreamEvent,
 } from "../../lib/api";
 import { fetchAmbientBootstrap, fetchBootstrap, postExtensionUiResponse, postJson, reportDiagnostic, streamNdjson } from "../../lib/api";
+import { isAbortError } from "../../lib/bridge/transport";
 import { isAppWindowFocused, showSystemNotification } from "../../lib/systemNotification";
 import { loadUiPreferences } from "../../lib/ui-preferences";
 import { t } from "../../i18n";
 import { choosePollMode, pollDelayMs } from "./pollMode";
+import { createPromptFeed, type FeedLoss, type PromptFeed } from "./promptFeed";
+import {
+  createDefaultBootstrap,
+  createDefaultCapabilities,
+  createDefaultConversation,
+  createDefaultProject,
+  createDefaultSnapshot,
+} from "./appDefaults";
 import { applyAmbientBootstrap, isBootstrapForSession } from "./ambientState";
-import { createStreamCommitBuffer, type StreamCommitBuffer } from "./streamCommitBuffer";
+import { mergeStreamingBootstrap, prependOlderMessages } from "./bootstrapPatch";
+import { ACCEPTED_EVENT_TYPES } from "./acceptedStreamEvents";
+import { useFileBaselineReader } from "./useFileBaseline";
+import { useOlderMessagePaging } from "./useOlderMessagePaging";
+import { createStreamCommitBuffer } from "./streamCommitBuffer";
+import { createSessionStreamState, type SessionStreamState } from "./sessionStreamState";
 import { createId } from "../../lib/id";
 import type { ContextUsagePatch } from "./bootstrapPatch";
 import {
   normalizeMessageProcessBlocks,
   settleStreamingMessages,
+  upsertLocalFallbackSession,
   promoteSessionRow,
   touchConversation,
   applyContextUsage,
-  withConversation,
   withMessages,
   withStats,
 } from "./bootstrapPatch";
@@ -32,13 +46,11 @@ import {
   countBubbleStats,
   createProvisionalTurn,
   discardProvisionalTurn,
-  mergeChatBubbles,
   replaceTurnWithProvisional,
 } from "../../shared/chatBubbles";
 import { compactionOutcome } from "../../shared/compactionNotice";
 import { attachmentKindFromMimeType } from "../../shared/attachmentKind";
 import { composeTurnNotificationBody, resolveTurnNotificationLabel, shouldNotifyTurnSettled } from "../../shared/turnNotifications";
-import { deriveSessionTitle } from "../../shared/sessionTitle";
 import { isSessionBusy } from "../../shared/sessionBusy";
 import {
   queuedComposerEntriesFromBubbles,
@@ -57,10 +69,8 @@ import {
   promptFallback,
 } from "./promptFallbacks";
 import type {
-  AppSnapshot,
   ChatAttachment,
   ChatMessage,
-  ChatSession,
   CapabilitiesState,
   CapabilityCommandArgument,
   CapabilityKind,
@@ -69,7 +79,6 @@ import type {
   CapabilityMcpInspection,
   CreateProjectResult,
   PersonalizationSettings,
-  ProjectSummary,
   ThinkingLevel,
   ToolToggleState,
 } from "../../types";
@@ -95,27 +104,6 @@ interface AppState {
   extensionUiNotifications: Array<{ id: string; message: string; type: "info" | "warning" | "error" }>;
   extensionTitle?: string;
   extensionEditorText?: string;
-}
-
-interface SessionStreamState {
-  controller: AbortController | null;
-  lifecycleGeneration: number;
-  /**
-   * Bubble the server is writing right now, kept in sync by the stream
-   * projection. It replaces the old `activeAssistantMessageId` +
-   * `pendingSteeringMessages` pair, which had to be reconciled by guessing.
-   */
-  activeBubbleId: string | null;
-  /** Stream events we could not address. Reported, never guessed around. */
-  droppedEvents: number;
-  /** Last pi-queue sequence applied, so a late duplicate cannot resurrect a 插话. */
-  queueSeq: number;
-  /**
-   * Frame-budgeted commit buffer for this session's stream (see
-   * `streamCommitBuffer.ts`). Created on the first event; it is what turns a burst of
-   * 60-90 provider deltas into one state commit instead of 60-90 re-renders.
-   */
-  commitBuffer?: StreamCommitBuffer;
 }
 
 /** Progress text pi reports for a package install/update (`pi` phase `start` carries the only message). */
@@ -165,70 +153,17 @@ type Action =
       updatedAt?: number;
     }
   | { type: "finish-session-streaming-messages"; sessionPath: string }
+  | {
+      /** 往窗口前面补一页更早的历史（id 是绝对的，可以直接接在前面）。 */
+      type: "prepend-session-messages";
+      sessionPath: string;
+      messages: ChatMessage[];
+      oldestTurn: number;
+      hasMoreBefore: boolean;
+    }
   | { type: "replace-bootstrap"; bootstrap: BootstrapResponse; sessionPath?: string }
   | { type: "replace-capabilities"; capabilities: CapabilitiesState }
   | { type: "apply-ambient"; ambient: AmbientBootstrap; sessionPath: string };
-
-function createDefaultConversation(): ChatSession {
-  const now = Date.now();
-  return {
-    id: "local-bootstrap",
-    title: "English practice",
-    createdAt: now,
-    updatedAt: now,
-    messages: [
-      {
-        id: createId("msg"),
-        role: "assistant",
-        kind: "text",
-        content:
-          "I am ready. Send a message and I will keep this as one continuous conversation, with gentle correction and long-context summaries when needed.",
-        createdAt: now,
-        status: "done",
-      },
-    ],
-  };
-}
-
-function createDefaultProject(): ProjectSummary {
-  const now = Date.now();
-  return {
-    id: "local-project",
-    name: "Code",
-    cwd: "",
-    createdAt: now,
-    updatedAt: now,
-    sessions: [],
-    pinned: false,
-    sessionPins: {},
-  };
-}
-
-function createDefaultSnapshot(): AppSnapshot {
-  return {
-    conversation: createDefaultConversation(),
-    project: createDefaultProject(),
-    modelConfig: {
-      provider: "",
-      model: "",
-      thinkingLevel: "low",
-      defaultThinkingLevel: "low",
-      agentUrl: "",
-      apiKeyConfigured: false,
-    },
-    stats: {
-      turnCount: 0,
-      userMessageCount: 0,
-      assistantMessageCount: 1,
-      messageCount: 1,
-      compactionCount: 0,
-      latestCompactionSummary: "",
-      contextTokens: null,
-      contextWindow: undefined,
-      contextPercent: null,
-    },
-  };
-}
 
 function normalizeBootstrap(bootstrap: BootstrapResponse): BootstrapResponse {
   return perfMeasure("normalize.bootstrap", () => normalizeBootstrapValue(bootstrap), bootstrapWeight);
@@ -449,13 +384,23 @@ export function reducer(state: AppState, action: Action): AppState {
       }
       return { ...state, bootstrap: touchConversation(patched.bootstrap) };
     }
+    case "prepend-session-messages": {
+      if (!state.bootstrap || !isBootstrapForSession(state.bootstrap, action.sessionPath)) {
+        return state;
+      }
+      const next = prependOlderMessages(state.bootstrap, action);
+      return next === state.bootstrap ? state : { ...state, bootstrap: next };
+    }
     case "replace-bootstrap": {
       if (action.sessionPath && state.bootstrap && !isBootstrapForSession(state.bootstrap, action.sessionPath)) {
         return state;
       }
       const normalizedBootstrap = normalizeBootstrap(action.bootstrap);
-      const bootstrap = action.sessionPath && state.bootstrap
-        ? mergeStreamingBootstrap(state.bootstrap, normalizedBootstrap, action.sessionPath)
+      const mergeWith = action.sessionPath && state.bootstrap;
+      // 计数留在调用侧：bootstrapPatch 是纯数据变换，不引入 perf（会拖进整个 app 图）。
+      if (mergeWith) perfCount("merge.streamingBootstrap");
+      const bootstrap = mergeWith
+        ? mergeStreamingBootstrap(mergeWith, normalizedBootstrap, action.sessionPath!)
         : normalizedBootstrap;
       return {
         ...state,
@@ -511,105 +456,6 @@ function structuredCloneBootstrap(bootstrap: BootstrapResponse): BootstrapRespon
   return copy;
 }
 
-function upsertLocalFallbackSession(bootstrap: BootstrapResponse, sessionPath: string, userMessage: ChatMessage, messageCount: number) {
-  const projectId = bootstrap.activeProjectId || bootstrap.snapshot.conversation.projectId || bootstrap.snapshot.project.id;
-  const title = deriveSessionTitle({ text: userMessage.content, attachments: userMessage.attachments }) || "New session";
-  const session = {
-    path: sessionPath,
-    id: sessionPath.split(/[\\/]/u).pop()?.replace(/\.[^.]+$/u, "") || bootstrap.snapshot.conversation.id,
-    title,
-    cwd: bootstrap.snapshot.conversation.workingDirectory || bootstrap.snapshot.project.cwd,
-    createdAt: bootstrap.snapshot.conversation.createdAt,
-    updatedAt: userMessage.createdAt,
-    messageCount,
-    firstMessage: userMessage.content,
-    pinned: false,
-  };
-
-  bootstrap.projects = bootstrap.projects.map((project) => {
-    if (project.id !== projectId) {
-      return project;
-    }
-
-    const existing = project.sessions.find((candidate) => candidate.path === sessionPath);
-    const nextSession = existing
-      ? {
-          ...existing,
-          title: existing.title === "New session" || existing.title === "no messages" || existing.messageCount <= 0 ? title : existing.title,
-          updatedAt: userMessage.createdAt,
-          messageCount: Math.max(existing.messageCount, messageCount),
-          firstMessage: existing.firstMessage || userMessage.content,
-        }
-      : session;
-
-    return {
-      ...project,
-      sessions: existing
-        ? project.sessions.map((candidate) => candidate.path === sessionPath ? nextSession : candidate)
-        : [session, ...project.sessions],
-    };
-  });
-
-  if (bootstrap.snapshot.project.id === projectId) {
-    const existing = bootstrap.snapshot.project.sessions.find((candidate) => candidate.path === sessionPath);
-    const nextSession = existing
-      ? {
-          ...existing,
-          title: existing.title === "New session" || existing.title === "no messages" || existing.messageCount <= 0 ? title : existing.title,
-          updatedAt: userMessage.createdAt,
-          messageCount: Math.max(existing.messageCount, messageCount),
-          firstMessage: existing.firstMessage || userMessage.content,
-        }
-      : session;
-    bootstrap.snapshot.project = {
-      ...bootstrap.snapshot.project,
-      sessions: existing
-        ? bootstrap.snapshot.project.sessions.map((candidate) => candidate.path === sessionPath ? nextSession : candidate)
-        : [session, ...bootstrap.snapshot.project.sessions],
-    };
-  }
-
-  if (
-    bootstrap.snapshot.conversation.sessionFile === sessionPath &&
-    (!bootstrap.snapshot.conversation.title || bootstrap.snapshot.conversation.title === "New session")
-  ) {
-    bootstrap.snapshot.conversation.title = title;
-  }
-}
-
-/** Events that prove the server took the submission over. */
-const ACCEPTED_EVENT_TYPES = new Set<PromptStreamEvent["type"]>([
-  "user_message_start",
-  "assistant_message_start",
-  "delta",
-  "assistant_partial",
-  "tool_execution_start",
-  "tool_execution_end",
-  "snapshot",
-  "queued",
-  "error",
-  "done",
-]);
-
-function mergeStreamingBootstrap(current: BootstrapResponse, next: BootstrapResponse, sessionPath: string): BootstrapResponse {
-  if (!isBootstrapForSession(current, sessionPath) || !isBootstrapForSession(next, sessionPath)) {
-    return next;
-  }
-
-  perfCount("merge.streamingBootstrap");
-  const merged = mergeChatBubbles(
-    current.snapshot.conversation.messages,
-    next.snapshot.conversation.messages,
-    // The snapshot carries pi's queue, so this is the one place allowed to
-    // remove a 插话 the server no longer holds (cleared by a stop).
-    { pendingQueues: next.pendingQueues },
-  );
-  if (merged === next.snapshot.conversation.messages) {
-    return next;
-  }
-  return withConversation(next, { ...next.snapshot.conversation, messages: merged });
-}
-
 function createInitialState(): AppState {
     return {
       bootstrap: null,
@@ -650,6 +496,14 @@ export function usePiDesktopApp() {
   const notifiedTurnsRef = useRef(new Map<string, number>());
 
   const bootstrap = state.bootstrap ?? createDefaultBootstrap();
+  /**
+   * 「写入前这个文件是什么」：只给 `write` 行算「删了几行」。同步读 + 后台补（派生不能等 I/O）。
+   * 必须建在 `bootstrap` **之后**：闭包里读它是惰性的，但编译器仍然把它算成初始化期读取。
+   */
+  const readFileBaseline = useFileBaselineReader(() => ({
+    projectId: bootstrap.activeProjectId || bootstrap.snapshot.conversation.projectId || bootstrap.snapshot.project.id,
+    sessionPath: bootstrap.activeSessionPath ?? undefined,
+  }));
   const conversation = bootstrap.snapshot.conversation;
   const stats = bootstrap.snapshot.stats;
   const modelConfig = bootstrap.snapshot.modelConfig;
@@ -789,13 +643,7 @@ export function usePiDesktopApp() {
       return existing;
     }
 
-    const next = {
-      controller: null,
-      lifecycleGeneration: 0,
-      activeBubbleId: null,
-      droppedEvents: 0,
-      queueSeq: 0,
-    };
+    const next = createSessionStreamState();
     streamStatesRef.current.set(sessionPath, next);
     return next;
   }
@@ -878,6 +726,92 @@ export function usePiDesktopApp() {
     return false;
   }
 
+  /**
+   * 一条 prompt 流坏了之后的**唯一去处**：先续订同一条 run（`promptFeed`），续不上才用
+   * 一次强制 bootstrap 追平。
+   *
+   * 这里故意**不落定这一轮**：桥上的 run 可能还在跑，落定就意味着停止按钮消失、还发一条假的
+   * 「已完成」提醒。只有快照明确说它已经不在跑了，才收尾。
+   */
+  async function reconcileLostFeed(
+    sessionPath: string,
+    streamState: SessionStreamState,
+    loss: FeedLoss,
+    /** 丢的是不是**这一轮**的流。插话的流是并行的第二条，它死了不代表主场没收看。 */
+    ownsTurn = true,
+  ) {
+    if (ownsTurn) {
+      // 我们的流已经没有了：看门狗必须改走 `full`，否则它会以为转录还在自己手里。
+      streamState.streamLost = true;
+    }
+    reportDiagnostic("client.prompt_feed.lost", {
+      sessionPath,
+      reason: loss.reason,
+      runId: loss.runId,
+      lastSeq: loss.lastSeq,
+      bridgeMessage: loss.message,
+    });
+
+    let latest: BootstrapResponse | null = null;
+    try {
+      latest = await fetchBootstrap({ force: true });
+    } catch (error) {
+      reportDiagnostic("client.prompt_feed.reconcile_error", {
+        sessionPath,
+        ...clientErrorDetails(error),
+      });
+    }
+    if (!latest || activeSessionPathRef.current !== sessionPath) {
+      if (activeSessionPathRef.current === sessionPath) {
+        dispatch({ type: "set-error", error: t("chat.stream.lostUnreachable") });
+      }
+      return;
+    }
+
+    const busy = Boolean(
+      latest.streamingSessionPaths?.includes(sessionPath) ||
+      latest.compactingSessionPaths?.includes(sessionPath),
+    );
+    if (!busy) {
+      finishLocalStreamingTurn(sessionPath, streamState);
+    }
+    // 快照是权威的：转录、忙闲、错误横幅都在这里对齐（所以文案得在它之后发）。
+    replaceBootstrap(latest, sessionPath);
+    if (!busy) {
+      notifyTurnSettled(sessionPath, null);
+    }
+    dispatch({ type: "set-error", error: t(busy ? "chat.stream.lostBusy" : "chat.stream.lostDone") });
+  }
+
+  /**
+   * 三个提交路径（新会话、插话、编辑重发）共用的 feed：只差「谁能中止它」和「这一轮还算不算数」。
+   */
+  function openPromptFeed(options: {
+    sessionPath: string;
+    streamState: SessionStreamState;
+    isCurrent: () => boolean;
+    ownerSignal: () => AbortSignal | null;
+    apply: (event: PromptStreamEvent) => void;
+    /** 这条流是否就是「这一轮」的流。插话那条是并行的，见 `reconcileLostFeed`。 */
+    ownsTurn?: boolean;
+  }): PromptFeed {
+    return createPromptFeed({
+      sessionPath: options.sessionPath,
+      stream: streamNdjson,
+      isCurrent: options.isCurrent,
+      ownerSignal: options.ownerSignal,
+      apply: options.apply,
+      onRepair: ({ attempt, fromSeq }) =>
+        reportDiagnostic("client.prompt_feed.repair", {
+          sessionPath: options.sessionPath,
+          attempt,
+          fromSeq,
+        }),
+      onLost: (loss) =>
+        void reconcileLostFeed(options.sessionPath, options.streamState, loss, options.ownsTurn ?? true),
+    });
+  }
+
   function rememberBootstrapSession(next: BootstrapResponse): BootstrapResponse {
     const normalized = normalizeBootstrap(next);
     const sessionPath = normalized.activeSessionPath ?? normalized.snapshot.conversation.sessionFile;
@@ -895,6 +829,11 @@ export function usePiDesktopApp() {
     }
     return merged;
   }
+
+  const { loadOlderMessages, loadingOlderMessages } = useOlderMessagePaging(bootstrap, {
+    dispatchPage: dispatch,
+    reportError: (message: string) => dispatch({ type: "set-error", error: message }),
+  });
 
   function replaceBootstrap(next: BootstrapResponse, sessionPath?: string) {
     const nextSessionPath = sessionPath ?? next.activeSessionPath ?? next.snapshot.conversation.sessionFile;
@@ -1141,8 +1080,10 @@ export function usePiDesktopApp() {
      */
     function currentPollMode(): "ambient" | "full" {
       const sessionPath = activeSessionPathRef.current;
+      const streamState = sessionPath ? streamStatesRef.current.get(sessionPath) : undefined;
       return choosePollMode({
-        ownsStream: Boolean(sessionPath && streamStatesRef.current.get(sessionPath)?.controller),
+        // 我们的流已经接不回来（见 promptFeed）→ 转录只能靠 full 快照追平，ambient 不带它。
+        ownsStream: Boolean(streamState?.controller) && !streamState?.streamLost,
         isStopping: state.isStopping,
         sinceLastStreamEventMs: Date.now() - lastStreamEventAtRef.current,
         sinceFullReconcileMs: Date.now() - lastFullReconcileAtRef.current,
@@ -1304,7 +1245,7 @@ export function usePiDesktopApp() {
     view: ChatStreamView,
     event: PromptStreamEvent,
   ): ChatStreamView {
-    const next = projectStreamEvent(view, event);
+    const next = projectStreamEvent(view, event, { readBaseline: readFileBaseline });
     if (next.droppedEvents !== streamState.droppedEvents) {
       perfCount("stream.eventDropped");
       if (next.droppedEvents === 1 || next.droppedEvents % 20 === 0) {
@@ -1518,17 +1459,11 @@ export function usePiDesktopApp() {
        * everything else about it is the same stream as any other prompt, because
        * the events name their own bubble.
        */
-      const handlePromptEvent = (
-        event: PromptStreamEvent,
-        generation: number,
-        controller: AbortController | null,
-      ) => {
-        if (streamState.lifecycleGeneration !== generation) {
-          return;
-        }
-        if (controller && streamState.controller !== controller) {
-          return;
-        }
+      /**
+       * 一帧落到 app 状态上的全部工作。**坏掉的 feed 走不到这里**：入口
+       * `handlePromptEvent` 先让 `promptFeed` 决定「续订还是追平」。
+       */
+      const applyPromptEvent = (event: PromptStreamEvent, generation: number) => {
         lastStreamEventAtRef.current = Date.now();
         perfCount("event.stream", { events: 1 });
         handleExtensionUiStreamEvent(event);
@@ -1573,7 +1508,7 @@ export function usePiDesktopApp() {
           }
         }
 
-        if (event.type === "error" || event.type === "transport_error") {
+        if (event.type === "error") {
           outcome.streamError = event.message ?? "Unknown streaming error";
           if (queueSteering && !outcome.accepted) {
             // pi refused the insert (compaction in flight, extension command, ...):
@@ -1592,10 +1527,16 @@ export function usePiDesktopApp() {
           }
         }
 
-        if (event.type === "snapshot" && event.snapshot) {
-          // Always safe to reconcile now: mergeChatBubbles keeps the bubbles this
-          // client is still waiting for, so pending 插话 no longer need a gate.
-          replaceBootstrap(event.snapshot, sessionPath);
+        if (event.type === "snapshot") {
+          if (event.snapshot) {
+            // Always safe to reconcile now: mergeChatBubbles keeps the bubbles this
+            // client is still waiting for, so pending 插话 no longer need a gate.
+            replaceBootstrap(event.snapshot, sessionPath);
+          } else if (event.snapshotOmitted) {
+            // 整份快照超限被明确省略：**不要**拿它去 reconcile（那不是"空对话"）。
+            // 流里的增量已经把这轮写进气泡了，`done` 之后的 bootstrap 才是追平点。
+            perfCount("stream.snapshotOmitted");
+          }
         }
 
         if (event.type === "done") {
@@ -1634,12 +1575,40 @@ export function usePiDesktopApp() {
         }
       };
 
+      /**
+       * 所有帧的入口：失效的帧直接丢掉，坏掉的 feed 交给 `promptFeed` 续订。传输故障不能
+       * 当成「这一轮失败」——桥上的 run 可能还在跑，落定它会让停止按钮消失、还谎报完成。
+       */
+      const handlePromptEvent = (
+        event: PromptStreamEvent,
+        generation: number,
+        controller: AbortController | null,
+        feed: PromptFeed,
+      ) => {
+        if (streamState.lifecycleGeneration !== generation) {
+          return;
+        }
+        if (controller && streamState.controller !== controller) {
+          return;
+        }
+        feed.accept(event);
+      };
+
       if (queueSteering) {
+        // 插话没人能中止（控制权在启动这一轮的那个请求），所以没有 owner signal。
+        const steerFeed = openPromptFeed({
+          sessionPath,
+          streamState,
+          isCurrent: () => streamState.lifecycleGeneration === requestGeneration,
+          ownerSignal: () => null,
+          apply: (event) => applyPromptEvent(event, requestGeneration),
+          ownsTurn: false,
+        });
         try {
           await streamNdjson(
             "/api/prompt",
             { ...promptBody, streamingBehavior: "steer" },
-            (event) => handlePromptEvent(event, requestGeneration, null),
+            (event) => handlePromptEvent(event, requestGeneration, null, steerFeed),
           );
           return true;
         } catch (error) {
@@ -1669,13 +1638,22 @@ export function usePiDesktopApp() {
       streamState.lifecycleGeneration += 1;
       const activeGeneration = streamState.lifecycleGeneration;
       streamState.controller = controller;
+      streamState.streamLost = false;
+      const feed = openPromptFeed({
+        sessionPath,
+        streamState,
+        isCurrent: () =>
+          streamState.lifecycleGeneration === activeGeneration && streamState.controller === controller,
+        ownerSignal: () => controller.signal,
+        apply: (event) => applyPromptEvent(event, activeGeneration),
+      });
       dispatch({ type: "set-streaming", value: true });
 
       try {
         await streamNdjson(
           "/api/prompt",
           promptBody,
-          (event) => handlePromptEvent(event, activeGeneration, controller),
+          (event) => handlePromptEvent(event, activeGeneration, controller, feed),
           { signal: controller.signal },
         );
       } catch (error) {
@@ -1790,6 +1768,7 @@ export function usePiDesktopApp() {
       streamState.lifecycleGeneration += 1;
       const activeGeneration = streamState.lifecycleGeneration;
       streamState.controller = controller;
+      streamState.streamLost = false;
       dispatch({ type: "set-error", error: null });
       dispatch({ type: "set-streaming", value: true });
 
@@ -1805,10 +1784,8 @@ export function usePiDesktopApp() {
         contentParts,
       });
 
-      const handleEditEvent = (event: PromptStreamEvent) => {
-        if (streamState.lifecycleGeneration !== activeGeneration || streamState.controller !== controller) {
-          return;
-        }
+      /** 一帧落到 app 状态上的工作（同 `applyPromptEvent`：坏 feed 进不来）。 */
+      const applyEditEvent = (event: PromptStreamEvent) => {
         lastStreamEventAtRef.current = Date.now();
         handleExtensionUiStreamEvent(event);
         if (ACCEPTED_EVENT_TYPES.has(event.type)) {
@@ -1833,7 +1810,7 @@ export function usePiDesktopApp() {
         if (event.type === "snapshot" && event.snapshot) {
           replaceBootstrap(event.snapshot, sessionPath);
         }
-        if (event.type === "error" || event.type === "transport_error") {
+        if (event.type === "error") {
           outcome.streamError = event.message ?? "Unknown streaming error";
         }
         if (event.type === "done") {
@@ -1859,6 +1836,21 @@ export function usePiDesktopApp() {
             })
             .catch(() => undefined);
         }
+      };
+
+      const editFeed = openPromptFeed({
+        sessionPath,
+        streamState,
+        isCurrent: () =>
+          streamState.lifecycleGeneration === activeGeneration && streamState.controller === controller,
+        ownerSignal: () => controller.signal,
+        apply: applyEditEvent,
+      });
+      const handleEditEvent = (event: PromptStreamEvent) => {
+        if (streamState.lifecycleGeneration !== activeGeneration || streamState.controller !== controller) {
+          return;
+        }
+        editFeed.accept(event);
       };
 
       try {
@@ -2847,6 +2839,8 @@ export function usePiDesktopApp() {
     reportError,
     dismissCompactionNotice,
     replaceBootstrap,
+    loadOlderMessages,
+    loadingOlderMessages,
   };
 }
 
@@ -2892,69 +2886,3 @@ function normalizeMessageParts(
     ...attachments.map((attachment) => ({ kind: "attachment" as const, attachmentId: attachment.id })),
   ];
 }
-
-function createDefaultBootstrap(): BootstrapResponse {
-  const snapshot = createDefaultSnapshot();
-  return {
-    snapshot,
-    projects: [snapshot.project],
-    activeProjectId: snapshot.project.id,
-    activeSessionPath: snapshot.conversation.sessionFile,
-    projectTrusted: false,
-    availableModels: [],
-    skills: [],
-    capabilities: createDefaultCapabilities(),
-    server: {
-      url: "",
-      ready: false,
-    },
-    canPrompt: false,
-    personalization: {
-      style: "default",
-      customInstructions: "",
-      persona: "",
-      extensionUi: "tui",
-    },
-  };
-}
-
-function createDefaultCapabilities(): CapabilitiesState {
-  return {
-    skills: [],
-      packages: [],
-      extensions: [],
-      mcpServers: [],
-      builtinCommands: [],
-      session: {
-      version: 3,
-      skills: [],
-      enabledSkills: [],
-      disabledSkills: [],
-      packages: [],
-      enabledPackages: [],
-      disabledPackages: [],
-      extensions: [],
-      enabledExtensions: [],
-      disabledExtensions: [],
-      updatedAt: Date.now(),
-    },
-  };
-}
-
-function isAbortError(error: unknown) {
-  return error instanceof DOMException
-    ? error.name === "AbortError"
-    : error instanceof Error && error.name === "AbortError";
-}
-
-
-
-
-
-
-
-
-
-
-
-

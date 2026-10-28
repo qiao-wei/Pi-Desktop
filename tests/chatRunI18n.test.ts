@@ -26,6 +26,10 @@ const thinkingRowTsx = readFileSync(
   new URL("../src/components/assistant-ui/elements/thinking-row.tsx", import.meta.url),
   "utf8",
 );
+const toolRowPresentationTsx = readFileSync(
+  new URL("../src/components/assistant-ui/elements/tool-row-presentation.tsx", import.meta.url),
+  "utf8",
+);
 const toolRowTsx = readFileSync(
   new URL("../src/components/assistant-ui/elements/tool-row.tsx", import.meta.url),
   "utf8",
@@ -53,8 +57,8 @@ test("思考行跟随语言：运行中是「正在思考」，结束后是「�
 test("工具行动作词跟随语言：分族 + 运行中/结束后两态", () => {
   setLocale("zh");
   assert.equal(t("process.tool.read.running"), "正在读取");
-  assert.equal(t("process.tool.read.done"), "已读取");
-  assert.equal(t("process.tool.execute.running"), "执行中");
+  assert.equal(t("process.tool.read.done"), "读取");
+  assert.equal(t("process.tool.execute.running"), "正在执行");
   assert.equal(t("process.tool.execute.done"), "终端");
   assert.equal(t("process.status.failed"), "执行失败");
 
@@ -124,8 +128,10 @@ test("组件里不再硬编码这些英文标签，而是调用 t(...)", () => {
     ["thread.aui.tsx", /aria-label="Assistant is working"/, "运行指示器 aria 必须走 message.workingAria"],
     ["thinking-row.tsx", />Thinking</, "思考行的运行态文案必须走 i18n"],
     ["thinking-row.tsx", />Thought</, "思考行的完成态文案必须走 i18n"],
-    ["tool-row.tsx", />Terminal</, "终端动作词必须走 i18n"],
-    ["tool-row.tsx", />MCP</, "MCP 动作词必须走 i18n"],
+    ["tool-row-presentation.tsx", />Terminal</, "终端动作词必须走 i18n"],
+    ["tool-row-presentation.tsx", />MCP</, "MCP 动作词必须走 i18n"],
+    // 兜底行曾经把工具标识符首字母大写就当动作词（中文界面里出现「Write」「Todo write」）。
+    ["tool-row-presentation.tsx", /kindLabel: label,/, "已知 family 不许拿英文工具名当动作词"],
     ["tool-bodies.tsx", />Parameters</, "工具正文分段名必须走 i18n"],
     ["tool-bodies.tsx", />Error</, "失败分段名必须走 i18n"],
   ];
@@ -133,6 +139,7 @@ test("组件里不再硬编码这些英文标签，而是调用 t(...)", () => {
     "thread.aui.tsx": threadTsx,
     "thinking-row.tsx": thinkingRowTsx,
     "tool-row.tsx": toolRowTsx,
+    "tool-row-presentation.tsx": toolRowPresentationTsx,
     "tool-bodies.tsx": toolBodiesTsx,
   };
 
@@ -143,7 +150,7 @@ test("组件里不再硬编码这些英文标签，而是调用 t(...)", () => {
   // 确认这些文件确实拿到了 t（而不是只是删掉了英文、留下空白）
   assert.match(thinkingRowTsx, /process\.reasoning\.thought/, "思考行必须调用思考词表");
   assert.match(
-    toolRowTsx,
+    toolRowPresentationTsx,
     /process\.tool\.execute\.done/,
     "终端动作词要走词表，而不是写死 Terminal",
   );

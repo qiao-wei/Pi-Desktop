@@ -54,6 +54,7 @@ export function ComposerRegion({ view }: { view: AppModel }) {
     fileInputRef, handleComposerInput, handleComposerKeyDown, handleComposerModelChange, handleDragEnter, handleDragLeave,
     handleDrop, handleInTaskSearchCount, handleInTaskSearchQueryChange, handlePaste, handleProjectCommandTerminalChange, handleStopTurn,
     handleSubmit, hideAttachmentHover, inTaskMatchCount, inTaskSearch, isDraggingFiles, isPreparingAttachments,
+    loadOlderMessages, loadingOlderMessages,
     modelConfig, modelSupportsThinking, openWorkspaceContent, openWorkspacePreview, projectCommandTerminal, projectCommands, projectGit, refreshMessage,
     rememberComposerSelection, restoreComposerFocusRing, revealProject, revealRunLog, scrollStateRef, selectSlashItem,
     selectedModel, selectedProvider, sessionWorktree, setComposerError, setShowExtensionStatus, setShowSettings,
@@ -228,6 +229,9 @@ export function ComposerRegion({ view }: { view: AppModel }) {
             onChangedFileContent={openWorkspaceContent}
             onChangedFileInIde={(path) => void projectGit.openFile(path)}
             workspaceRoot={activeProject.cwd}
+            hasMoreBefore={conversation.hasMoreBefore}
+            loadingOlderMessages={loadingOlderMessages}
+            onLoadOlderMessages={loadOlderMessages}
           />
           {inTaskSearch.open ? (
             <InTaskSearchBar

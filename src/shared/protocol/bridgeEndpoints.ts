@@ -74,6 +74,14 @@ export const BRIDGE_ENDPOINTS = {
     since: 1,
     summary: "Send a turn; streams events until the run ends. The stream is the transcript feed.",
   },
+  runStream: {
+    method: "POST",
+    path: "/api/runs/stream",
+    transport: "ndjson",
+    since: 1,
+    summary:
+      "Reattach to a running turn from (runId, fromSeq): replays the frames this client missed, then follows live. 404 = the run is gone; 409 = its log no longer reaches back that far.",
+  },
   stop: {
     method: "POST",
     path: "/api/stop",

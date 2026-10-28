@@ -47,7 +47,8 @@ import {
   upsertLiveToolBlock,
   upsertToolProcessBlock,
 } from "./chatProcessBlocks.ts";
-import { deriveToolDisplay, toolDisplayForBlock, toolResultText } from "./toolDisplay.ts";
+import { deriveToolDisplay, toolDisplayForBlock, toolResultTextWithCut, toolRowFamily } from "./toolDisplay.ts";
+import { budgetToolArgs } from "./toolPayloadBudget.ts";
 
 export interface ChatStreamView {
   /** Bubbles in transcript order, exactly as the UI renders them. */
@@ -80,7 +81,11 @@ export function streamingBubbleId(bubbles: readonly ChatMessage[]): string | nul
  * nothing, in which case the incoming object is returned so React keeps the
  * message identities it already has.
  */
-export function projectStreamEvent(view: ChatStreamView, event: PromptStreamEvent): ChatStreamView {
+export function projectStreamEvent(
+  view: ChatStreamView,
+  event: PromptStreamEvent,
+  options: ProjectStreamOptions = {},
+): ChatStreamView {
   switch (event.type) {
     case "user_message_start":
       return projectUserMessageStart(view, event);
@@ -98,7 +103,7 @@ export function projectStreamEvent(view: ChatStreamView, event: PromptStreamEven
     case "tool_execution_start":
     case "tool_execution_update":
     case "tool_execution_end":
-      return projectToolEvent(view, event);
+      return projectToolEvent(view, event, options);
     case "queued":
       return projectQueue(view, event);
     case "context_usage":
@@ -285,12 +290,26 @@ function projectProcessBlocks(view: ChatStreamView, event: PromptStreamEvent): C
   );
 }
 
-function projectToolEvent(view: ChatStreamView, event: PromptStreamEvent): ChatStreamView {
+/** What the live projection may ask its host for (the renderer has it; the server does not). */
+export interface ProjectStreamOptions {
+  /**
+   * Content of a file *before* a `write` runs, when the host can read it. Sync by
+   * contract: derivations cannot await I/O, so the reader answers from a cache it fills
+   * in the background (`src/features/chat/fileBaseline.ts`).
+   */
+  readBaseline?: (path: string) => string | undefined;
+}
+
+function projectToolEvent(
+  view: ChatStreamView,
+  event: PromptStreamEvent,
+  options: ProjectStreamOptions = {},
+): ChatStreamView {
   const target = resolveTarget(view, event);
   if (!target) {
     return drop(view, event);
   }
-  const block = toToolProcessBlock(event);
+  const block = toToolProcessBlock(event, options);
   const streamedArgs = event.type === "tool_call_stream_delta" && typeof event.argsText === "string" && event.argsText !== "";
 
   return rememberTarget(
@@ -301,10 +320,20 @@ function projectToolEvent(view: ChatStreamView, event: PromptStreamEvent): ChatS
         // token; the parsed `args` only exists at `tool_call_stream_end`, which
         // replaces the text with pretty-printed JSON.
         const processBlocks = streamedArgs
-          ? appendToolCallArgsText(bubble.processBlocks ?? [], toolBlockOf(block), event.argsText ?? "")
+          ? appendToolCallArgsText(
+              bubble.processBlocks ?? [],
+              toolBlockOf(block),
+              event.argsText ?? "",
+              options.readBaseline,
+            )
           : upsertToolProcessBlock(bubble.processBlocks ?? [], block);
         const liveBlocks = streamedArgs
-          ? appendLiveToolCallArgsText(bubble.liveBlocks ?? [], toolBlockOf(block), event.argsText ?? "")
+          ? appendLiveToolCallArgsText(
+              bubble.liveBlocks ?? [],
+              toolBlockOf(block),
+              event.argsText ?? "",
+              options.readBaseline,
+            )
           : upsertLiveToolBlock(bubble.liveBlocks ?? [], block);
         if (processBlocks === bubble.processBlocks && liveBlocks === bubble.liveBlocks) {
           return bubble;
@@ -489,10 +518,17 @@ function drop(view: ChatStreamView, _event: PromptStreamEvent): ChatStreamView {
   return { ...view, droppedEvents: view.droppedEvents + 1 };
 }
 
-function toToolProcessBlock(event: PromptStreamEvent): MessageProcessBlock {
+function toToolProcessBlock(
+  event: PromptStreamEvent,
+  options: ProjectStreamOptions = {},
+): MessageProcessBlock {
   const done = event.type === "tool_execution_end";
   const toolName = event.toolName ?? "tool";
   const result = event.result === undefined ? event.partialResult : event.result;
+  // 服务端已经裁过（`__omitted` 在里面）；本地 loopback 路径没经过服务端，
+  // 这里再做一次预算，幂等。
+  const args = budgetToolArgs(event.args);
+  const resultText = result === undefined ? undefined : toolResultTextWithCut(result);
   return {
     kind: "tool",
     // Deliberately *not* `|| event.toolStreamId`: a stream slot and a call id are
@@ -501,18 +537,23 @@ function toToolProcessBlock(event: PromptStreamEvent): MessageProcessBlock {
     toolCallId: event.toolCallId || "",
     toolStreamId: event.toolStreamId,
     toolName,
-    callText: stringifyToolArgs(event.args),
+    callText: stringifyToolArgs(args),
     // The plain text of the result, never the raw envelope: this is what the
     // persisted-transcript path has always shown (`toolResultProcessText`), and
     // the live path used to disagree by printing `{"content":[…]}` verbatim.
-    resultText: result === undefined ? undefined : toolResultText(result),
+    resultText: resultText?.text,
+    resultTruncated: resultText?.cut ?? undefined,
     // Derived here rather than in the renderer so no component parses tool text.
     display: toolDisplayForBlock(
       deriveToolDisplay({
         toolName,
-        args: event.args,
+        args,
         result: event.result,
         partialResult: event.partialResult,
+        isError: done ? event.isError === true : undefined,
+        // A `write`'s removed count needs the file as it was before the call; the args
+        // only ever say what goes in.
+        baseline: writtenFileBaseline(toolName, event.args, options.readBaseline),
       }),
     ),
     status: done ? "done" : "streaming",
@@ -537,7 +578,7 @@ export function normalizeProcessBlock(block: StreamProcessBlock | null | undefin
     kind: "tool",
     toolCallId: block.toolCallId,
     toolName: block.toolName || "tool",
-    callText: stringifyToolArgs(block.arguments),
+    callText: stringifyToolArgs(budgetToolArgs(block.arguments)),
     display: toolDisplayForBlock(
       deriveToolDisplay({
         toolName: block.toolName || "tool",
@@ -547,6 +588,27 @@ export function normalizeProcessBlock(block: StreamProcessBlock | null | undefin
     ),
     status: "streaming",
   };
+}
+
+/**
+ * The pre-call content of the file a `write` is about to replace, if the host can supply it.
+ *
+ * Only `write`: an `edit` states both sides of its change in the arguments, so it needs no
+ * baseline to know its counts.
+ */
+function writtenFileBaseline(
+  toolName: string,
+  args: unknown,
+  readBaseline?: (path: string) => string | undefined,
+): string | undefined {
+  if (!readBaseline || toolRowFamily(toolName) !== "write") {
+    return undefined;
+  }
+  const path =
+    typeof args === "object" && args !== null && typeof (args as { path?: unknown }).path === "string"
+      ? ((args as { path: string }).path)
+      : "";
+  return path ? readBaseline(path) : undefined;
 }
 
 /**

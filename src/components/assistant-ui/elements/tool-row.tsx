@@ -27,14 +27,7 @@
  * panel, and everything else parameters + result.
  */
 
-import {
-  ChevronRightIcon,
-  PencilIcon,
-  PlugIcon,
-  SearchIcon,
-  SquareTerminalIcon,
-  WrenchIcon,
-} from "lucide-react";
+import { ChevronRightIcon } from "lucide-react";
 import {
   createContext,
   useCallback,
@@ -53,17 +46,9 @@ import {
 } from "@/components/ui/collapsible";
 import { useT } from "@/i18n/react";
 import { cn } from "@/lib/utils";
-import {
-  editOperationOfTool,
-  parseMcpToolName,
-  pathLeaf,
-  toolRowFamily,
-  toolRowFolder,
-  type ToolDisplay,
-} from "@/shared/toolDisplay";
-import { toWorkspaceRelativePath } from "@/shared/turnChangedFiles";
+import { toolRowFamily, type ToolDisplay } from "@/shared/toolDisplay";
 
-import { DiffBody, McpBody, PartsBody, TerminalBody } from "./tool-bodies";
+import { KIND_LABEL_CLASS, resolvePresentation } from "./tool-row-presentation";
 import { DiffCount, StatusWord } from "./tool-row-readouts";
 
 /* -------------------------------------------------------------------------- */
@@ -108,15 +93,6 @@ export function ToolRowFileOpenProvider({
   return <FileOpenContext.Provider value={onOpenFile}>{children}</FileOpenContext.Provider>;
 }
 
-/**
- * Whether the row's path can be opened by the host at all: the panel reads files
- * relative to the project root and refuses anything outside it, so an absolute path
- * from another checkout must not pretend to be clickable.
- */
-function isPanelPath(path: string): boolean {
-  return path !== "" && !path.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(path);
-}
-
 const CONTENT_UNMOUNT_DELAY_MS = 300;
 
 /** The summary row, verbatim from ZCode's `ToolSummaryRow`. */
@@ -126,9 +102,6 @@ const SUMMARY_ROW_CLASS =
 const SUMMARY_CONTENT_CLASS =
   "min-w-0 flex max-w-full items-center gap-2 text-foreground-subtlest";
 
-const KIND_LABEL_CLASS = "shrink-0 font-medium whitespace-nowrap";
-
-const PATH_TEXT_CLASS = "min-w-0 truncate text-foreground-subtlest";
 
 /* -------------------------------------------------------------------------- */
 /* Row                                                                        */
@@ -144,8 +117,19 @@ export interface ToolRowProps {
   /** Pi Desktop's in-flight output: a present `result` would mean "finished". */
   partialResult?: string;
   isError?: boolean;
+  /**
+   * assistant-ui's part status (`{ type: "running" | "complete" | ... }`). The slot
+   * component is rendered as `<ToolFallbackComponent {...part} />`, so this is the
+   * field that actually says whether the call is in flight — before this was read,
+   * `running` fell back to `false` and every verb sat in its settled form, which is
+   * the same as showing nothing at all.
+   */
+  status?: { type: string };
+  /** Explicit override, for tests and for callers that already know. */
   running?: boolean;
   display?: ToolDisplay;
+  /** `resultText` 是被预算裁过的（原文更大）。 */
+  resultTruncated?: { bytes: number; lines: number };
 }
 
 export function ToolRow({
@@ -156,17 +140,22 @@ export function ToolRow({
   result,
   partialResult,
   isError,
-  running = false,
+  status,
+  running,
   display,
+  resultTruncated,
 }: ToolRowProps) {
   const t = useT();
   const workspaceRoot = useContext(WorkspaceRootContext);
   const family = toolRowFamily(toolName);
+  // `status` is the real source; `running` stays for direct callers. A settled
+  // transcript has no `status`, and must never render as running.
+  const isRunning = running ?? status?.type === "running";
   const resultText = result ?? partialResult ?? "";
   const presentation = useMemo(
     () =>
-      resolvePresentation({ t, family, toolName, args, display, running, workspaceRoot }),
-    [args, display, family, running, t, toolName, workspaceRoot],
+      resolvePresentation({ t, family, toolName, args, display, running: isRunning, workspaceRoot }),
+    [args, display, family, isRunning, t, toolName, workspaceRoot],
   );
 
   const body = presentation.body;
@@ -174,8 +163,8 @@ export function ToolRow({
     if (!body) {
       return null;
     }
-    return body({ display, argsText, resultText, isError: Boolean(isError), t });
-  }, [argsText, body, display, isError, resultText, t]);
+    return body({ display, argsText, resultText, resultTruncated, isError: Boolean(isError), t });
+  }, [argsText, body, display, isError, resultText, resultTruncated, t]);
 
   return (
     <ToolRowLayout
@@ -190,7 +179,7 @@ export function ToolRow({
       diff={presentation.diff}
       statusLabel={isError ? t("process.status.failed") : presentation.statusLabel}
       statusTooltip={isError ? resultText : undefined}
-      running={running}
+      running={isRunning}
       title={presentation.title}
       canToggle={presentation.canToggle && body !== undefined}
       renderBody={renderBody}
@@ -198,266 +187,6 @@ export function ToolRow({
   );
 }
 
-interface Presentation {
-  icon: ReactNode;
-  kindLabel: ReactNode;
-  kindDetail?: ReactNode;
-  primaryText?: ReactNode;
-  /** Workspace-relative path of the single file this row points at, when there is one. */
-  filePath?: string;
-  secondaryText?: ReactNode;
-  separator?: ReactNode;
-  diff?: { added: number; removed: number };
-  statusLabel?: string;
-  title?: string;
-  canToggle: boolean;
-  body?: (input: BodyInput) => ReactNode;
-}
-
-interface BodyInput {
-  display?: ToolDisplay;
-  argsText?: string;
-  resultText: string;
-  isError: boolean;
-  t: (key: string, params?: Record<string, string | number>) => string;
-}
-
-const ROW_ICON_CLASS = "size-4 shrink-0 text-foreground-subtle";
-
-function resolvePresentation({
-  t,
-  family,
-  toolName,
-  args,
-  display,
-  running,
-  workspaceRoot,
-}: {
-  t: (key: string, params?: Record<string, string | number>) => string;
-  family: ReturnType<typeof toolRowFamily>;
-  toolName: string;
-  args: unknown;
-  display?: ToolDisplay;
-  running: boolean;
-  workspaceRoot: string;
-}): Presentation {
-  switch (family) {
-    case "read": {
-      const path = display?.kind === "read" ? (display.path ?? "") : "";
-      const relative = toWorkspaceRelativePath(path, workspaceRoot);
-      return {
-        icon: <SearchIcon className={ROW_ICON_CLASS} />,
-        kindLabel: t(running ? "process.tool.read.running" : "process.tool.read.done"),
-        primaryText: relative ? (
-          <span className={cn("min-w-0 truncate text-foreground-subtle")} title={relative}>
-            {pathLeaf(relative)}
-          </span>
-        ) : null,
-        filePath: isPanelPath(relative) ? relative : undefined,
-        secondaryText: toolRowFolder(relative, workspaceRoot) ? (
-          <span data-slot="tool-row-path" className={PATH_TEXT_CLASS} title={relative}>
-            {toolRowFolder(relative, workspaceRoot)}
-          </span>
-        ) : null,
-        title: relative || toolName,
-        // ZCode's read renderer is summary-only: the file is the answer, and its
-        // content already exists in the transcript as the tool's result text.
-        canToggle: false,
-      };
-    }
-    case "write":
-    case "edit": {
-      const files = display?.kind === "fileDiff" ? display.files : [];
-      if (files.length === 0) {
-        return fallbackPresentation({ t, toolName, running });
-      }
-      const operation = editOperationOfTool(toolName);
-      const key =
-        operation === "write"
-          ? running
-            ? "process.tool.write.running"
-            : "process.tool.write.done"
-          : running
-            ? "process.tool.edit.running"
-            : "process.tool.edit.done";
-      const relativePaths = files.map((file) => toWorkspaceRelativePath(file.path, workspaceRoot));
-      const totals = files.reduce(
-        (sum, file) => ({ added: sum.added + file.added, removed: sum.removed + file.removed }),
-        { added: 0, removed: 0 },
-      );
-      const first = relativePaths[0] ?? "";
-      const multiple = files.length > 1;
-      return {
-        icon: <PencilIcon className={ROW_ICON_CLASS} />,
-        kindLabel: t(key),
-        // ZCode joins the file chips under one verb and lists them; the second
-        // text carries the directory of the first file.
-        primaryText: multiple ? (
-          <span className="min-w-0 truncate text-foreground-subtle" title={relativePaths.join(", ")}>
-            {t(files.length === 1 ? "process.tool.fileCount.one" : "process.tool.fileCount.other", {
-              count: files.length,
-            })}
-          </span>
-        ) : (
-          <span className="min-w-0 truncate text-foreground-subtle" title={first}>
-            {pathLeaf(first)}
-          </span>
-        ),
-        filePath: !multiple && isPanelPath(first) ? first : undefined,
-        secondaryText:
-          !multiple && toolRowFolder(first, workspaceRoot) ? (
-            <span data-slot="tool-row-path" className={PATH_TEXT_CLASS} title={first}>
-              {toolRowFolder(first, workspaceRoot)}
-            </span>
-          ) : null,
-        diff: totals.added > 0 || totals.removed > 0 ? totals : undefined,
-        title: relativePaths.join(", ") || toolName,
-        canToggle: true,
-        body: (input) => (
-          <DiffBody
-            files={input.display?.kind === "fileDiff" ? input.display.files : files}
-            workspaceRoot={workspaceRoot}
-            t={t}
-          />
-        ),
-      };
-    }
-    case "execute": {
-      const command = stringArg(args, ["command", "cmd", "script"]) ?? "";
-      const terminal = display?.kind === "terminal" ? display : undefined;
-      return {
-        icon: <SquareTerminalIcon className={ROW_ICON_CLASS} />,
-        kindLabel: t(running ? "process.tool.execute.running" : "process.tool.execute.done"),
-        primaryText: null,
-        // Collapsed, the command is body text on the row (ZCode keeps sans here
-        // and switches to mono only for the expanded copy).
-        secondaryText: command ? (
-          <code className="min-w-0 truncate font-sans" title={command}>
-            {command}
-          </code>
-        ) : null,
-        title: command || toolName,
-        canToggle: true,
-        body: (input) => (
-          <TerminalBody
-            command={command}
-            output={terminal?.output ?? input.resultText}
-            exitCode={terminal?.exitCode}
-            omittedPath={terminal?.fullOutputPath}
-            running={running}
-            hasResult={input.resultText.length > 0 || terminal !== undefined}
-            t={t}
-          />
-        ),
-      };
-    }
-    case "search": {
-      const pattern = stringArg(args, ["pattern", "query", "glob"]) ?? "";
-      const path = stringArg(args, ["path", "cwd"]) ?? "";
-      const label =
-        toolName === "ls"
-          ? path
-            ? t("process.tool.search.listIn", { cwd: toWorkspaceRelativePath(path, workspaceRoot) })
-            : t("process.tool.search.list")
-          : pattern
-            ? t("process.tool.search.findWithQuery", { query: pattern })
-            : t("process.tool.search.find");
-      return {
-        icon: <SearchIcon className={ROW_ICON_CLASS} />,
-        kindLabel: t(running ? "process.tool.search.running" : "process.tool.search.done"),
-        primaryText: <span className="min-w-0 truncate">{label}</span>,
-        title: label,
-        canToggle: false,
-      };
-    }
-    case "mcp": {
-      const parsed = parseMcpToolName(toolName);
-      const server = parsed ? humanizeIdentifier(parsed.server) : undefined;
-      const tool = parsed ? stripRepeatedPrefix(humanizeIdentifier(parsed.tool), server ?? "") : "";
-      const label = tool || humanizeIdentifier(toolName);
-      return {
-        icon: <PlugIcon className={ROW_ICON_CLASS} />,
-        kindLabel: t("process.tool.mcp"),
-        kindDetail: server ? <span className="text-foreground-subtle">{server}</span> : undefined,
-        primaryText: <span className="min-w-0 truncate text-foreground-subtle" title={label}>{label}</span>,
-        separator: "·",
-        title: toolName,
-        canToggle: true,
-        body: (input) => (
-          <McpBody argsText={input.argsText} resultText={input.resultText} isError={input.isError} t={t} />
-        ),
-      };
-    }
-    default:
-      return fallbackPresentation({ t, toolName, running });
-  }
-}
-
-/**
- * ZCode's fallback renderer: the tool's own name capitalized as the kind, a
- * generic title, and the lifecycle word as the secondary text (its only visible
- * status, since it has no dedicated renderer to shimmer a verb for it).
- */
-function fallbackPresentation({
-  t,
-  toolName,
-  running,
-}: {
-  t: (key: string, params?: Record<string, string | number>) => string;
-  toolName: string;
-  running: boolean;
-}): Presentation {
-  const kind = humanizeIdentifier(toolName);
-  return {
-    icon: <WrenchIcon className={ROW_ICON_CLASS} />,
-    kindLabel: kind.charAt(0).toUpperCase() + kind.slice(1),
-    primaryText: <span className="min-w-0 truncate text-foreground-subtle">{t("process.tool.call")}</span>,
-    secondaryText: running ? (
-      <span className="shrink-0 whitespace-nowrap">{t("process.status.running")}</span>
-    ) : undefined,
-    statusLabel: running ? undefined : t("process.status.completed"),
-    title: toolName,
-    canToggle: true,
-    body: (input) => (
-      <PartsBody argsText={input.argsText} resultText={input.resultText} isError={input.isError} t={t} />
-    ),
-  };
-}
-
-function stringArg(args: unknown, keys: readonly string[]): string | undefined {
-  if (typeof args === "string") {
-    return args.trim() || undefined;
-  }
-  if (typeof args !== "object" || args === null || Array.isArray(args)) {
-    return undefined;
-  }
-  const record = args as Record<string, unknown>;
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value.trim();
-    }
-  }
-  return undefined;
-}
-
-/** `my_server` / `my-server` → `my server`. */
-function humanizeIdentifier(value: string): string {
-  return value.replace(/[_-]+/g, " ").trim();
-}
-
-/** MCP tools often repeat their server name; the row already shows it. */
-function stripRepeatedPrefix(label: string, server: string): string {
-  const prefix = `${server} `;
-  if (server && label.toLowerCase().startsWith(prefix.toLowerCase())) {
-    return label.slice(prefix.length);
-  }
-  return label;
-}
-
-/* -------------------------------------------------------------------------- */
-/* Layout                                                                     */
-/* -------------------------------------------------------------------------- */
 
 function ToolRowLayout({
   toolCallId,
@@ -537,9 +266,16 @@ function ToolRowLayout({
         {icon}
       </span>
       <span
+        data-slot="tool-row-kind"
+        data-running={running ? "" : undefined}
         className={cn(
           KIND_LABEL_CLASS,
-          running ? "shimmer motion-reduce:animate-none" : "text-foreground-subtlest",
+          // `shimmer-spread` / `shimmer-angle` are load-bearing for short labels: the
+          // plugin's defaults (4ch + 80px spread, 200px track, 15°) put a *four-character*
+          // verb (「正在写入」) permanently inside the soft band, so it reads as dim grey
+          // instead of "solid text with a highlight passing over it". A narrow, unangled
+          // band keeps the text at full strength and only sweeps a stripe across it.
+          running ? "shimmer shimmer-spread-30 shimmer-angle-0 motion-reduce:animate-none" : "text-foreground-subtlest",
         )}
       >
         {kindLabel}

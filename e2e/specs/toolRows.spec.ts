@@ -71,10 +71,20 @@ test("edit 行：摘要行说出动作与文件，展开是内联 diff", async (
 
   await sendMessage(page, "E2E-TOOL-EDIT 改一下 demo.ts");
 
+  // 第二轮（拿到工具结果之后的文本）真的到达了：这一轮没有卡在工具那一跃。
+  await expect(page.locator("[data-message-id$='#assistant']").last()).toContainText("E2E-3 done", {
+    timeout: 30_000,
+  });
+  await turnFinished(page);
+  // 落定后过程区自动折叠、行跟着退场。先点开它 —— 这里要验的是**行的语法**，
+  // 不是「流式途中它恰好在某个时刻可点」（后者是另一条用例的事，也很容易踩到
+  // 「轮次已经收尾、区域已折叠」这个瞬间）。
+  await expandProcessRegion(page);
+
   // 摘要行：图标 + 动作词 + 文件名 + diff 计数。动作词来自**工具名**（`edit` 就是 Edit）：
   // 「只插入几行」的补丁和「write 覆盖成超集」形状一样，形状不能当证据。
   const row = page.locator('[data-slot="tool-row"]').filter({ hasText: "demo.ts" }).first();
-  await expect(row).toBeVisible({ timeout: 30_000 });
+  await expect(row).toBeVisible({ timeout: 15_000 });
   await expect(row).toContainText("demo.ts");
   await expect(row).toContainText("+1");
   await expect(row).toContainText("−1");
@@ -94,18 +104,18 @@ test("edit 行：摘要行说出动作与文件，展开是内联 diff", async (
   await expect(page.locator('[data-diff-line="removed"]')).toContainText("alpha");
   await expect(added).not.toContainText("+beta");
 
-  // 第二轮（拿到工具结果之后的文本）真的到达了：这一轮没有卡在工具那一跃。
-  await expect(page.locator("[data-message-id$='#assistant']").last()).toContainText("E2E-3 done", {
-    timeout: 30_000,
-  });
-  await turnFinished(page);
+  // 第二遍：语法高亮是**异步补**的（ZCode 同款，先纯文本首帧，token 到了才换上）。
+  // 所以这里轮询 —— 断言的是"最终会有颜色"，不是"点开那一帧就有"。
+  await expect
+    .poll(
+      async () =>
+        page
+          .locator('[data-slot="diff-body"] [data-diff-highlight] span[style*="color"]')
+          .count(),
+      { timeout: 15_000 },
+    )
+    .toBeGreaterThan(0);
 
-  // 落定后过程区先自动折叠、行也退场了；截图要看的是**用户点开之后**的样子
-  // （「编辑 demo.ts · 项目名/ +1 −1」和真正的内联 diff），所以再展开一次。
-  await expandProcessRegion(page);
-  await page.locator('[data-slot="tool-row"]').filter({ hasText: "demo.ts" }).first()
-    .locator('[role="button"]').click({ position: { x: 6, y: 8 } });
-  await expect(page.locator("[data-diff-line]", { hasText: "beta" }).first()).toBeVisible();
   await page.waitForTimeout(400);
   await shoot(page, "tool-row-edit-light");
   // 走应用自己的主题开关（而不是往 <html> 上贴 class）：截图拍的必须是用户能到达的状态。
@@ -113,6 +123,124 @@ test("edit 行：摘要行说出动作与文件，展开是内联 diff", async (
   await page.waitForTimeout(200);
   await shoot(page, "tool-row-edit-dark");
   await page.getByRole("button", { name: "切换到浅色主题" }).click();
+});
+
+/**
+ * 写大文件时，行里的 `+N` 是**边流边涨**的（ZCode 的形态），不是等工具跑完一次性出现。
+ *
+ * 这条必须在真浏览器里量：数字来自「参数文本已到达多少」→ 投影层的节流重算 → 行的
+ * `DiffCount`。单元测试钉得住解析与节流，但「用户看得见它涨」只能端到端验。
+ */
+test("write 大文件：参数还在流的时候 +N 就在涨（覆盖既有文件时还给出 −M）", async ({ page, harness }) => {
+  // 先放一份**已有内容**的文件：`−M` 只能来自写入前的正文，所以这条同时验「基线真的读到了」。
+  writeFileSync(join(harness.workspaceDir, "notes.md"), Array.from({ length: 5 }, (_, index) => `旧第 ${index + 1} 行`).join("\n") + "\n");
+  await openProject(page, harness);
+
+  await sendMessage(page, "E2E-TOOL-WRITE 写一个说明文件");
+
+  const row = page.locator('[data-slot="tool-row"]').filter({ hasText: "notes.md" }).first();
+  await expect(row).toBeVisible({ timeout: 30_000 });
+
+  // 运行态：动作词是「正在写入」并带扫光。这是用户报的 bug（跑起来永远显示「写入」、
+  // 一点光都没有）：`status` 没接进来 ⇒ running 恒为 false。断言分两半 —— 文案、以及
+  // 那个 span 真的在跑 `tw-shimmer` 动画（只有类名不算，CSS 可能被覆盖）。
+  const kind = row.locator('[data-slot="tool-row-kind"]');
+  await expect(kind).toContainText(/正在写入/);
+  // 用字符串形式的 evaluate：e2e 参与 `tsc -p tsconfig.node-runtime.json`，那份配置
+  // 没有 DOM lib，写成函数就会在 node 侧类型检查里报 `getComputedStyle` 未定义。
+  const live = await kind.evaluate((element) => {
+    // `getComputedStyle` 这个全局在 e2e 的 node 侧类型检查里不存在（那份 tsconfig 没有
+    // DOM lib），所以走元素自己的 window。写成函数（而不是字符串）才有真实返回值。
+    const style = element.ownerDocument.defaultView!.getComputedStyle(element);
+    return {
+      animation: style.animationName,
+      fill: style.webkitTextFillColor,
+      running: element.getAttribute("data-running"),
+    };
+  });
+  assert.ok(live.running !== null, "运行中的动作词要带 data-running");
+  assert.match(live.animation, /shimmer/i, `动作词应当在跑扫光动画，实际 ${live.animation}`);
+  // 扫光靠 `background-clip: text` + 透明填充色生效；填充色不透明说明渐变没接上。
+  assert.match(live.fill, /rgba\(0, 0, 0, 0\)|transparent/, `扫光没生效：fill=${live.fill}`);
+
+  // 采样：只认「已经出现数字」的帧。至少要有一次 0 < N < 24，才能说明它**中途**更新过。
+  const seen = new Set<number>();
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const label = await row.locator('[aria-label^="+"]').first().getAttribute("aria-label").catch(() => null);
+    if (label) {
+      const value = Number(label.slice(1));
+      if (Number.isFinite(value)) {
+        seen.add(value);
+        if (value > 0 && value < 24) {
+          // 留一张「还在涨」的证据（工具还没跑，数字已经在了）。
+          await shoot(page, "write-row-growing");
+          break;
+        }
+      }
+    }
+    await page.waitForTimeout(30);
+  }
+  assert.ok(
+    [...seen].some((value) => value > 0 && value < 24),
+    `应当观察到增长中的中间值，实际只看到 ${JSON.stringify([...seen])}`,
+  );
+
+  // 收尾：参数收齐后行里就是最终行数，正文是整文件的 diff。`−5` 来自写入前的正文
+  //（宿主按相对路径读到旧文件；读不到时这一档只会显示 `+N`，见 ADR-006 §15）。
+  await expect(row.locator('[aria-label^="+"]').first()).toHaveAttribute("aria-label", "+24", { timeout: 30_000 });
+  await expect(row.locator('[aria-label^="-"]').first()).toHaveAttribute("aria-label", "-5", { timeout: 30_000 });
+  // 落定后动作词回到名词形态，扫光与 data-running 一起消失（行不再声称还在进行）。
+  await expect(kind).toContainText(/^写入$/);
+  assert.equal(await kind.getAttribute("data-running"), null, "落定后不许再标运行中");
+  assert.equal(
+    await kind.evaluate(
+      (element) => element.ownerDocument.defaultView!.getComputedStyle(element).animationName,
+    ),
+    "none",
+    "落定后动画要停",
+  );
+  await row.locator('[role="button"]').click({ position: { x: 6, y: 8 } });
+  await expect(page.locator('[data-diff-line="added"]').first()).toContainText("第 1 条");
+});
+
+/**
+ * 超出预算的 write：正文不随流传输，但**行里的数字仍然是真的**。
+ *
+ * 一份 8000 行的文件（约 800 KB）远超线上单字段上限（32 KiB）。服务端在发帧前裁成
+ * head + tail 并把原始行数记进 `__omitted`；行必须据此显示 `+8000`，正文位置说明
+ * 「未随流传输」，而不是渲染一个空的 diff（空 diff 看起来像"没有改动"）。
+ */
+test("超大 write：行里是真实行数，正文说明「未随流传输」而不是空 diff", async ({ page, harness }) => {
+  await openProject(page, harness);
+
+  await sendMessage(page, "E2E-TOOL-WRITE-BIG 写一个很大的文件");
+
+  // 先等这一轮真的结束。**不要**在流式途中断言最终行数：打字机在 64 KiB 处就停发了，
+  // 而整轮落定时过程区会自动折叠、行随之卸载——中途看到的永远是预览值（+412/+617/…）。
+  await expect(page.locator("[data-message-id$='#assistant']").last()).toContainText("E2E-3 done", {
+    timeout: 90_000,
+  });
+  await turnFinished(page);
+
+  // 折叠后重新展开：这时行是由**落定后**的数据重建的（快照/转录路径），
+  // 行里的数字必须来自裁剪前的原文，而不是 head/tail 预览。
+  const region = page.locator('[data-slot="aui_process-group"]').last();
+  await region.locator("> div > button").click();
+  const row = region.locator('[data-slot="tool-row"]').filter({ hasText: "big.md" }).first();
+  await expect(row).toBeVisible();
+  await expect(row.locator('[aria-label^="+"]').first()).toHaveAttribute("aria-label", "+8000");
+
+  await row.locator('[role="button"]').first().click();
+  const body = page.locator('[data-slot="diff-body"]');
+  await expect(body).toBeVisible();
+  await expect(body).toContainText("未随流传输");
+  // 关键反例：不许拿 head/tail 预览去造 diff 行。
+  await expect(body.locator("[data-diff-line]")).toHaveCount(0);
+
+  // 展开是高度动画（内容先渲染、再长高）：不等它，截图会拍到高度 0 的那一帧。
+  await page.waitForTimeout(400);
+  await shoot(page, "tool-row-write-omitted-light");
 });
 
 test("bash 行：展开是终端正文，含 $ 提示符与输出", async ({ page, harness }) => {
@@ -147,6 +275,20 @@ test("思考行：默认收起、单行尾巴、落定后给时长", async ({ pa
   // 运行中：标签是「正在思考」，尾巴是**最后一行**（不是开头那句）。
   await expect(trigger).toContainText("正在思考");
   await expect(trigger.locator("[data-reasoning-streaming-line]")).toBeAttached();
+
+  // 而且这行字**在动**：类名不够，量的是计算样式。曾经它同时挂着 40% 的淡色，
+  // 扫光只剩 8% 不透明度（等于没有效果），所以这里同时钉动画和"填充色被渐变接管"。
+  const sweep = await trigger
+    .locator(".shimmer")
+    .first()
+    .evaluate((element) => {
+      const style = element.ownerDocument.defaultView!.getComputedStyle(element);
+      return { animation: style.animationName, fill: style.webkitTextFillColor };
+    });
+  assert.match(sweep.animation, /shimmer/i, `「正在思考」应当有扫光动画，实际 ${sweep.animation}`);
+  assert.match(sweep.fill, /rgba\(0, 0, 0, 0\)|transparent/, `扫光没有接管填充色：${sweep.fill}`);
+  // 证据：运行中的一行（「正在思考」+ 单行尾巴）。扫光是一条动画，静态图只能看形态。
+  await shoot(page, "thinking-row-running-light");
 
   // 收起态：思考行自己的正文不在 DOM 里 —— 行默认收起，只有读者点它才开。
   await expect(page.locator('[data-slot="thinking-text"]')).toHaveCount(0);

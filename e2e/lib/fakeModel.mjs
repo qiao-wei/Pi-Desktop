@@ -18,6 +18,35 @@ export const E2E_MODEL_NAME = "E2E Model";
 
 const DEFAULT_CHUNKS = ["E2E-1 ", "E2E-2 ", "E2E-3 done"];
 
+/** 把一段文本切成固定长度的块（工具参数要像真 provider 那样逐块下发）。 */
+function chunkText(text, size) {
+  const chunks = [];
+  for (let index = 0; index < text.length; index += size) {
+    chunks.push(text.slice(index, index + size));
+  }
+  return chunks;
+}
+
+/**
+ * 写一个大文件：参数本身分块到达时，行里的 `+N` 应该在**工具跑起来之前**就一路涨起来
+ * （ZCode 的形态）。这里的正文够长，好让用例真的观察到中间的某个值。
+ */
+const WRITE_FILE_LINES = Array.from(
+  { length: 24 },
+  (_, index) => `第 ${index + 1} 条：这是 demo.md 里的一行说明文字。`,
+);
+
+/**
+ * 一个**大到必须被预算裁掉**的 write：正文约 300 KB，远超线上单字段上限（32 KiB）。
+ *
+ * 参数分块要放大（默认 32 字符/块会让 300 KB 变成近万次 tick），但仍然是分块到达的——
+ * 用例要验证的正是「流式参数超过上限后停发、收尾帧带裁剪后的对象」这条路径。
+ */
+const BIG_WRITE_LINES = Array.from(
+  { length: 8000 },
+  (_, index) => `第 ${index + 1} 行：这一行存在的目的是把参数撑到预算之外（big write）。`,
+);
+
 /**
  * 脚本化工具调用：用户消息里出现 marker 时，这一轮先回一个工具调用，拿到工具结果后再回文本。
  *
@@ -42,6 +71,21 @@ const TOOL_REQUESTS = {
     arguments: JSON.stringify({
       path: "src/notes/demo.ts",
       edits: [{ oldText: "alpha", newText: "beta" }],
+    }),
+  },
+  "E2E-TOOL-WRITE": {
+    name: "write",
+    arguments: JSON.stringify({
+      path: "notes.md",
+      content: `${WRITE_FILE_LINES.join("\n")}\n`,
+    }),
+  },
+  "E2E-TOOL-WRITE-BIG": {
+    name: "write",
+    chunkSize: 8192,
+    arguments: JSON.stringify({
+      path: "big.md",
+      content: `${BIG_WRITE_LINES.join("\n")}\n`,
     }),
   },
   "E2E-TOOL-BASH": {
@@ -226,7 +270,12 @@ export async function startFakeModel(options = {}) {
         ],
       });
       await sleep(chunkDelayMs);
-      delta({ tool_calls: [{ index: 0, function: { arguments: toolCall.arguments } }] });
+      // 参数**分块**发：真实 provider 就是这样逐 token 吐 `arguments` 的，而「行里的 +N 会不会
+      // 跟着涨」只有在参数真的分段到达时才验得出来（一次性发完就等于跳过整段流式形态）。
+      for (const chunk of chunkText(toolCall.arguments, toolCall.chunkSize ?? 32)) {
+        delta({ tool_calls: [{ index: 0, function: { arguments: chunk } }] });
+        await sleep(chunkDelayMs);
+      }
       delta({}, "tool_calls");
       res.write("data: [DONE]\n\n");
       res.end();

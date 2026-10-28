@@ -15,6 +15,7 @@
 import type { MessageProcessBlock } from "../types";
 import { messageToText } from "./messageText.ts";
 import { deriveToolDisplay, toolDisplayForBlock, type ToolDisplay } from "./toolDisplay.ts";
+import { budgetToolResultText, type PayloadCut } from "./toolPayloadBudget.ts";
 
 /**
  * The subset of a transcript message this module reads. Structural rather than
@@ -38,20 +39,43 @@ export function toolResultProcessText(message: ToolResultMessageLike): string {
 }
 
 /**
+ * The persisted result text with the wire budget applied.
+ *
+ * A transcript from disk can hold whatever an extension tool returned; a snapshot
+ * carrying a 20 MB blob would refill the same socket the live stream just drained.
+ * The cut is returned alongside so the block can mark itself as shortened.
+ */
+export function toolResultProcessTextWithCut(message: ToolResultMessageLike): {
+  text: string;
+  cut: PayloadCut | null;
+} {
+  const text = toolResultProcessText(message);
+  const { text: cut, cut: info } = budgetToolResultText(text);
+  return { text: cut, cut: info };
+}
+
+/**
  * A tool result with no call before it: the model-visible history starts at the
  * `user` message, so a result whose call scrolled out of the window still has to
  * render as a row. The arguments are gone, hence `(tool call completed)`.
  */
 export function toolResultAsProcessBlock(message: ToolResultMessageLike): ToolProcessBlock {
   const toolName = String(message.toolName ?? "tool");
+  const result = toolResultProcessTextWithCut(message);
   return {
     kind: "tool",
     toolCallId: String(message.toolCallId ?? ""),
     toolName,
     callText: "(tool call completed)",
-    resultText: toolResultProcessText(message),
+    resultText: result.text,
+    resultTruncated: result.cut ?? undefined,
     display: toolDisplayForBlock(
-      deriveToolDisplay({ toolName, args: undefined, result: toolResultEnvelope(message) }),
+      deriveToolDisplay({
+        toolName,
+        args: undefined,
+        result: toolResultEnvelope(message),
+        isError: Boolean(message.isError),
+      }),
     ),
     status: "done",
     isError: Boolean(message.isError),
@@ -74,6 +98,7 @@ export function toolResultDisplay(
       toolName: block.toolName,
       args: parseToolArgsText(block.callText),
       result: toolResultEnvelope(message),
+      isError: Boolean(message.isError),
     }),
   );
 }

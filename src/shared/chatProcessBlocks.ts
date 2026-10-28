@@ -1,17 +1,30 @@
 import type { ChatMessage, MessageLiveBlock, MessageProcessBlock } from "../types";
+import {
+  findPendingToolBlockIndex,
+  findToolBlockIndex,
+  isToolProcessBlock,
+  samePayloadCut,
+  toolProcessBlockKeys,
+  toolProcessBlocksMatch,
+} from "./chatToolBlockIndex.ts";
 import { sameToolDisplay } from "./toolDisplay.ts";
+import { streamedArgsDisplay } from "./toolArgsPreview.ts";
+
+// 这些是工具卡片身份的一部分，历史上从本模块导出（`bootstrapPatch` 在用）。
+export {
+  findPendingToolBlockIndex,
+  isToolProcessBlock,
+  toolProcessBlockKeys,
+  toolProcessBlocksMatch,
+};
 
 /**
  * The process-block algebra behind a streaming assistant bubble: thinking text,
- * interim "notice" text and tool blocks, merged without ever rebuilding blocks
- * that did not change.
- *
- * The server repeats the *cumulative* payload on every coalesced tick, so these
- * merges are the reason a repeated event stays a no-op instead of turning into a
- * new object identity per token (which previously rebuilt the whole thread).
- *
- * Lives next to `chatBubbles.ts` because the transcript -> bubble builder and
- * the stream projection both need exactly one copy of these rules.
+ * interim "notice" text and tool blocks, merged without ever rebuilding blocks that
+ * did not change. The server repeats the *cumulative* payload on every coalesced
+ * tick, so these merges are why a repeated event stays a no-op instead of turning
+ * into a new object identity per token. Lives next to `chatBubbles.ts`: the
+ * transcript builder and the stream projection need exactly one copy of these rules.
  */
 
 function sameBlocks(a: MessageProcessBlock, b: MessageProcessBlock): boolean {
@@ -28,6 +41,7 @@ function sameBlocks(a: MessageProcessBlock, b: MessageProcessBlock): boolean {
       a.toolName === b.toolName &&
       a.callText === b.callText &&
       a.resultText === b.resultText &&
+      samePayloadCut(a.resultTruncated, b.resultTruncated) &&
       sameToolDisplay(a.display, b.display) &&
       a.isError === b.isError &&
       a.status === b.status
@@ -37,61 +51,6 @@ function sameBlocks(a: MessageProcessBlock, b: MessageProcessBlock): boolean {
     return a.text === b.text && a.streamKey === b.streamKey && a.open === b.open;
   }
   return (a as { text: string }).text === (b as { text: string }).text;
-}
-
-export function isToolProcessBlock(block: MessageProcessBlock): block is Extract<MessageProcessBlock, { kind: "tool" }> {
-  return block.kind === "tool";
-}
-
-export function toolProcessBlockKeys(block: Extract<MessageProcessBlock, { kind: "tool" }>): string[] {
-  return [
-    block.toolCallId ? `id:${block.toolCallId}` : "",
-    block.toolStreamId ? `stream:${block.toolStreamId}` : "",
-  ].filter(Boolean);
-}
-
-export function toolProcessBlocksMatch(
-  first: Extract<MessageProcessBlock, { kind: "tool" }>,
-  second: Extract<MessageProcessBlock, { kind: "tool" }>,
-): boolean {
-  const firstKeys = new Set(toolProcessBlockKeys(first));
-  return toolProcessBlockKeys(second).some((key) => firstKeys.has(key));
-}
-
-/**
- * A tool block whose call id never arrived: it exists only as a stream slot, so
- * a later event that finally names the call has to *bind* into it rather than
- * open a second card for the same call.
- */
-function isPendingToolBlock(
-  block: MessageProcessBlock | MessageLiveBlock,
-  toolName: string,
-): block is Extract<MessageProcessBlock, { kind: "tool" }> {
-  return (
-    block.kind === "tool" &&
-    !block.toolCallId &&
-    (block.toolName === toolName || !toolName || block.toolName === "tool")
-  );
-}
-
-/**
- * Index of the placeholder a call id should be bound to. FIFO on purpose: pi
- * executes the tool calls of a message in transcript order, so the first
- * still-anonymous card is the one this execution belongs to.
- */
-export function findPendingToolBlockIndex(
-  blocks: readonly (MessageProcessBlock | MessageLiveBlock)[],
-  toolName: string,
-): number {
-  if (!toolName) {
-    return -1;
-  }
-  for (let index = 0; index < blocks.length; index += 1) {
-    if (isPendingToolBlock(blocks[index], toolName)) {
-      return index;
-    }
-  }
-  return -1;
 }
 
 /**
@@ -155,6 +114,7 @@ export function mergeAssistantProcessBlocks(
         callText: block.callText || "",
         resultText: block.resultText,
         ...(block.display === undefined ? {} : { display: block.display }),
+        ...(block.resultTruncated === undefined ? {} : { resultTruncated: block.resultTruncated }),
         isError: block.isError,
         status: block.status ?? "streaming",
       });
@@ -179,6 +139,9 @@ export function mergeAssistantProcessBlocks(
       callText: block.callText || prior.callText,
       resultText: block.resultText ?? prior.resultText,
       ...(display === undefined ? {} : { display }),
+      ...(block.resultTruncated ?? prior.resultTruncated
+        ? { resultTruncated: block.resultTruncated ?? prior.resultTruncated }
+        : {}),
       isError: block.isError ?? prior.isError,
       status: block.status ?? prior.status ?? "streaming",
     });
@@ -387,6 +350,9 @@ function upsertToolBlock<T extends MessageProcessBlock | MessageLiveBlock>(
       callText: block.callText || prior.callText,
       resultText: block.resultText ?? prior.resultText,
       ...(display === undefined ? {} : { display }),
+      ...(block.resultTruncated ?? prior.resultTruncated
+        ? { resultTruncated: block.resultTruncated ?? prior.resultTruncated }
+        : {}),
       isError: block.isError ?? prior.isError,
       status: block.status ?? prior.status,
     } as unknown as T;
@@ -524,23 +490,11 @@ export function appendLiveThinkingBlock(
 }
 
 /** The block a streamed tool-call argument belongs to: last match wins. */
-function findToolBlockIndex<T extends MessageProcessBlock | MessageLiveBlock>(
-  blocks: readonly T[],
-  probe: Extract<MessageProcessBlock, { kind: "tool" }>,
-): number {
-  for (let index = blocks.length - 1; index >= 0; index -= 1) {
-    const item = blocks[index];
-    if (item.kind === "tool" && toolProcessBlocksMatch(item, probe)) {
-      return index;
-    }
-  }
-  return -1;
-}
-
 function appendToolArgsText<T extends MessageProcessBlock | MessageLiveBlock>(
   blocks: readonly T[],
   probe: Extract<MessageProcessBlock, { kind: "tool" }>,
   delta: string,
+  readBaseline?: (path: string) => string | undefined,
 ): T[] {
   if (!delta) {
     return blocks as T[];
@@ -559,10 +513,12 @@ function appendToolArgsText<T extends MessageProcessBlock | MessageLiveBlock>(
 
   const current = blocks[index] as Extract<MessageProcessBlock, { kind: "tool" }>;
   const next = blocks.slice() as T[];
+  const callText = `${current.callText}${delta}`;
   next[index] = {
     ...current,
     toolCallId: current.toolCallId || probe.toolCallId,
-    callText: `${current.callText}${delta}`,
+    callText,
+    display: streamedArgsDisplay(current, callText, readBaseline),
     status: "streaming",
   } as T;
   // Argument tokens on an existing card are tool activity too: close the
@@ -575,8 +531,9 @@ export function appendToolCallArgsText(
   blocks: MessageProcessBlock[],
   probe: Extract<MessageProcessBlock, { kind: "tool" }>,
   delta: string,
+  readBaseline?: (path: string) => string | undefined,
 ): MessageProcessBlock[] {
-  return appendToolArgsText(blocks, probe, delta);
+  return appendToolArgsText(blocks, probe, delta, readBaseline);
 }
 
 /** Same, for the live list the streaming bubble renders. */
@@ -584,8 +541,9 @@ export function appendLiveToolCallArgsText(
   blocks: MessageLiveBlock[],
   probe: Extract<MessageProcessBlock, { kind: "tool" }>,
   delta: string,
+  readBaseline?: (path: string) => string | undefined,
 ): MessageLiveBlock[] {
-  return appendToolArgsText(blocks, probe, delta);
+  return appendToolArgsText(blocks, probe, delta, readBaseline);
 }
 
 /** Append a text delta to the live block list, copying only the tail block. */

@@ -15,16 +15,22 @@
  * 它该做的是走 bootstrap 重新同步，而不是从中间假装接上。
  */
 
+import { budgetFramePayload, MAX_STREAM_FRAME_BYTES } from "../src/shared/toolPayloadBudget.ts";
 import { createFrameWriter } from "./frameWriter.mjs";
 
 /** 4 MiB：与单流待发上限同量级。一轮会话的帧量级是几十 KB，这里挡的是"断线的客户端 + 长回复"。 */
 const DEFAULT_MAX_LOG_BYTES = 4 * 1024 * 1024;
 
 /**
- * @param {{ maxLogBytes?: number }} [options]
+ * @param {{ maxLogBytes?: number, maxPendingBytes?: number, maxFrameBytes?: number, onOverflow?: (stats: any) => void, onFrameBudget?: (stats: any) => void }} [options]
+ *   `maxPendingBytes` 只为测试而开：默认值与单流上限同位（见 server/frameWriter.mjs），
+ *   但一个单测没法真的往 socket 里塞 4 MiB。`onOverflow` 由宿主接到诊断日志上：越限是止损，
+ *   但"哪条 run、卡在多大的积压上"必须留证据。
  */
 export function createRunStreams(options = {}) {
   const maxLogBytes = options.maxLogBytes ?? DEFAULT_MAX_LOG_BYTES;
+  const maxPendingBytes = options.maxPendingBytes;
+  const maxFrameBytes = options.maxFrameBytes ?? MAX_STREAM_FRAME_BYTES;
   /** @type {Map<string, any>} */
   const runs = new Map();
 
@@ -52,11 +58,30 @@ export function createRunStreams(options = {}) {
       get oldestSeq() {
         return log.length > 0 ? log[0].seq : seq + 1;
       },
-      /** 发一帧：编号 → 落日志 → 扇给每个 sink。 */
-      publish(payload) {
+      /** 发一帧：预算 → 编号 → 落日志 → 扇给每个 sink。 */
+      publish(rawPayload) {
         if (closed) {
           return;
         }
+        // 预算必须在**落日志之前**：日志里存的就是订阅者会收到的那一份，重放才不会
+        // 拼出一条比原流更肥的流（见 src/shared/toolPayloadBudget.ts）。
+        const budgeted = budgetFramePayload(rawPayload, maxFrameBytes);
+        if (budgeted.cuts.length > 0) {
+          try {
+            options.onFrameBudget?.({
+              runId,
+              sessionPath,
+              type: rawPayload?.type,
+              originalBytes: Buffer.byteLength(JSON.stringify(rawPayload) ?? ""),
+              bytes: budgeted.bytes,
+              salvaged: budgeted.salvaged,
+              cuts: budgeted.cuts.map((cut) => ({ path: cut.path, bytes: cut.bytes, lines: cut.lines })),
+            });
+          } catch {
+            // 报告失败不能把这条流弄坏。
+          }
+        }
+        const payload = budgeted.payload;
         seq += 1;
         const bytes = Buffer.byteLength(JSON.stringify(payload));
         log.push({ seq, payload, bytes });
@@ -104,10 +129,16 @@ export function createRunStreams(options = {}) {
        * @param {{ startSeq: number, replay: any[] }} plan
        */
       attach(res, plan) {
-        const sink = createFrameWriter(res, { runId, startSeq: plan.startSeq });
-        for (const payload of plan.replay) {
-          sink.write(payload);
-        }
+        // sink 越限时把 run 的归属一起交出去：只报"overflow"没法定位是哪条会话。
+        const sink = createFrameWriter(res, {
+          runId,
+          startSeq: plan.startSeq,
+          ...(maxPendingBytes === undefined ? {} : { maxPendingBytes }),
+          onOverflow: (stats) => options.onOverflow?.({ ...stats, runId, sessionPath }),
+        });
+        // 重放走 `replay()`：历史帧不受待发上限约束（见 server/frameWriter.mjs），否则
+        // "补上被丢掉的整段"会当场再次越限，续订永远不可能成功。
+        sink.replay(plan.replay);
         sinks.add(sink);
         // 订阅者自己走了：只摘它这一条。run 归提交者所有，别人的流不受影响。
         const drop = () => sinks.delete(sink);

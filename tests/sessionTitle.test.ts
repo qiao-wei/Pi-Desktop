@@ -153,10 +153,11 @@ test("deriveSessionTitle is idempotent", () => {
 });
 
 test("client and server share one submit-time implementation", () => {
-  const client = readFileSync("src/features/chat/usePiDesktopApp.ts", "utf8");
+  // 侧栏会话行的本地兜底在 `bootstrapPatch.ts`（它只改 bootstrap，从 hook 里搬出来的）
+  const client = readFileSync("src/features/chat/bootstrapPatch.ts", "utf8");
   const server = bridgeSource();
 
-  assert.ok(client.includes('from "../../shared/sessionTitle"'));
+  assert.ok(client.includes('from "../../shared/sessionTitle.ts"'));
   assert.ok(server.includes('from "../src/shared/sessionTitle.ts"'));
   assert.ok(!client.includes("function fallbackSessionTitle"));
   assert.ok(/function inferConversationTitle[\s\S]*?deriveSessionTitle\(/.test(server));

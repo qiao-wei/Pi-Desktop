@@ -1,5 +1,6 @@
 import { assistantThinkingBlocks, countTranscriptTurns, createBubbleTracker, messageDisplayText } from "../src/shared/chatBubbles.ts";
 import { domainErrorFrame } from "../src/shared/protocol/bridgeStreamFrames.ts";
+import { budgetArgsDelta, budgetToolArgs } from "../src/shared/toolPayloadBudget.ts";
 import { appendAttachmentContext, sanitizeAttachmentName } from "./attachmentHelpers.mjs";
 import { normalizeMessageParts } from "./conversationParts.mjs";
 import { corsHeaders } from "./cors.mjs";
@@ -102,6 +103,10 @@ async function streamPrompt(req, res, requestId, options = {}) {
   const bubbleOf = () => bubbleTracker.currentAssistant()?.bubbleId ?? null;
   const toolArgsById = new Map();
   const toolStreamIdsByCallId = new Map();
+  // 已经转发了多少字节的**参数文本**（打字机动画）。一份 4 MB 的正文会产生 4 MB 的
+  // 客户端状态，而超过这个量之后动画本身已经没有信息量：停发，让 `tool_call_stream_end`
+  // （带裁剪后的参数）收尾。
+  const streamedArgsBytes = new Map();
   // Identity of a thinking block across the delta stream and the cumulative
   // snapshots. Keyed by pi's own content index (not the ordinal among thinking
   // blocks) so it lines up with `contentIndex` on `thinking_delta`, even when the
@@ -302,7 +307,8 @@ async function streamPrompt(req, res, requestId, options = {}) {
           contentIndex: assistantEvent.contentIndex,
           toolCallId: toolCall?.id,
           toolName: toolCall?.name,
-          args: toolCall?.arguments ?? {},
+          // 整份文件正文就在里面：上线前裁（`__omitted` 记下原始行数/字节）。
+          args: budgetToolArgs(toolCall?.arguments ?? {}),
         });
       }
 
@@ -315,19 +321,25 @@ async function streamPrompt(req, res, requestId, options = {}) {
         // `delta` is the raw JSON text still being produced, which is exactly what
         // the argument typewriter animates; `tool_call_stream_end` follows with the
         // parsed arguments.
-        writeEvent({
-          type: "tool_call_stream_delta",
-          bubbleId: bubbleOf(),
-          toolStreamId: streamId,
-          contentIndex: assistantEvent.contentIndex,
-          toolCallId: toolCall?.id,
-          toolName: toolCall?.name,
-          argsText: assistantEvent.delta ?? "",
-        });
+        const forwarded = streamedArgsBytes.get(streamId) ?? 0;
+        const argsDelta = budgetArgsDelta(forwarded, assistantEvent.delta ?? "");
+        if (argsDelta.text !== "") {
+          streamedArgsBytes.set(streamId, argsDelta.forwardedBytes);
+          writeEvent({
+            type: "tool_call_stream_delta",
+            bubbleId: bubbleOf(),
+            toolStreamId: streamId,
+            contentIndex: assistantEvent.contentIndex,
+            toolCallId: toolCall?.id,
+            toolName: toolCall?.name,
+            argsText: argsDelta.text,
+          });
+        }
       }
 
       if (assistantEvent.type === "toolcall_end") {
         const streamId = toolStreamId(assistantMessageStreamIndex, assistantEvent.contentIndex);
+        streamedArgsBytes.delete(streamId);
         toolArgsById.set(assistantEvent.toolCall.id, assistantEvent.toolCall.arguments ?? {});
         toolStreamIdsByCallId.set(assistantEvent.toolCall.id, streamId);
         writeEvent({
@@ -337,7 +349,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
           contentIndex: assistantEvent.contentIndex,
           toolCallId: assistantEvent.toolCall.id,
           toolName: assistantEvent.toolCall.name,
-          args: assistantEvent.toolCall.arguments ?? {},
+          args: budgetToolArgs(assistantEvent.toolCall.arguments ?? {}),
         });
       }
     }
@@ -358,7 +370,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
         toolCallId: event.toolCallId,
         toolStreamId: toolStreamIdsByCallId.get(event.toolCallId),
         toolName: event.toolName,
-        args: event.args ?? toolArgsById.get(event.toolCallId),
+        args: budgetToolArgs(event.args ?? toolArgsById.get(event.toolCallId)),
       });
     }
 
@@ -373,7 +385,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
         toolCallId: event.toolCallId,
         toolStreamId: toolStreamIdsByCallId.get(event.toolCallId),
         toolName: event.toolName,
-        args: event.args ?? toolArgsById.get(event.toolCallId),
+        args: budgetToolArgs(event.args ?? toolArgsById.get(event.toolCallId)),
         partialResult: event.partialResult,
       });
     }
@@ -386,7 +398,7 @@ async function streamPrompt(req, res, requestId, options = {}) {
         toolCallId: event.toolCallId,
         toolStreamId: toolStreamIdsByCallId.get(event.toolCallId),
         toolName: event.toolName,
-        args: event.args ?? toolArgsById.get(event.toolCallId),
+        args: budgetToolArgs(event.args ?? toolArgsById.get(event.toolCallId)),
         result: event.result,
         isError: event.isError,
       });

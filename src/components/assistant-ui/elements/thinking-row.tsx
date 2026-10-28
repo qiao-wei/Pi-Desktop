@@ -223,7 +223,11 @@ export function ThinkingRow({ text, status, startedAt, endedAt }: ThinkingRowPro
         <BrainIcon className="size-4 shrink-0 text-foreground-subtlest" />
         <span className="shrink-0 whitespace-nowrap" data-reasoning-label="true">
           {streaming ? (
-            <ShimmerLabel className="font-medium text-foreground-subtlest">
+            // No color class on purpose: the sweep is derived from `currentColor`
+            // (strong = currentColor, soft = 20% of it), so tinting the label to
+            // `foreground-subtlest` first would leave the highlight at 8% opacity --
+            // a sweep nobody can see. ZCode's `ThinkingShimmer` has no color either.
+            <ShimmerLabel className="shimmer-spread-30 shimmer-angle-0 font-medium">
               {t("process.reasoning.thinking")}
             </ShimmerLabel>
           ) : (

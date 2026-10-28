@@ -16,6 +16,8 @@ import { sourceDir } from "./lib/sourceDir.ts";
 
 const server = bridgeSource();
 const chatThread = readFileSync(new URL("../src/features/chat/ChatThread.tsx", import.meta.url), "utf8");
+// 入参类型住在 `chatThreadProps.ts`（ChatThread.tsx 的行数额度），所以断言跟着声明走。
+const chatThreadProps = readFileSync(new URL("../src/features/chat/chatThreadProps.ts", import.meta.url), "utf8");
 const editBox = sourceDir("src/features/chat");
 const thread = readFileSync(new URL("../src/components/assistant-ui/elements/thread.aui.tsx", import.meta.url), "utf8");
 const app = appSource();
@@ -227,7 +229,7 @@ test("a middle turn still goes through the truncate confirm before editing", () 
 test("regenerate is wired through assistant-ui's Reload with the parent user bubble", () => {
   // assistant-ui calls `onReload(parentId, config)`; `parentId` is the id of the
   // message *before* the assistant one, i.e. our `tN#user` bubble.
-  assert.match(chatThread, /onReloadMessage\?: \(parentMessageId: string\)/);
+  assert.match(chatThreadProps, /onReloadMessage\?: \(parentMessageId: string\)/);
   assert.match(chatThread, /\(parentId: string \| null\)/);
   assert.match(chatThread, /onReloadMessage\(parentId\)/);
   assert.match(chatThread, /\.\.\.\(onReloadMessage \? \{ onReload \} : \{\}\)/);

@@ -12,7 +12,10 @@
 import { ChevronRightIcon } from "lucide-react";
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 
+import { useDiffHighlight } from "@/features/chat/useDiffHighlight";
+import { useThemeMode } from "@/features/chat/useThemeMode";
 import { cn } from "@/lib/utils";
+import type { DiffHighlightSpan } from "@/shared/diffHighlight";
 import {
   toolDiffLines,
   type ToolDiffLine,
@@ -20,6 +23,7 @@ import {
   type ToolFileDiff,
 } from "@/shared/toolDisplay";
 import { toWorkspaceRelativePath } from "@/shared/turnChangedFiles";
+import { formatFileSize } from "@/shared/workspaceFiles";
 
 /** ZCode's shell for an expanded tool body (see `ToolLayout`). */
 const BODY_SHELL_CLASS = "mb-2 space-y-3";
@@ -57,11 +61,18 @@ function DiffFile({
   t: (key: string, params?: Record<string, string | number>) => string;
 }) {
   const { head, tail, omitted } = useMemo(() => toolDiffLines(file.patch), [file.patch]);
+  // 正文没上线（预算裁掉）：计数是真的，patch 是空的。给一句说明+文件大小，
+  // 而不是让一个空 diff 冒充「没有改动」。
+  const omittedBody = file.patch === "" ? file.omitted : undefined;
   const relative = toWorkspaceRelativePath(file.path, workspaceRoot);
   // Line numbers count rendered rows from 1, the way ZCode's preview numbers them
   // (`index + 1`) -- not the file's own line numbers, which the patch only knows
   // per hunk and which would restart at every hunk boundary anyway.
-  const numbered = [...head, ...tail];
+  const numbered = useMemo(() => [...head, ...tail], [head, tail]);
+  // ZCode's second pass: the rows are already on screen as plain text, and the tokens
+  // arrive a frame later. `painted` stays null while collapsed -- nothing to colour.
+  const themeMode = useThemeMode();
+  const highlighted = useDiffHighlight({ path: relative, lines: numbered, enabled: true, themeMode });
 
   return (
     <div
@@ -72,8 +83,13 @@ function DiffFile({
     >
       <div className="min-w-full font-mono text-xs leading-relaxed">
         {numbered.map((line, index) => (
-          <DiffRow key={index} line={line} number={index + 1} />
+          <DiffRow key={index} line={line} number={index + 1} spans={highlighted?.get(index)} />
         ))}
+        {omittedBody ? (
+          <div className="px-3 py-1 text-foreground-subtle">
+            {t("process.payload.omittedBody", { size: formatFileSize(omittedBody.bytes) })}
+          </div>
+        ) : null}
         {omitted > 0 ? (
           <div className="px-3 py-1 text-foreground-subtle">
             {t("process.diff.omittedLines", { count: omitted })}
@@ -92,7 +108,16 @@ function DiffFile({
  * protocol the reader did not ask for. The gutter is sticky so it stays put when a
  * long line is scrolled sideways.
  */
-function DiffRow({ line, number }: { line: ToolDiffLine; number: number }) {
+function DiffRow({
+  line,
+  number,
+  spans,
+}: {
+  line: ToolDiffLine;
+  number: number;
+  /** Highlighted tokens for this row; absent until the second pass lands. */
+  spans?: DiffHighlightSpan[];
+}) {
   const styles = diffLineStyles(line.kind);
 
   return (
@@ -107,7 +132,19 @@ function DiffRow({ line, number }: { line: ToolDiffLine; number: number }) {
       >
         {number}
       </span>
-      <code className="block flex-1 px-3 whitespace-pre">{line.text || " "}</code>
+      {spans ? (
+        // `data-diff-highlight` marks "tokens, not plain text": the e2e asserts it appears
+        // only after the async pass, never on the first frame.
+        <code className="block flex-1 px-3 whitespace-pre" data-diff-highlight="">
+          {spans.map((span, spanIndex) => (
+            <span key={spanIndex} style={span.color ? { color: span.color } : undefined}>
+              {span.text}
+            </span>
+          ))}
+        </code>
+      ) : (
+        <code className="block flex-1 px-3 whitespace-pre">{line.text || " "}</code>
+      )}
     </div>
   );
 }
@@ -159,6 +196,30 @@ function diffLineStyles(kind: ToolDiffLineKind): {
   };
 }
 
+/**
+ * 结果正文被裁掉时的一行说明。裁的是**中段**（首尾都留着），所以这句话说的是
+ * 「只显示了首尾」，不是「被截断」——读者能据此决定去不去看原始文件。
+ */
+function ResultTruncatedNote({
+  truncated,
+  t,
+}: {
+  truncated?: { bytes: number; lines: number };
+  t: (key: string, params?: Record<string, string | number>) => string;
+}) {
+  if (!truncated) {
+    return null;
+  }
+  return (
+    <p className="font-mono text-ui-sm text-foreground-subtle" data-slot="result-truncated">
+      {t("process.payload.truncatedResult", {
+        size: formatFileSize(truncated.bytes),
+        lines: truncated.lines,
+      })}
+    </p>
+  );
+}
+
 export function TerminalBody({
   command,
   output,
@@ -166,12 +227,14 @@ export function TerminalBody({
   omittedPath,
   running,
   hasResult,
+  truncated,
   t,
 }: {
   command: string;
   output: string;
   exitCode?: number;
   omittedPath?: string;
+  truncated?: { bytes: number; lines: number };
   running: boolean;
   hasResult: boolean;
   t: (key: string, params?: Record<string, string | number>) => string;
@@ -238,8 +301,11 @@ export function TerminalBody({
         </p>
       ) : null}
       {exitCode !== undefined && exitCode !== 0 ? (
-        <p className="font-mono text-ui-sm text-diff-removed">exit {exitCode}</p>
+        <p className="font-mono text-ui-sm text-diff-removed">
+          {t("process.tool.exitCode", { code: exitCode })}
+        </p>
       ) : null}
+      <ResultTruncatedNote truncated={truncated} t={t} />
       {omittedPath ? (
         <p className="font-mono text-ui-sm text-foreground-subtle">{omittedPath}</p>
       ) : null}
@@ -251,11 +317,13 @@ export function TerminalBody({
 export function McpBody({
   argsText,
   resultText,
+  truncated,
   isError,
   t,
 }: {
   argsText?: string;
   resultText: string;
+  truncated?: { bytes: number; lines: number };
   isError: boolean;
   t: (key: string, params?: Record<string, string | number>) => string;
 }) {
@@ -284,6 +352,7 @@ export function McpBody({
           </div>
         )
       ) : null}
+      <ResultTruncatedNote truncated={truncated} t={t} />
       {argsText ? (
         <div>
           <button
@@ -317,11 +386,13 @@ export function McpBody({
 export function PartsBody({
   argsText,
   resultText,
+  truncated,
   isError,
   t,
 }: {
   argsText?: string;
   resultText: string;
+  truncated?: { bytes: number; lines: number };
   isError: boolean;
   t: (key: string, params?: Record<string, string | number>) => string;
 }) {
@@ -350,6 +421,7 @@ export function PartsBody({
           >
             <div className="p-3 break-words whitespace-pre-wrap">{resultText}</div>
           </div>
+          <ResultTruncatedNote truncated={truncated} t={t} />
         </section>
       ) : null}
     </div>

@@ -90,6 +90,8 @@ export function toAssistantUiParts(
       // renders a diff / terminal / parameters+result from this, never by parsing
       // `resultText`. See `src/shared/toolDisplay.ts`.
       display: block.display,
+      // 结果正文被预算裁过（原文更大）：行里要说明，而不是把半份日志当全部。
+      resultTruncated: block.resultTruncated,
     } as unknown as ThreadAssistantMessagePart,
   ];
 }

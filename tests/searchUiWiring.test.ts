@@ -16,6 +16,11 @@ const chatThreadSource = readFileSync(
   new URL("../src/features/chat/ChatThread.tsx", import.meta.url),
   "utf8",
 );
+// 入参类型在前几轮为行数额度搬到了 `chatThreadProps.ts`；行为断言仍看 ChatThread。
+const chatThreadPropsSource = readFileSync(
+  new URL("../src/features/chat/chatThreadProps.ts", import.meta.url),
+  "utf8",
+);
 const threadSearchSource = readFileSync(
   new URL("../src/features/chat/useThreadSearch.ts", import.meta.url),
   "utf8",
@@ -91,7 +96,7 @@ test("App：会话内搜索小条浮在线程区上，并把查询传给 ChatThr
 });
 
 test("ChatThread：搜索 props 交给 useThreadSearch，视口 owner 提交 revealRange", () => {
-  assert.match(chatThreadSource, /searchQuery\?: string/);
+  assert.match(chatThreadPropsSource, /searchQuery\?: string/);
   assert.match(chatThreadSource, /useThreadSearch\(\{/);
   assert.match(chatThreadSource, /controllerRef\.current = \{ revealRange \}/);
 });

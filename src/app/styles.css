@@ -645,6 +645,40 @@ p {
    */
 }
 
+/*
+ * 「加载更早的消息」：快照只带尾部窗口，更早的历史按页取。
+ *
+ * 放在视口顶部居中、正常参与布局（不是浮层）：滚动到顶时它是第一个可点的东西，
+ * 取到之后新内容插在它*下面*，读者视线仍然落在刚才那一行上（见 ChatThread 的
+ * prepend 锚定）。
+ */
+.aui-thread-load-older {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 6px;
+}
+
+.aui-load-older {
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-pill);
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--app-ink-soft);
+  background: var(--card);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.aui-load-older:hover:not(:disabled) {
+  color: var(--app-ink);
+  background: var(--app-accent-wash);
+}
+
+.aui-load-older:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .aui-scroll-to-bottom {
   position: absolute;
   left: 50%;

@@ -11,11 +11,13 @@
  *
  * This module derives the row model **once**, for both the live stream
  * (`chatStreamProjection.toToolProcessBlock`) and the persisted transcript
- * (`chatBubbles.assistantMessageConversationView`), so no component ever parses
+ * (`assistantMessageView.assistantMessageConversationView`), so no component ever parses
  * tool text. It is deliberately presentation-free: no colors, no labels, no
  * React. `toolRowFamily` decides which row renders; `display` decides what its
  * body can show.
  */
+
+import { budgetToolResultText, omittedFieldOf, type PayloadCut } from "./toolPayloadBudget.ts";
 
 /**
  * Which row a tool gets. Family is derived from the tool *name* only: the row
@@ -38,6 +40,12 @@ export interface ToolFileDiff {
   removed: number;
   /** Unified diff (`--- path` / `+++ path` / `@@ …`), exactly as pi emits it. */
   patch: string;
+  /**
+   * The body never made it onto the wire (`toolPayloadBudget` cut it) — the counts
+   * above are real, the patch is empty on purpose. The body renders a note instead
+   * of an empty diff; the file itself is on disk, so opening it is the real answer.
+   */
+  omitted?: { bytes: number };
 }
 
 /**
@@ -232,6 +240,19 @@ export function toolResultText(
   return readToolEnvelope(result, fallbackText).text;
 }
 
+/**
+ * Same, with the wire budget applied: an extension tool (or an MCP server) can
+ * return more than a chat row should ever carry. `cut` is non-null only when the
+ * text was actually shortened, so the row can say so instead of silently showing
+ * a fraction of the output.
+ */
+export function toolResultTextWithCut(
+  result: unknown,
+  fallbackText?: string,
+): { text: string; cut: PayloadCut | null } {
+  return budgetToolResultText(toolResultText(result, fallbackText));
+}
+
 function countPatchLines(patch: string): { added: number; removed: number } {
   let added = 0;
   let removed = 0;
@@ -295,21 +316,89 @@ export function parseUnifiedPatch(patch: string): ToolFileDiff[] {
   return files;
 }
 
-/** A whole-file patch for a `write`, whose pi result carries no `details`. */
-function patchForWrittenFile(path: string, content: string): ToolFileDiff | null {
-  if (!path || content.length === 0) {
-    return null;
+/** Lines of a text the way a diff counts them: a trailing newline ends the last line. */
+function textLines(text: string): string[] {
+  if (text.length === 0) {
+    return [];
   }
-  const lines = content.endsWith("\n")
-    ? content.slice(0, -1).split("\n")
-    : content.split("\n");
+  return (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n");
+}
+
+/** The replacements of an `edit` call, whichever shape the model sent. */
+function editReplacements(record: Record<string, unknown> | undefined): Array<Record<string, unknown>> {
+  const raw = record?.edits;
+  const list = Array.isArray(raw) ? raw : [record];
+  return list.filter((entry): entry is Record<string, unknown> => isRecord(entry));
+}
+
+/**
+ * Preview of an `edit` from its arguments alone, for the stretch of the stream where
+ * the call's `details.patch` does not exist yet.
+ *
+ * It needs no file on disk: each replacement is exact, so its `oldText` lines are the
+ * removed lines and its `newText` lines are the added ones, one for one. That is why
+ * the counts can grow while the arguments arrive — and why they are a *preview*: the
+ * authoritative numbers come with the patch (which also carries context lines).
+ */
+function previewEditDisplay(
+  args: Record<string, unknown> | undefined,
+  path: string,
+): ToolDisplay {
+  const removed: string[] = [];
+  const added: string[] = [];
+  for (const edit of editReplacements(args)) {
+    const oldText = edit.oldText;
+    const newText = edit.newText;
+    if (typeof oldText === "string") {
+      removed.push(...textLines(oldText));
+    }
+    if (typeof newText === "string") {
+      added.push(...textLines(newText));
+    }
+  }
+  if (removed.length === 0 && added.length === 0) {
+    return { kind: "none" };
+  }
   const patch = [
     `--- ${path}`,
     `+++ ${path}`,
-    `@@ -0,0 +1,${lines.length} @@`,
-    ...lines.map((line) => `+${line}`),
+    `@@ -1,${removed.length} +1,${added.length} @@`,
+    ...removed.map((line) => `-${line}`),
+    ...added.map((line) => `+${line}`),
   ].join("\n");
-  return { path, added: lines.length, removed: 0, patch };
+  return {
+    kind: "fileDiff",
+    files: [{ path, added: added.length, removed: removed.length, patch }],
+  };
+}
+
+/**
+ * A whole-file patch for a `write`, whose pi result carries no `details`.
+ *
+ * `baseline` is the file's previous content, when the host could read it before the call
+ * ran. Without it the honest answer is "0 removed": a `write` on a new file really does
+ * only add lines, and a `write` over an old file cannot be told from a new one by the
+ * arguments alone.
+ */
+function patchForWrittenFile(
+  path: string,
+  content: string,
+  baseline?: string,
+): ToolFileDiff | null {
+  if (!path || content.length === 0) {
+    return null;
+  }
+  const added = textLines(content);
+  const removed = baseline === undefined ? [] : textLines(baseline);
+  const patch = [
+    `--- ${path}`,
+    `+++ ${path}`,
+    // No old side means "created from nothing", which is what `-0,0` says.
+    `@@ -${removed.length === 0 ? 0 : 1},${removed.length} +1,${added.length} @@`,
+    ...removed.map((line) => `-${line}`),
+    ...added.map((line) => `+${line}`),
+  ].join("\n");
+  return { path, added: added.length, removed: removed.length, patch };
 }
 
 function stringField(record: Record<string, unknown> | undefined, key: string): string | undefined {
@@ -332,6 +421,18 @@ export function deriveToolDisplay(input: {
   result: unknown;
   /** In-flight output, used while a call is still running. */
   partialResult?: unknown;
+  /**
+   * The call failed. A preview is built from the *arguments*, so it describes what the
+   * call meant to do — and a failed `edit`/`write` changed nothing. Printing `+3 −1`
+   * next to an error would claim an outcome that did not happen.
+   */
+  isError?: boolean;
+  /**
+   * Content of the file *before* this call, when the host could read it. Only `write`
+   * needs it (a `write` argument says what goes in, never what comes out), and only for
+   * the removed count — see `src/features/chat/fileBaseline.ts` for who fills it in.
+   */
+  baseline?: string;
 }): ToolDisplay {
   const family = toolRowFamily(input.toolName);
   const envelope = readToolEnvelope(
@@ -342,16 +443,43 @@ export function deriveToolDisplay(input: {
   switch (family) {
     case "edit": {
       const patch = stringField(envelope.details, "patch");
-      if (!patch) {
+      if (patch) {
+        return { kind: "fileDiff", files: parseUnifiedPatch(patch) };
+      }
+      // No patch yet: the call is still streaming its arguments (pi computes the patch
+      // after the file is written). The arguments describe the change exactly, so this
+      // is a real preview rather than a guess — but only while it can still come true:
+      // a failed `edit` changed nothing, and numbers would be a claim about an outcome.
+      if (input.isError === true) {
         return { kind: "none" };
       }
-      return { kind: "fileDiff", files: parseUnifiedPatch(patch) };
+      return previewEditDisplay(args, stringField(args, "path") ?? "");
     }
     case "write": {
-      const file = patchForWrittenFile(
-        stringField(args, "path") ?? "",
-        stringField(args, "content") ?? "",
-      );
+      // A result that carries a real patch wins: it has context lines and is the
+      // authoritative count. (pi's `write` currently sends none, which is why the
+      // whole-file preview below exists at all.)
+      const settledPatch = stringField(envelope.details, "patch");
+      if (settledPatch) {
+        return { kind: "fileDiff", files: parseUnifiedPatch(settledPatch) };
+      }
+      if (input.isError === true) {
+        return { kind: "none" };
+      }
+      const path = stringField(args, "path") ?? "";
+      // 正文被预算裁掉了：颜色逐行比对已经没有意义，但「写了多少行」是服务端在
+      // 裁之前数好的，仍然是真的。给出计数、空 patch 和省略标记——绝不把 head/tail
+      // 预览当成完整文件去造一份假 diff。
+      const omittedContent = omittedFieldOf(args, "content");
+      if (omittedContent) {
+        const added = omittedContent.lines;
+        const removed = input.baseline === undefined ? 0 : textLines(input.baseline).length;
+        return {
+          kind: "fileDiff",
+          files: [{ path, added, removed, patch: "", omitted: { bytes: omittedContent.bytes } }],
+        };
+      }
+      const file = patchForWrittenFile(path, stringField(args, "content") ?? "", input.baseline);
       return file ? { kind: "fileDiff", files: [file] } : { kind: "none" };
     }
     case "execute": {

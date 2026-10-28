@@ -1309,3 +1309,189 @@ test("工具块活动只关它上面的思考：下方并发思考的流式面�
   });
   assert.equal(liveShape(message()), "RTR*", "迟到的工具事件不得误伤下方仍在输出的思考");
 });
+
+/**
+ * 参数边流边到 ⇒ 行里的 `+N −M` 也该边流边长（ZCode 的形态）。
+ *
+ * 以前：`display` 只在 `args` 存在时派生，而 `args` 要等到 `tool_call_stream_end` 才被解析，
+ * 于是 `edit`/`write` 的数字是**工具跑完之后一次性**出现的。现在参数文本自己就够用
+ * （`edit` 的 oldText/newText、`write` 的 content），只是要跨过 256 字符才重算一次。
+ */
+test("write 的参数逐块到达时，行里的 +N 跟着涨；结束后换成真实 patch", () => {
+  let view = createChatStreamView([userBubble(1, "写个文件")]);
+  const bubbleId = chatBubbleId(1, "assistant");
+  const feed = (payload: Record<string, unknown>) => {
+    view = projectStreamEvent(view, event({ bubbleId, ...payload } as PromptStreamEvent));
+    return (view.bubbles[1].liveBlocks ?? []).find((block) => block.kind === "tool");
+  };
+
+  feed({ type: "assistant_message_start", turn: 1 });
+  feed({ type: "tool_call_stream_start", toolStreamId: "s1", toolName: "write", args: {} });
+
+  const content = Array.from({ length: 40 }, (_, index) => `第 ${index + 1} 行：这一行的正文长一点，好让节流分档真的跨过去`);
+  const argsText = JSON.stringify({ path: "notes.md", content: `${content.join("\n")}\n` });
+  const added: number[] = [];
+  for (const chunk of argsText.match(/.{1,80}/gs) ?? []) {
+    const block = feed({ type: "tool_call_stream_delta", toolStreamId: "s1", toolName: "write", argsText: chunk });
+    if (block?.display?.kind === "fileDiff") {
+      added.push(block.display.files[0]!.added);
+    }
+  }
+  assert.equal(added.length > 1, true, `+N 必须涨过多次，实际：${JSON.stringify(added)}`);
+  assert.equal(
+    added.every((value, index) => index === 0 || value >= added[index - 1]!),
+    true,
+    `只增不减：${JSON.stringify(added)}`,
+  );
+  assert.equal(new Set(added).size > 1, true, "确实涨过多个值，不是最后跳一下");
+  // 节流让最后一个 delta 可能停在上一档（38/40 这种）；`tool_call_stream_end` 会给出
+  // 完整参数、重算一次，于是工具还没开始跑，行里的数字就已经准了。
+  const closed = feed({ type: "tool_call_stream_end", toolStreamId: "s1", toolName: "write", args: JSON.parse(argsText) });
+  assert.equal(
+    closed?.display?.kind === "fileDiff" ? closed.display.files[0]!.added : 0,
+    40,
+    "参数收齐后行里就是最终行数（工具还没开始跑）",
+  );
+
+  // 工具真的跑完后，结果里的 patch 才是准的（这里直接给权威 patch，断言它盖掉预览）。
+  const done = feed({
+    type: "tool_execution_end",
+    toolCallId: "c1",
+    toolStreamId: "s1",
+    toolName: "write",
+    args: { path: "notes.md", content: "" },
+    result: { content: [], details: { patch: "--- notes.md\n+++ notes.md\n@@ -0,0 +1,2 @@\n+a\n+b" } },
+  });
+  assert.equal(done?.display?.kind, "fileDiff");
+  assert.equal(done?.display?.kind === "fileDiff" ? done.display.files[0]!.added : 0, 2);
+});
+
+test("edit 的参数流到一半就有 +/−，不用等工具结果", () => {
+  let view = createChatStreamView([userBubble(1, "改一下")]);
+  const bubbleId = chatBubbleId(1, "assistant");
+  const feed = (payload: Record<string, unknown>) => {
+    view = projectStreamEvent(view, event({ bubbleId, ...payload } as PromptStreamEvent));
+    return (view.bubbles[1].liveBlocks ?? []).find((block) => block.kind === "tool");
+  };
+
+  feed({ type: "assistant_message_start", turn: 1 });
+  feed({ type: "tool_call_stream_start", toolStreamId: "s1", toolName: "edit", args: {} });
+  const argsText = JSON.stringify({
+    path: "demo.ts",
+    edits: [{ oldText: `const a = ${"1".repeat(120)};`, newText: "const a = 2;\nconst b = 3;" }],
+  });
+  let block = feed({ type: "tool_call_stream_delta", toolStreamId: "s1", toolName: "edit", argsText });
+  for (const chunk of argsText.match(/.{1,60}/gs) ?? []) {
+    block = feed({ type: "tool_call_stream_delta", toolStreamId: "s1", toolName: "edit", argsText: chunk });
+  }
+  assert.equal(block?.display?.kind, "fileDiff");
+  if (block?.display?.kind === "fileDiff") {
+    assert.deepEqual([block.display.files[0]!.added, block.display.files[0]!.removed], [2, 1]);
+    assert.equal(block.status, "streaming", "这是运行中的预览，不是结果");
+  }
+});
+
+/**
+ * `write` 覆盖既有文件时，「删了几行」只能来自**写入前的文件**。宿主把它注入成同步读
+ * （缓存没命中时先在后台拉），派生层因此保持纯函数；这条钉的是整条链：
+ * 参数里的 `content` 一路涨、基线一到 `−M` 就出现，最后真实 patch 仍然赢。
+ */
+test("write 的有基线时，流式途中就有 +N −M", () => {
+  let view = createChatStreamView([userBubble(1, "覆盖写一下")]);
+  const bubbleId = chatBubbleId(1, "assistant");
+  const feed = (payload: Record<string, unknown>) => {
+    view = projectStreamEvent(view, event({ bubbleId, ...payload } as PromptStreamEvent), {
+      readBaseline: (path) => (path === "notes.md" ? "旧一\n旧二\n旧三\n" : undefined),
+    });
+    return (view.bubbles[1].liveBlocks ?? []).find((block) => block.kind === "tool");
+  };
+
+  feed({ type: "assistant_message_start", turn: 1 });
+  feed({ type: "tool_call_stream_start", toolStreamId: "s1", toolName: "write", args: {} });
+  const argsText = JSON.stringify({ path: "notes.md", content: `${"新一行\n".repeat(20)}` });
+  feed({ type: "tool_call_stream_delta", toolStreamId: "s1", toolName: "write", argsText });
+  for (const chunk of argsText.match(/.{1,40}/gs) ?? []) {
+    feed({ type: "tool_call_stream_delta", toolStreamId: "s1", toolName: "write", argsText: chunk });
+  }
+  const closed = feed({
+    type: "tool_call_stream_end",
+    toolStreamId: "s1",
+    toolName: "write",
+    args: JSON.parse(argsText),
+  });
+  assert.equal(closed?.display?.kind, "fileDiff");
+  if (closed?.display?.kind === "fileDiff") {
+    assert.deepEqual(
+      [closed.display.files[0]!.added, closed.display.files[0]!.removed],
+      [20, 3],
+      "新增来自 content，删除来自写入前的文件",
+    );
+  }
+});
+
+/**
+ * 实时路径的预算：`tool_execution_end` 里可能是整份文件正文 + 整段输出。
+ *
+ * 服务端在发帧前已经裁过（`__omitted` 随 args 一起到），客户端再做一次是幂等的；
+ * 这里直接喂**已裁**的形状，断言投影不会把计数弄丢，也不会把预览当成完整文件造 diff。
+ */
+test("大载荷的 tool_execution_end：callText 仍是合法 JSON，计数来自__omitted", () => {
+  const { feed, message } = streamFixture(1);
+  feed({ type: "assistant_message_start", turn: 1 });
+  feed({
+    type: "tool_execution_start",
+    toolCallId: "call-big",
+    toolStreamId: "s-big",
+    toolName: "write",
+    args: { path: "big.log", content: "h…t" },
+  });
+  feed({
+    type: "tool_execution_end",
+    toolCallId: "call-big",
+    toolStreamId: "s-big",
+    toolName: "write",
+    args: {
+      path: "big.log",
+      content: "h…t",
+      __omitted: [{ path: "content", bytes: 4_000_000, lines: 120_000 }],
+    },
+    result: { content: [{ type: "text", text: "Successfully wrote big.log." }] },
+  });
+
+  const block = (message().processBlocks ?? []).find(
+    (item) => item.kind === "tool" && item.toolCallId === "call-big",
+  );
+  assert.ok(block && block.kind === "tool");
+  const parsed = JSON.parse(block.callText) as { __omitted: { lines: number }[] };
+  assert.equal(parsed.__omitted[0]?.lines, 120_000);
+
+  const display = block.display;
+  assert.equal(display?.kind, "fileDiff");
+  const files = display?.kind === "fileDiff" ? display.files : [];
+  assert.equal(files[0]?.added, 120_000, "行数来自裁剪前的原文");
+  assert.equal(files[0]?.patch, "", "不拿 head/tail 预览造一份假 diff");
+  assert.deepEqual(files[0]?.omitted, { bytes: 4_000_000 });
+});
+
+test("结果正文超预算时，块上带着裁剪标记（界面据此说「只显示了首尾」）", () => {
+  const { feed, message } = streamFixture(1);
+  feed({ type: "assistant_message_start", turn: 1 });
+  const output = `${"a".repeat(40_000)}\n${"b".repeat(40_000)}`;
+  feed({
+    type: "tool_execution_end",
+    toolCallId: "call-out",
+    toolStreamId: "s-out",
+    toolName: "bash",
+    args: { command: "cat big.log" },
+    result: { content: [{ type: "text", text: output }] },
+  });
+
+  const block = (message().processBlocks ?? []).find(
+    (item) => item.kind === "tool" && item.toolCallId === "call-out",
+  );
+  assert.ok(block && block.kind === "tool");
+  assert.ok(block.resultTruncated, "没有标记就等于静默截断");
+  assert.equal(block.resultTruncated.bytes, Buffer.byteLength(output));
+  assert.ok((block.resultText ?? "").includes("\n…\n"));
+  assert.ok((block.resultText ?? "").length < output.length);
+});

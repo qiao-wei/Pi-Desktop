@@ -132,6 +132,7 @@ React、npm 这类通用词。
 
 **streamSeq（流帧序号）**
 - 是什么：**一条 run 内**单调递增、不跳号的帧序号（从 1 开始），由桥的帧写入器盖上去（载荷覆盖不了）。`(runId, streamSeq)` 就是「接着发」的地址。
+- _避免_：把 `transport_error` 帧也算进序号。它是**关于这条流**的一句话，不是 run 的一帧；带上序号会把续订地址推过一条从未送达的帧（`overflow` 帧故意不带 `streamSeq`）。
 - _避免_：与 `queueSeq` 混用 —— 后者是 pi 队列里那一轮的位置，跟流帧无关。
 - 代码：`server/frameWriter.mjs`、`server/runStreams.mjs`；契约字段在 `src/lib/api.ts` 的 `PromptStreamEvent`。
 
@@ -141,10 +142,26 @@ React、npm 这类通用词。
 - 代码：`src/shared/protocol/version.ts`（`DELIVERY_PROFILE` / `DELIVERY_POLICIES`）、镜像 `server/protocolVersion.mjs`。
 
 **重连（reconnect）vs 恢复（recovery）**
-- 重连：**同一个客户端重新接到同一条 run** 的流，靠「我收到第 N 帧了」续订（`fromSeq`）。今天只是**留了形状**，没有实现。
+- 重连：**同一个客户端重新接到同一条 run** 的流，靠「我收到第 N 帧了」续订（`fromSeq`）。渲染侧已经接上（`promptFeed`）：流坏了就自动续订，续不上才走恢复。
 - 恢复：新客户端或重启后拿到**完整会话状态**（快照 + 历史）。与「续订同一条流」是两件事。
 - _避免_：互相混用；也避免把「跨设备恢复」说成「重连」——前者没有**中继**不可实现。
-- 代码：重连的落点是 `server/runStreams.mjs` 的 `plan(fromSeq)` 与 `POST /api/runs/stream`。
+- 代码：重连的落点是 `server/runStreams.mjs` 的 `plan(fromSeq)` 与 `POST /api/runs/stream`；客户端是 `src/features/chat/promptFeed.ts`。
+
+**断流（feed damage）**
+- 是什么：这条 prompt 流本身坏了——收到 `transport_error`，或 `streamSeq` 跳号。**桥上的 run 可能还活着**，这是它和「这一轮失败了」的关键区别。
+- 处理：先续订（`(runId, 最后一条带序号的帧 + 1)`），续不上才强制拉一次快照追平。**不许**当场把这一轮当失败收尾：那会提前把气泡标 done、发一条假的「完成」通知、收掉停止按钮，而服务端还在写。
+- 代码：`src/features/chat/promptFeed.ts`（游标 + 续订 + 重试）、`usePiDesktopApp.ts` 的 `reconcileLostFeed`（续不上时的兜底）。
+
+**载荷预算（payload budget）**
+- 是什么：**帧内容**的大小上限。和 `frameWriter` 的待发上限（4 MiB，管的是"积压了多少还没发出去"）不是一回事：那管的是积压，这管的是单条载荷本身。三层：
+  ① 单个参数字符串 32 KiB（裁成 head + `…` + tail，`__omitted` 记下原文的字节数与行数）；
+  ② 参数流 delta 累计 64 KiB（打字机停发，收尾由带裁剪后对象的 `tool_call_stream_end` 负责）；
+  ③ 整帧 1 MiB（`runStreams.publish` 裁，两档字符串预算，最坏降级为"只留结构字段 + `__dropped`"）。
+- 为什么裁在**落日志之前**：日志里存的就是订阅者会收到的那一份。存原文的话，重放会把刚排空的 socket 再打满一次，"越限 → 续订 → 越限"永远出不来。
+- _避免_：把"裁"说成"截断"。正文是 **head + tail**（读日志、读编译错误时结尾才是重点），参数对象保持**合法 JSON**，`path` / `command` 这类短字段不受影响，而 `+N`、`行数` 一律来自**裁剪之前**的原文。
+- _避免_：静默裁剪。裁掉就要带标记（参数里的 `__omitted`、块上的 `resultTruncated`、帧上的 `__cuts`，最坏是 `__dropped`），界面据此说"未随流传输"或"只显示了首尾"。空 diff 绝不能被当成"没有改动"。
+- 前提：**全文不在线上**。`write` 写的那份文件、bash 的 `fullOutputPath` 才是原文；"展开全文"应该去读文件，而不是要求把 MB 级正文再发一遍。
+- 代码：`src/shared/toolPayloadBudget.ts`、`server/runStreams.mjs` 的 `publish`、`server/promptStream.mjs` 的工具帧；诊断事件 `run.frame_budget`。
 
 **中继（relay）**
 - 是什么：跨机器的传输路径。它引入**有损传输**，因此是 ack / 重传唯一说得通的场景；也是**信任模型必须先补上**的地方（今天桥零鉴权 + CORS `*`，只绑 127.0.0.1）。
@@ -180,6 +197,26 @@ React、npm 这类通用词。
 - _避免_：说成「格式化」或「主题」。它不是渲染样式，是**从结构化结果里读出来的事实**（`edit` 的 `details.patch`、`bash` 的 `structuredContent.exit_code`）；渲染层不许再解析结果文本。
 - 代码：`src/shared/toolDisplay.ts`（`deriveToolDisplay` / `toolDisplayForBlock` / `sameToolDisplay`）、消费方 `elements/tool-row.tsx` + `elements/tool-bodies.tsx`。
 - 注意：**字段是可选的**。老会话的转录与不产出结构化结果的工具没有它，走兜底行（参数 + 结果），这是常态之一而不是异常。
+**running label（运行态动作词）**：一行在进行中时，动作词是进行时（`正在思考` / `正在写入` / `正在编辑` /
+`正在执行` / `正在读取` / `正在搜索`）并带一条扫光带；落定后换回名词（`写入` / `终端` / `思考 · N 秒`）。
+运行与否**只来自该 part 自己的 `status`**（`running ?? status?.type === "running"`），不看整条消息是否在跑。
+扫光基于 `currentColor`，所以运行态标签**不许再叠淡色**；短标签用 `shimmer-spread-30 shimmer-angle-0`
+收窄扫光带，否则整行长期落在软色带里，看起来就是一行淡灰字。兜底行（`display` 还没派生）按 family 取同一组
+词表，只有未知工具才显示它自己的名字。
+
+**diff second pass（diff 的第二遍高亮）**：内联 diff 的第一帧永远是**纯文本**；Shiki token 由
+`useDiffHighlight` 异步补（复用右侧面板的 `shiki-wasm` shared highlighter，语言名来自
+`inferCodeLanguage`，主题跟着 `<html>.dark`）。规则在 `src/shared/diffHighlight.ts`：按**同一种行**
+切段（一段一次 tokenize，跨行语法才连得上），token 行数或正文对不上就**整段不画** —— 宁可不着色，
+也不能让颜色落到别的行上。纯文本语言（`log`）不跑；高亮失败等于没发生。
+
+**streaming preview（流式读数）**
+- 是什么：`edit`/`write` 行尾的 `+N −M` 在**工具还没跑**的时候就已经在涨 —— 值来自**已经到达的参数文本**（`edit` 的 `edits[].oldText/newText` 行数、`write` 的 `content` 行数），不是等结果里的 `details.patch`。
+- 边界：结果是权威。`details.patch` 一到就用它（带上下文行、计数一致）；`status === "done"` 的块不再重算；**失败的行不显示预览**（参数描述的是「打算做什么」，失败的写没有发生）。
+- `write` 的 `−M` 需要**写入前的文件**：宿主注入一个同步读 + 后台补的读取器（`fileBaseline.ts`），纯派生层只接一个 `baseline?: string`；读不到（新文件/项目外/二进制/超大）就只给 `+N`，绝不编 `−0`。
+- _避免_：说成「估算」或「预测」。它是**已到达部分的精确读数**：参数是精确替换，`oldText`/`newText` 的行数就是删/增行数；唯一被省略的是「还没到的那部分」。
+- 代码：`src/shared/toolArgsPreview.ts`（半截 JSON 解析 + 128 字符分档节流 `streamedArgsDisplay`）、`src/shared/toolDisplay.ts` 的 `previewEditDisplay` / `patchForWrittenFile`。
+
 - 路径段（行尾的目录，`toolRowFolder`）**永远非空**：文件就在工作区根时显示工作区的文件夹名并带尾斜杠（`iej/`），项目外路径保留自己的目录 —— 空着读起来像这个文件没有位置。
 
 **row family（行族）**

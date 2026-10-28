@@ -13,6 +13,7 @@ import { assistantContentText, inferConversationTitle, normalizeGeneratedTitle }
 import { normalizeComposerDefaults } from "./sessionModelPolicy.mjs";
 import { diagnosticLog, getProjectSessionDir } from "./sessionStoreFactory.mjs";
 import { displayTranscript } from "./sessionTranscript.mjs";
+import { CONVERSATION_TAIL_TURNS, transcriptPageWindow, transcriptTailWindow } from "./conversationWindow.mjs";
 import { errorDetails, formatAgentError, isSessionBusy, parseTime, sendJson } from "./smallHelpers.mjs";
 import { randomUUID } from "node:crypto";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
@@ -30,6 +31,41 @@ export function createSessionSnapshots(state, deps) {
   const { directoryMimeType, generatedTitleMaxChars, modelRuntime, openRuntimes, projectAttachmentRoot, searchDocumentCache, searchDocumentCacheLimit, sessionStore } = deps;
 
 const sessionAbortPromises = new WeakMap();
+
+/**
+ * 往前翻一页历史（`GET /api/sessions/messages`）。
+ *
+ * 快照只带尾部窗口，更早的部分由这个入口按需取——这正是 ZCode 的形状
+ * （`rowsRange({ beforeRowId, limit })`）。三个约束：
+ *
+ * 1. **轮次编号是绝对的**：返回的气泡 id 与整份转录一致（`turnOffset`），否则客户端一
+ *    prepend 就会认为整段历史被换掉了。
+ * 2. **页不会切开一轮**：只按轮边界截，回答和它的工具结果始终在同一页里。
+ * 3. **上限**：客户端要多少都不超过 `CONVERSATION_PAGE_MAX_TURNS`，否则"翻历史"会变成
+ *    变相的全量拉取，窗口也就白做了。
+ */
+/** @param {{ beforeTurn?: string | number | null, limit?: string | number | null, runtime?: any }} [options] */
+function sessionMessagePage(options = {}) {
+  const beforeTurn = options.beforeTurn == null ? 0 : Number(options.beforeTurn);
+  const limit = options.limit == null ? undefined : Number(options.limit);
+  const runtime = options.runtime ?? state.runtime;
+  const transcript = displayTranscript(runtime.session);
+  const window = transcriptPageWindow(transcript, beforeTurn, limit);
+  if (!window.messages.length) {
+    return { messages: [], hasMoreBefore: false, oldestTurn: window.startTurn, totalTurns: window.totalTurns };
+  }
+  return {
+    messages: buildChatBubbles(window.messages, {
+      // 历史页永远是已经落定的内容：不给它造"正在流"的占位气泡。
+      isStreaming: false,
+      toAttachment: toConversationAttachment,
+      turnOffset: window.startTurn - 1,
+    }),
+    hasMoreBefore: window.startTurn > 1,
+    oldestTurn: window.startTurn,
+    totalTurns: window.totalTurns,
+  };
+}
 
 function latestAssistantError(messages) {
   if (!Array.isArray(messages)) {
@@ -237,10 +273,15 @@ async function buildSnapshot(targetRuntime = state.runtime, options = {}) {
   const traceSessionSwitch = options.traceSessionSwitch === true;
   const startedAt = traceSessionSwitch ? Date.now() : 0;
   const project = deps.findProject(targetRuntime.projectId);
-  const visibleMessages = buildChatBubbles(displayTranscript(targetRuntime.session), {
+  const transcript = displayTranscript(targetRuntime.session);
+  // 快照只带尾部窗口（见 CONVERSATION_TAIL_TURNS）。`turnOffset` 让气泡编号保持绝对，
+  // 所以客户端合并时看到的 id 与整份转录完全一致。
+  const window = options.conversationWindow ?? transcriptTailWindow(transcript, options.tailTurns ?? CONVERSATION_TAIL_TURNS);
+  const visibleMessages = buildChatBubbles(window.messages, {
     isStreaming: targetRuntime.session.isStreaming,
     now: Date.now(),
     toAttachment: toConversationAttachment,
+    turnOffset: window.startTurn - 1,
   });
   if (traceSessionSwitch) {
     diagnosticLog("session.switch.snapshot_messages", {
@@ -264,9 +305,11 @@ async function buildSnapshot(targetRuntime = state.runtime, options = {}) {
   const model = deps.isUsableModel(targetRuntime.session.model) ? targetRuntime.session.model : undefined;
   const modelProvider = model?.provider ? String(model.provider) : targetRuntime.settingsManager.getDefaultProvider() ?? "";
   const modelId = model?.id ?? targetRuntime.settingsManager.getDefaultModel() ?? "";
-  const messageCount = visibleMessages.length;
-  const userMessages = visibleMessages.filter((message) => message.role === "user");
-  const assistantMessages = visibleMessages.filter((message) => message.role === "assistant");
+  // 统计是**整份会话**的数（用量浮层与侧栏都在用），不能跟着窗口缩水：
+  // 窗口只决定"这次发多少"，不改变"这个会话有多少"。
+  const messageCount = transcript.length;
+  const userMessages = transcript.filter((message) => message.role === "user");
+  const assistantMessages = transcript.filter((message) => message.role === "assistant");
   const result = {
     snapshot: {
       conversation: {
@@ -279,6 +322,10 @@ async function buildSnapshot(targetRuntime = state.runtime, options = {}) {
         // worktree 会话这里就是 worktree 路径，前端靠它区分“会话在哪个检出里跑”。
         workingDirectory: targetRuntime.workspaceCwd ?? project.cwd,
         sessionFile: targetRuntime.session.sessionFile,
+        // 这份快照是不是一段窗口：更早的历史在服务端，客户端要往前翻就按 `oldestTurn` 取。
+        hasMoreBefore: window.hasMoreBefore === true,
+        oldestTurn: window.startTurn,
+        totalTurns: window.totalTurns,
       },
       project,
       modelConfig: {
@@ -643,5 +690,5 @@ async function searchSessionDocuments(query, limit) {
   return { results, truncated };
 }
 
-  return { abortSession, buildAmbientSnapshot, buildSnapshot, generateInitialSessionTitle, latestAssistantError, liveStreamingSessionPaths, pendingQueues, queueSeq, queueSeqBySession, readSessionSearchDocument, refreshSnapshot, searchSessionDocuments, sendAttachment, sendLocalMedia, sessionAbortPromises, sessionIsStreaming, stopSession, toConversationAttachment, updateSessionStoreFromRuntime, updateSessionStoreFromSession };
+  return { abortSession, buildAmbientSnapshot, buildSnapshot, generateInitialSessionTitle, sessionMessagePage, latestAssistantError, liveStreamingSessionPaths, pendingQueues, queueSeq, queueSeqBySession, readSessionSearchDocument, refreshSnapshot, searchSessionDocuments, sendAttachment, sendLocalMedia, sessionAbortPromises, sessionIsStreaming, stopSession, toConversationAttachment, updateSessionStoreFromRuntime, updateSessionStoreFromSession };
 }

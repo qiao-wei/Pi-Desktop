@@ -832,7 +832,9 @@
       ],
       "transport": "json",
       "bridge": true,
-      "callers": []
+      "callers": [
+        "src/features/chat/promptFeed.ts"
+      ]
     },
     "/api/search": {
       "methods": [
@@ -882,6 +884,16 @@
       "bridge": true,
       "callers": [
         "src/features/chat/usePiDesktopApp.ts"
+      ]
+    },
+    "/api/sessions/messages": {
+      "methods": [
+        "GET"
+      ],
+      "transport": "json",
+      "bridge": true,
+      "callers": [
+        "src/lib/api.ts"
       ]
     },
     "/api/sessions/pin": {
