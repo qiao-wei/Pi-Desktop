@@ -120,13 +120,15 @@ test("技能/包弹窗里放的是那个共享面板，且一次只有一个", (
 test("新加的两个图标画在侧栏同一套族谱上（不是另一个图标族）", () => {
   const icons = readFileSync(new URL("../src/components/sidebarIcons.tsx", import.meta.url), "utf8");
   // ZCode 的「文件树」是 lucide `ListTree`、「技能」是 `WandSparkles`：路径照抄，
-  // 但外壳用 `Svg()`（24 格 + strokeWidth 1.7），否则又变成两种笔画混排。
+  // 但外壳用 `Svg()`（24 格 + `app-icon` 标记），线宽与 lucide 那批图标同走
+  // `--app-icon-stroke`，否则又变成两种笔画混排。
   assert.match(icons, /export function SidebarFileTreeIcon/);
   assert.match(icons, /d="M3 6v4c0 1\.1\.9 2 2 2h3"/);
   assert.match(icons, /export function SidebarSkillsIcon/);
   assert.match(icons, /m21\.64 3\.64-1\.28-1\.28a1\.21 1\.21 0 0 0-1\.72 0L2\.36 18\.64/);
   assert.match(icons, /export function SidebarMoreIcon/);
-  assert.match(icons, /strokeWidth=\{1\.7\}/);
+  assert.match(icons, /"app-icon"/);
+  assert.doesNotMatch(icons, /strokeWidth=\{\d/);
 });
 
 test("两个入口的文案 key 在 zh / en 两包都有", () => {

@@ -32,6 +32,21 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+/*
+ * 图标线宽统一收口。
+ *
+ * lucide 在 `<svg>` 上写死 `stroke-width="2"`（这是**呈现属性**，权威性低于任何作者样式），
+ * 16px 下明显偏粗；`sidebarIcons.tsx` 自己画的图标原本也各写各的 1.7。两边一起收进
+ * `--app-icon-stroke`：新加的图标不用再逐个传 `strokeWidth`，主题也能整档调粗细。
+ *
+ * `svg.app-icon` 是手写图标的标记（`Svg` 组件与 `useAppComposerEditing` 里的内联 svg）。
+ * 需要**单独**加粗某个图标时用内联 `style={{ strokeWidth: … }}` —— 内联样式优先级更高。
+ */
+svg.lucide,
+svg.app-icon {
+  stroke-width: var(--app-icon-stroke, 1.5);
+}
+
 .titlebar {
   position: relative;
   z-index: 100;

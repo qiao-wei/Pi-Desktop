@@ -91,6 +91,9 @@
   --app-info-wash: #e6d7ff;
   --app-success: #079445;
   --app-success-wash: #cef9de;
+  /* 图标线宽（`styles.css` 的 `svg.lucide` / `svg.app-icon` 读它）：
+     lucide 的默认 2 在 16px 下偏粗，统一收到 1.5。 */
+  --app-icon-stroke: 1.5;
   /*
    * 参考项目（PI-Desktop，Codex 视觉系统）的表层机制。
    * 缺省值刻意等于改造前的渲染结果：侧栏不透明、无光泽、无模糊，阴影/圆角就是

@@ -6,8 +6,9 @@ import type { SVGProps } from "react";
  * Pi Desktop's sidebar used lucide equivalents, but they are not the same drawings: codex-ui's
  * pushpin has a flat top bar and a straight stem, its "new session" glyph is a compose box
  * (square + pen) rather than a bare pencil, and its archive is a lidded box. The sidebar is
- * built to match codex-ui, so the icon paths are copied verbatim (same 24px grid, same 1.7
- * stroke) instead of being approximated with another icon family.
+ * built to match codex-ui, so the icon paths are copied verbatim (same 24px grid) instead of
+ * being approximated with another icon family. 线宽不在这里写死：`styles.css` 的
+ * `svg.app-icon` 用 `--app-icon-stroke` 统一收口（lucide 那批图标也走同一条规则）。
  *
  * `FolderOpen` has no codex-ui original — it is drawn on the same construction as codex-ui's
  * `Folder` so the collapsed/expanded pair reads as one family.
@@ -15,7 +16,7 @@ import type { SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 
-function Svg({ size = 16, children, ...rest }: IconProps) {
+function Svg({ size = 16, className, children, ...rest }: IconProps) {
   return (
     <svg
       width={size}
@@ -23,10 +24,10 @@ function Svg({ size = 16, children, ...rest }: IconProps) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.7}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
+      className={className ? `app-icon ${className}` : "app-icon"}
       {...rest}
     >
       {children}
@@ -57,7 +58,7 @@ export function SidebarNewSessionIcon(props: IconProps) {
 /**
  * codex-ui `Ellipsis` — 三个点。
  *
- * 点用「描边圆」而不是实心圆：r=1 + 1.7 描边在小尺寸下正好糊成一个实心点，
+ * 点用「描边圆」而不是实心圆：r=1 的描边圈在小尺寸下正好糊成一个实心点，
  * 和 lucide / codex-ui 的 `Ellipsis` 观感一致（实心 r=1 在 16px 下只有 0.8px，显得比旁边
  * 那一族图标都轻）。
  */
@@ -74,7 +75,7 @@ export function SidebarMoreIcon(props: IconProps) {
 /**
  * 「显示文件树」——ZCode 用的就是 `ListTree`（`ProjectNodeContent.tsx` 的 files 动作、
  * `TaskListItem` 的 `git.action.showTree`），路径照抄 lucide，但按上面这套族谱的构造画
- * （24 格 / 1.7 描边 / 16px），免得又变成「同排里只有这两个图标又粗又大」。
+ * （24 格 / 16px，线宽走 `--app-icon-stroke`），免得又变成「同排里只有这两个图标又粗又大」。
  */
 export function SidebarFileTreeIcon(props: IconProps) {
   return (

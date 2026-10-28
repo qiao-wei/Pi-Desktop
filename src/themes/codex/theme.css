@@ -68,6 +68,9 @@
   --app-radius-pill: 999px;
   --app-radius-round: 50%;
 
+  /* 图标线宽与默认主题同值（明暗不改几何），显式列出满足「完整覆盖」约定 */
+  --app-icon-stroke: 1.5;
+
   /* --- 阴影阶梯（§6.3 light）+ 浮层 0.5px 描边（§6.4） --- */
   --app-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --app-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
@@ -336,6 +339,8 @@
   --app-radius-composer: 20px;
   --app-radius-pill: 999px;
   --app-radius-round: 50%;
+  /* 图标线宽与浅色同档 */
+  --app-icon-stroke: 1.5;
 
   --app-danger: #ff6764;
   --app-danger-hover: #ff8583;

@@ -1263,7 +1263,8 @@ function CustomScrollToBottom() {
       onClick={() => store.getState().scrollToBottom()}
       aria-label="Scroll to latest message"
     >
-      <ArrowDownIcon size={18} strokeWidth={2.5} />
+      {/* 线宽走 `--app-icon-stroke`（styles.css 的 svg.lucide 规则），不在图标上覆写。 */}
+      <ArrowDownIcon size={18} />
     </button>
   );
 }

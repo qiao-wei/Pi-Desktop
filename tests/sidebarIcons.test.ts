@@ -40,9 +40,11 @@ test("codex-ui's pin / compose / archive paths are copied verbatim", () => {
   assert.match(iconSource, /<rect x="3" y="4" width="18" height="4\.5" rx="1\.5" \/>/);
   assert.match(iconSource, /d="M10 12\.5h4"/);
 
-  // codex-ui's 24px grid and 1.7 stroke (lucide defaults look heavier).
+  // codex-ui 的 24px 格；**线宽不在这里写死** —— `styles.css` 的 `svg.app-icon` 与
+  // `svg.lucide` 一起读 `--app-icon-stroke`，两套图标才不会被写成两个粗细。
   assert.match(iconSource, /viewBox="0 0 24 24"/);
-  assert.match(iconSource, /strokeWidth=\{1\.7\}/);
+  assert.match(iconSource, /"app-icon"/, "手写图标必须带 app-icon，否则吃不到统一线宽");
+  assert.doesNotMatch(iconSource, /strokeWidth=\{\d/, "线宽请交给 --app-icon-stroke");
 });
 
 test("the sidebar imports the codex-ui icon set instead of lucide lookalikes", () => {
