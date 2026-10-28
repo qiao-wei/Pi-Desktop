@@ -472,6 +472,18 @@ test("插话起新回合（服务端当时没在流式）时也能正常渲染",
  * `thinking_end` 出现（`tool_call_stream_end` 等同理）——开场时 `partial` 还在被
  * provider 就地改写，那份正文属于还没发出去的 delta。
  */
+/**
+ * Blocks without the timing this client observed (`startedAt`/`endedAt`).
+ *
+ * The assertions below pin text / `open` / `streamKey` — the shape of the thought.
+ * When and for how long it streamed is a separate fact (and inherently wall-clock),
+ * so it is stripped here instead of loosened with `assert.partialDeepStrictEqual`:
+ * everything else still has to match exactly.
+ */
+function withoutTiming<T extends { startedAt?: number; endedAt?: number }>(blocks: readonly T[] | undefined) {
+  return (blocks ?? []).map(({ startedAt: _startedAt, endedAt: _endedAt, ...rest }) => rest);
+}
+
 test("thinking_delta 逐 token 追加到 liveBlocks，首条 delta 就开块", () => {
   let view = createChatStreamView([userBubble(1, "问题")]);
   view = projectStreamEvent(
@@ -491,7 +503,7 @@ test("thinking_delta 逐 token 追加到 liveBlocks，首条 delta 就开块", (
   const after = view.bubbles[1];
 
   assert.deepEqual(
-    after.liveBlocks,
+    withoutTiming(after.liveBlocks),
     // `open` 是显式的“这一块还在想”标记（不再靠“是不是最后一块”反推）
     [{ kind: "thinking", text: "先想一想", open: true }],
     "两次 delta 合成同一条思考块",
@@ -634,7 +646,7 @@ test("两轮 thinking 文本相同时也各开各的块，不会被并进 tool �
   const after = view.bubbles[1].liveBlocks ?? [];
   assert.equal(after.length, 3, "同 key 的 delta 不开新块");
   assert.deepEqual(
-    after[2],
+    withoutTiming(after)[2],
     { kind: "thinking", text: "我想继续", streamKey: "assistant-1-thinking-0", open: true },
     "同 key 的 delta 追到本块并亮 spinner",
   );
@@ -975,7 +987,7 @@ test("文本为空的收尾快照只清 open，不碰已流出的正文，且幂
 
   const settled = textlessClose();
   assert.deepEqual(
-    settled.liveBlocks,
+    withoutTiming(settled.liveBlocks),
     [{ kind: "thinking", text: "让我看看目录", streamKey: key, open: false }],
     "关圈只改状态，正文一个字不能动",
   );

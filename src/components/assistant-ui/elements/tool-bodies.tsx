@@ -34,7 +34,7 @@ export function DiffBody({
   t: (key: string, params?: Record<string, string | number>) => string;
 }) {
   return (
-    <div className={BODY_SHELL_CLASS}>
+    <div data-slot="diff-body" className={BODY_SHELL_CLASS}>
       {files.map((file) => (
         <DiffFile
           key={`${file.path}:${file.added}:${file.removed}`}

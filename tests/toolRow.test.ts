@@ -20,6 +20,10 @@ const toolRow = readFileSync(
   new URL("../src/components/assistant-ui/elements/tool-row.tsx", import.meta.url),
   "utf8",
 );
+const toolRowReadouts = readFileSync(
+  new URL("../src/components/assistant-ui/elements/tool-row-readouts.tsx", import.meta.url),
+  "utf8",
+);
 const toolBodies = readFileSync(
   new URL("../src/components/assistant-ui/elements/tool-bodies.tsx", import.meta.url),
   "utf8",
@@ -73,8 +77,11 @@ test("状态词只在有信息时出现：失败才带虚线下划线与可复�
     /statusLabel=\{isError \? t\("process\.status\.failed"\) : presentation\.statusLabel\}/,
     "只有失败（或工具自己声明）时才给状态词",
   );
-  assert.match(toolRow, /underline decoration-dotted underline-offset-2/);
-  assert.match(toolRow, /navigator\.clipboard\.writeText\(tooltip\)/, "tooltip 里要能复制错误");
+  // 状态词与「行」同住一行，但两个只读小件（+N −M / 失败词 + 复制按钮）拆到了
+  // tool-row-readouts.tsx（行文件有 max-lines 棘轮）。
+  assert.match(toolRowReadouts, /underline decoration-dotted underline-offset-2/);
+  assert.match(toolRowReadouts, /navigator\.clipboard\.writeText\(tooltip\)/, "tooltip 里要能复制错误");
+  assert.match(toolRow, /<StatusWord label=\{statusLabel\}/, "行渲染的是那个状态词组件");
   // 旧实现把错误正文前缀成 `Error: ` 塞进正文；现在错误只挂在状态词上。
   assert.doesNotMatch(toolRow, /Error: \$\{|`Error: /, "正文不该再被 `Error:` 前缀污染");
 });
@@ -158,4 +165,26 @@ test("ZCode 兼容 token 落在 tailwind.css，深色只在各主题的 .dark �
     );
     assert.match(source, /--color-diff-added:\s*var\(--color-green-500\)/, `${name} 的深色 diff`);
   }
+});
+/**
+ * 文件名与路径是两个不同的点击目标（用户 2026-10-27 的对照：ZCode 的
+ * `renderFileChip` 点名字打开文件预览，`renderFilePath` 在摘要行里点开内联正文）。
+ */
+test("文件名是打开文件面板的链接，路径才是展开内联的开关", () => {
+  assert.match(toolRow, /data-slot="tool-row-file-link"/, "文件名要是一个独立的可点目标");
+  assert.match(toolRow, /hover:underline/, "链接要有可点的手感（ZCode 的 chip 就是 hover 下划线）");
+  // 摘要行本身是 Radix 折叠触发器：名字上的点击必须拦两次，否则会顺手展开正文。
+  const link = toolRow.slice(toolRow.indexOf('data-slot="tool-row-file-link"'));
+  const upToClick = link.slice(0, link.indexOf("onClick"));
+  assert.match(upToClick, /onMouseDown=\{\(event\) => \{\s*event\.preventDefault\(\);\s*event\.stopPropagation\(\);/, "mousedown 也要拦（焦点/拖选不该触发折叠）");
+  assert.match(link, /onClick=\{\(event\) => \{\s*event\.stopPropagation\(\);\s*openFile\(filePath\);/, "点击只打开文件，不折叠");
+  // 没有宿主（只读回放）时名字保持纯文本，而不是点了没反应的按钮。
+  assert.match(toolRow, /primaryText && filePath && openFile \?/, "没有文件或没有宿主时不渲染链接");
+});
+
+test("只有项目内的单个文件才可点（右面板拒绝项目外路径）", () => {
+  assert.match(toolRow, /function isPanelPath\(path: string\): boolean/, "路径可点性要有单独判据");
+  assert.match(toolRow, /!path\.startsWith\("\/"\)/, "绝对路径（项目外）不可点");
+  assert.match(toolRow, /filePath: isPanelPath\(relative\) \? relative : undefined/);
+  assert.match(toolRow, /filePath: !multiple && isPanelPath\(first\) \? first : undefined/, "多文件行不选一个当目标");
 });

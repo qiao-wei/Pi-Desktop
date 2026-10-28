@@ -19,7 +19,7 @@ import { createId } from "../../lib/id";
 import type { ContextUsagePatch } from "./bootstrapPatch";
 import {
   normalizeMessageProcessBlocks,
-  patchMessages,
+  settleStreamingMessages,
   promoteSessionRow,
   touchConversation,
   applyContextUsage,
@@ -443,9 +443,7 @@ export function reducer(state: AppState, action: Action): AppState {
         return state;
       }
 
-      const patched = patchMessages(state.bootstrap, (message) =>
-        message.role === "assistant" && message.status === "streaming" ? { ...message, status: "done" } : message,
-      );
+      const patched = settleStreamingMessages(state.bootstrap);
       if (!patched.changed) {
         return state;
       }

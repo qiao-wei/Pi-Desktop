@@ -49,7 +49,12 @@ export function toAssistantUiParts(
           // exactly those as running - a false「工具卡都出来了，上面的 thinking
           // 还在输出」whenever the last block happened to be a settled panel.
           isStreaming && block.open === true ? { type: "running" } : { type: "complete" },
-      },
+        // Timing observed by this client (see `MessageProcessBlock.startedAt`): it
+        // rides on the block because the row is unmounted the moment the turn
+        // settles. Absent for a transcript replayed from disk.
+        startedAt: block.startedAt,
+        endedAt: block.endedAt,
+      } as unknown as ThreadAssistantMessagePart,
     ];
   }
 

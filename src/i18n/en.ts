@@ -519,8 +519,6 @@ export const en = {
   "process.tool.write.done": "Write",
   "process.tool.edit.running": "Editing",
   "process.tool.edit.done": "Edit",
-  "process.tool.delete.running": "Deleting",
-  "process.tool.delete.done": "Delete",
   "process.tool.execute.running": "Running",
   "process.tool.execute.done": "Terminal",
   "process.tool.search.running": "Searching",

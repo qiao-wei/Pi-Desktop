@@ -163,6 +163,13 @@ React、npm 这类通用词。
 - _避免_：说成「工具组」（那是已删的旧分组概念）；也别说「行会自己折叠」——**自动折叠只有区域这一处**，行级的开合只由读者点击驱动。
 - 代码：`src/components/assistant-ui/elements/thread.aui.tsx` 的 `PiDesktopProcessGroup`；判定与推迟在 `src/shared/collapseGate.ts`、`src/components/assistant-ui/elements/deferredCollapse.ts`。
 
+**process header label（过程区表头文案）**
+- 是什么：区域表头那一句 —— 运行中是「工作中 N 秒」，落定是「已工作 N 秒」（ZCode 的 `workingFor` / `workedFor`）；拿不到时长时退回无时长的「工作中」/「思考过程」（ZCode 的 `labels.history`）。
+- 时长有两个来源，且**只有这两个**：转录自己的条目时间戳（整轮的跨度，**从问题那一条算起** —— 问题的时刻不在 `pendingTurn` 里，不 prepend 就只剩一个点，会被算成「没有时长」），以及「这个客户端看了多久」（落定瞬间快照还没描述这一轮时的兜底，`observedTurnDuration`）。**没有客户端秒表**：重放出来的一轮没有 delta，秒表无从测起。
+- 每块思考的时长（`Thought · N 秒`）同样只来自客户端观测（首个 delta → 块关闭），并必须活过快照重建（`thinkingTiming.ts`）；转录里没有逐块时间戳。
+- _避免_：说成「计时器」。它是**读出来的**跨度，不是跑着的表；「不知道」和「瞬间」是两回事，前者退回无时长文案，后者才取 1 秒下限。
+- 代码：`src/shared/chatTurnTiming.ts`（`turnDurationOf` / `observedTurnDuration` / `settleStreamingAnswer`）、`src/shared/thinkingTiming.ts`（逐块观测与搬运）、消费方 `thread.aui.tsx` 的 `PiDesktopProcessGroup`。
+
 **process block（过程块）**
 - 是什么：助手气泡里 `kind` 不是 `text` 的那些块 —— `thinking` / `tool` / `notice`。它们有顺序、可合并（流式里同一块会被反复重算），是过程区的**唯一数据形状**。
 - _避免_：说成「工具组」「步骤」。分组是旧实现的渲染概念（已删），块本身是平铺的。
@@ -173,6 +180,7 @@ React、npm 这类通用词。
 - _避免_：说成「格式化」或「主题」。它不是渲染样式，是**从结构化结果里读出来的事实**（`edit` 的 `details.patch`、`bash` 的 `structuredContent.exit_code`）；渲染层不许再解析结果文本。
 - 代码：`src/shared/toolDisplay.ts`（`deriveToolDisplay` / `toolDisplayForBlock` / `sameToolDisplay`）、消费方 `elements/tool-row.tsx` + `elements/tool-bodies.tsx`。
 - 注意：**字段是可选的**。老会话的转录与不产出结构化结果的工具没有它，走兜底行（参数 + 结果），这是常态之一而不是异常。
+- 路径段（行尾的目录，`toolRowFolder`）**永远非空**：文件就在工作区根时显示工作区的文件夹名并带尾斜杠（`iej/`），项目外路径保留自己的目录 —— 空着读起来像这个文件没有位置。
 
 **row family（行族）**
 - 是什么：工具名 → 一族，决定动作词、图标与正文形态：`read` / `write` / `edit` / `execute`（bash、powershell）/ `search`（grep、ls、find）/ `mcp`（`mcp__<server>__<tool>`）/ `other`。

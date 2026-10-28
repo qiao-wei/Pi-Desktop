@@ -23,6 +23,14 @@ export interface ChatMessage {
   processBlocks?: MessageProcessBlock[];
   liveBlocks?: MessageLiveBlock[];
   createdAt: number;
+  /**
+   * How long the turn took, from the transcript's own timestamps (first entry →
+   * last entry of the turn). Present on settled turns only: while streaming there is
+   * no end yet, and a snapshot replayed from disk measures it the same way rather
+   * than guessing from a client-side clock. The process-region header renders it as
+   * 「已工作 N 秒」; a turn without it says 「思考过程」 instead of inventing a number.
+   */
+  turnDurationMs?: number;
   status?: "streaming" | "done";
   /**
    * Rendered from a local submission that the server has not confirmed yet
@@ -95,6 +103,16 @@ export type MessageProcessBlock =
        * appended after it — the panel stopped animating mid-thought.
        */
       open?: boolean;
+      /**
+       * When this client first saw a delta for the thought, and when it settled
+       * (epoch ms). Carried on the block rather than kept in the row component
+       * because the row is unmounted before it can observe the end: the process
+       * region collapses the moment the turn settles. A transcript replayed from
+       * disk has neither value — pi stores no per-block timing — so the row falls
+       * back to "持续了几秒" instead of inventing a number.
+       */
+      startedAt?: number;
+      endedAt?: number;
     }
   | {
       kind: "notice";

@@ -21,7 +21,14 @@
  */
 
 import { BrainIcon, ChevronRightIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 
 import {
   Collapsible,
@@ -31,6 +38,13 @@ import {
 import { useT } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import { lastReasoningLine, reasoningSeconds } from "@/shared/reasoningText";
+import {
+  EMPTY_SCROLL_MASK_STATE,
+  isScrolledToBottom,
+  scrollMaskState,
+  scrollMaskStyle,
+  type ScrollMaskState,
+} from "@/shared/scrollMask";
 
 import { ShimmerLabel } from "./surfaces";
 
@@ -42,31 +56,52 @@ const REASONING_SUMMARY_MASK =
 export interface ThinkingRowProps {
   text: string;
   status?: { type: string };
+  /**
+   * When the thought started / settled, observed by the client and carried on the
+   * block. This is the real source: the row itself is unmounted the moment the turn
+   * settles (the process region collapses), so a start time kept in component state
+   * never lives long enough to be subtracted.
+   */
+  startedAt?: number;
+  endedAt?: number;
 }
 
-export function ThinkingRow({ text, status }: ThinkingRowProps) {
+export function ThinkingRow({ text, status, startedAt, endedAt }: ThinkingRowProps) {
   const t = useT();
   const streaming = status?.type === "running";
   const [open, setOpen] = useState(false);
   const [duration, setDuration] = useState<number | undefined>(undefined);
-  const startedAt = useRef<number | null>(null);
+  const watchedFrom = useRef<number | null>(null);
 
-  // ZCode times a thought client-side: start at the first streaming render, stop
-  // when it settles. A row rebuilt from a transcript never streamed here, so it
-  // has no duration and says "a few seconds" instead of inventing one.
+  // Fallback for a block that arrives without timing but does stream through this
+  // row (nothing settled it above us). The primary source is `startedAt`/`endedAt`
+  // on the block: a transcript replayed from disk has neither, and a thought whose
+  // end we never saw must not invent a duration.
   useEffect(() => {
     if (streaming) {
-      if (startedAt.current === null) {
-        startedAt.current = Date.now();
+      if (watchedFrom.current === null) {
+        watchedFrom.current = Date.now();
       }
       return;
     }
-    if (startedAt.current !== null) {
-      const seconds = reasoningSeconds(startedAt.current);
-      startedAt.current = null;
+    if (watchedFrom.current !== null) {
+      const seconds = reasoningSeconds(watchedFrom.current);
+      watchedFrom.current = null;
       setDuration(seconds);
     }
   }, [streaming]);
+
+  const observedSeconds =
+    startedAt !== undefined && endedAt !== undefined && endedAt >= startedAt
+      ? reasoningSeconds(startedAt, endedAt)
+      : undefined;
+  const shownSeconds = observedSeconds ?? duration;
+
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  /** The reader is parked at the end: new text may keep pulling the viewport down. */
+  const autoFollow = useRef(true);
+  const [mask, setMask] = useState<ScrollMaskState>(EMPTY_SCROLL_MASK_STATE);
 
   const [shouldRenderContent, setShouldRenderContent] = useState(false);
   const unmountTimer = useRef<number | null>(null);
@@ -95,6 +130,77 @@ export function ThinkingRow({ text, status }: ThinkingRowProps) {
     };
   }, [open, shouldRenderContent]);
 
+  // --- expanded body: follow the newest thought while it streams --------------
+  // ZCode's `ReasoningContent` does the same thing (its `autoFollowBottomRef`): the
+  // viewport is pinned to the end while text arrives, and *stops* following the
+  // moment the reader scrolls away — being yanked back to the newest token mid-read
+  // is worse than missing it. Scrolling back to the bottom resumes following.
+  const updateMask = useCallback(() => {
+    const viewport = scrollRef.current;
+    setMask(viewport ? scrollMaskState(viewport) : EMPTY_SCROLL_MASK_STATE);
+  }, []);
+  const scrollToBottom = useCallback(() => {
+    const viewport = scrollRef.current;
+    if (!viewport) {
+      return;
+    }
+    viewport.scrollTop = viewport.scrollHeight;
+    updateMask();
+  }, [updateMask]);
+  const handleScroll = useCallback(() => {
+    const viewport = scrollRef.current;
+    if (viewport) {
+      autoFollow.current = isScrolledToBottom(viewport);
+    }
+    updateMask();
+  }, [updateMask]);
+
+  useEffect(() => {
+    if (!shouldRenderContent) {
+      // Collapsed bodies unmount; the next open starts at the newest line again.
+      autoFollow.current = true;
+      setMask(EMPTY_SCROLL_MASK_STATE);
+      return undefined;
+    }
+    const viewport = scrollRef.current;
+    if (!viewport) {
+      return undefined;
+    }
+    // The content grows for two reasons (a new token, or the browser re-measuring
+    // after the expand animation), so both nodes are observed — watching only the
+    // text would miss the case where the viewport itself is what changes size.
+    const sync = () => {
+      if (autoFollow.current) {
+        scrollToBottom();
+        return;
+      }
+      updateMask();
+    };
+    sync();
+    if (typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+    const observer = new ResizeObserver(sync);
+    observer.observe(viewport);
+    if (contentRef.current) {
+      observer.observe(contentRef.current);
+    }
+    return () => observer.disconnect();
+  }, [scrollToBottom, shouldRenderContent, updateMask]);
+
+  useEffect(() => {
+    if (!shouldRenderContent) {
+      return;
+    }
+    if (autoFollow.current) {
+      scrollToBottom();
+      return;
+    }
+    updateMask();
+    // Only appended text moves the viewport; `scrollToBottom`/`updateMask` are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text]);
+
   // An empty streaming thought has nothing to say yet; ZCode renders nothing at
   // all rather than an empty row that would push the answer down.
   if (streaming && text.length === 0) {
@@ -104,9 +210,9 @@ export function ThinkingRow({ text, status }: ThinkingRowProps) {
   const summary = streaming && !open ? lastReasoningLine(text) : null;
   const label = streaming
     ? null
-    : duration === undefined
+    : shownSeconds === undefined
       ? t("process.reasoning.durationFewSeconds")
-      : t("process.reasoning.durationSeconds", { seconds: duration });
+      : t("process.reasoning.durationSeconds", { seconds: shownSeconds });
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="flex w-full flex-col">
@@ -154,10 +260,17 @@ export function ThinkingRow({ text, status }: ThinkingRowProps) {
         {shouldRenderContent ? (
           <div className="pt-3">
             <div
+              ref={scrollRef}
               data-slot="thinking-text"
+              data-scroll-mask={mask.showTop && mask.showBottom ? "both" : mask.showTop ? "top" : mask.showBottom ? "bottom" : "none"}
+              onScroll={handleScroll}
+              style={scrollMaskStyle(mask)}
               className="ml-2 max-h-60 space-y-2 overflow-auto border-border border-l pl-3.5 text-ui-base text-foreground-subtlest"
             >
-              <div className="min-w-0 break-words whitespace-pre-wrap text-foreground-subtlest">
+              <div
+                ref={contentRef}
+                className="min-w-0 break-words whitespace-pre-wrap text-foreground-subtlest"
+              >
                 {text}
               </div>
             </div>

@@ -1,5 +1,6 @@
 import type { BootstrapResponse } from "../../lib/api";
 import type { ChatMessage, ChatSession, ProjectSessionSummary, ProjectSummary } from "../../types";
+import { settleStreamingAnswer } from "../../shared/chatTurnTiming.ts";
 /* The block algebra moved to `shared/chatProcessBlocks.ts` so the server and the
  * stream projection can use it too; re-exported here for existing call sites. */
 export {
@@ -142,6 +143,20 @@ export function patchMessages(
     return { bootstrap, changed: false };
   }
   return withMessages(bootstrap, next);
+}
+
+/**
+ * Mark every streaming answer done, keeping the durations this client observed.
+ *
+ * The transcript's own timestamps may not describe these turns yet, and an unknown
+ * duration prints a different header than a known one — so the observed span is
+ * carried here rather than dropped.
+ */
+export function settleStreamingMessages(
+  bootstrap: BootstrapResponse,
+  settledAt: number = Date.now(),
+): PatchResult {
+  return patchMessages(bootstrap, (message) => settleStreamingAnswer(message, settledAt) ?? message);
 }
 
 /** Shallow-copy the one message matching `messageId` and hand it to `updater`. */

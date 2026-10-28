@@ -534,6 +534,7 @@ const PiDesktopProcessGroup: FC<PropsWithChildren<{ group: ThreadGroupPart }>> =
   const t = useT();
   const timing = useMessageTiming();
   const messageRunning = useAuiState((state) => state.message.status?.type === "running");
+  const turnDurationMs = useAuiState((state) => state.message.metadata.custom?.piDesktopTurnDurationMs);
   const processRef = useRef<HTMLDivElement>(null);
   const lockScroll = useScrollPositionLock(processRef);
   const [userOpen, setUserOpen] = useState(false);
@@ -551,13 +552,19 @@ const PiDesktopProcessGroup: FC<PropsWithChildren<{ group: ThreadGroupPart }>> =
     },
     [lockScroll, releaseCollapseGate],
   );
-  // `totalStreamTime` is only known once the runtime has timing for this message; a
-  // turn that is too short to measure (or replayed from a snapshot) has none, and
-  // "已工作 0 秒" would be a claim the data does not make. ZCode falls back to a
-  // duration-less label in exactly this case ("思考过程" / `labels.history`).
-  const seconds = timing?.totalStreamTime
-    ? Math.max(1, Math.round(timing.totalStreamTime / 1000))
-    : undefined;
+  // Two sources, one number: the runtime's stream timing when this client watched the
+  // turn live, otherwise the transcript's own timestamps (`turnDurationMs`, measured in
+  // `chatBubbles` from the turn's entries). The second one is what makes the label
+  // survive opening an old session — a replayed turn has no deltas to time, and
+  // "已工作 0 秒" would be a claim the data does not make, so an unknown duration falls
+  // back to ZCode's duration-less label ("思考过程" / `labels.history`).
+  const measured =
+    timing?.totalStreamTime ??
+    (typeof turnDurationMs === "number" ? turnDurationMs : undefined);
+  const seconds =
+    measured !== undefined && measured > 0
+      ? Math.max(1, Math.round(measured / 1000))
+      : undefined;
   const label =
     seconds === undefined
       ? t(messageRunning ? "process.working" : "process.history")

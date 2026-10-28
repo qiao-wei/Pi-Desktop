@@ -36,6 +36,8 @@ import {
   toolResultProcessText,
 } from "./chatToolBlocks.ts";
 import { messageToText } from "./messageText.ts";
+import { turnDurationOf } from "./chatTurnTiming.ts";
+import { carryObservedAnswerTiming } from "./thinkingTiming.ts";
 import { callToolDisplay } from "./toolDisplay.ts";
 
 export { messageToText };
@@ -263,6 +265,8 @@ export function buildChatBubbles(
   const bubbles: ChatMessage[] = [];
   const toAttachment = options.toAttachment ?? ((attachment: ChatAttachment) => attachment);
   let pendingTurn: TranscriptMessage[] = [];
+  /** The question's timestamp: `pendingTurn` starts only *after* it. */
+  let turnStartedAt = 0;
   let turn = 0;
 
   const flushTurn = () => {
@@ -342,6 +346,9 @@ export function buildChatBubbles(
         content: finalContent,
         processBlocks,
         createdAt,
+        // The question is not in `pendingTurn`, so it is prepended here — otherwise a
+        // turn with a single answer entry measures one point and has no duration.
+        turnDurationMs: turnDurationOf([{ timestamp: turnStartedAt }, ...pendingTurn]),
         status: "done",
       });
     }
@@ -353,6 +360,7 @@ export function buildChatBubbles(
     if (message.role === "user") {
       flushTurn();
       turn += 1;
+      turnStartedAt = Number(message.timestamp ?? 0);
       const parsed = parseAttachmentContext(messageToText(message));
       bubbles.push({
         id: chatBubbleId(turn, "user"),
@@ -1096,7 +1104,8 @@ export function keepAheadOfSnapshot(incoming: ChatMessage, local: ChatMessage): 
     return incoming;
   }
   if (incoming.status === "done") {
-    return incoming;
+    // The snapshot is the truth about content, but not about timing.
+    return carryObservedAnswerTiming(incoming, local);
   }
   if (local.content.length <= incoming.content.length && !(local.processBlocks?.length ?? 0)) {
     return incoming;
@@ -1109,6 +1118,9 @@ export function keepAheadOfSnapshot(incoming: ChatMessage, local: ChatMessage): 
       : incoming.processBlocks,
     liveBlocks: local.liveBlocks ?? incoming.liveBlocks,
     status: local.status === "streaming" ? "streaming" : incoming.status,
+    // A snapshot taken right after the run can still describe the *question* only, so
+    // keep the span we watched: otherwise the newest turn is the one without a time.
+    turnDurationMs: incoming.turnDurationMs ?? local.turnDurationMs,
   };
 }
 

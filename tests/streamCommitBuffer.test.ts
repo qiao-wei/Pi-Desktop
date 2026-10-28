@@ -200,9 +200,15 @@ test("用真的 projectStreamEvent：合帧提交与逐条立即提交结果完�
   buffer.flush();
 
   assert.equal(commits < events.length, true, "提交次数必须明显少于事件数");
-  // 气泡创建时刻是 `Date.now()`，两边差 1ms 属正常，不比时间戳。
+  // 时刻都是 `Date.now()`：气泡创建与「这块思考什么时候开始/结束」两边本就差几毫秒，
+  // 与「合帧有没有改变内容」无关，所以一起抹平；正文、open、顺序仍然逐字比较。
   const withoutCreatedAt = (bubbles: ChatMessage[]) =>
-    bubbles.map((bubble) => ({ ...bubble, createdAt: 0 }));
+    bubbles.map((bubble) => ({
+      ...bubble,
+      createdAt: 0,
+      liveBlocks: bubble.liveBlocks?.map(({ startedAt: _s, endedAt: _e, ...rest }) => rest),
+      processBlocks: bubble.processBlocks?.map(({ startedAt: _s, endedAt: _e, ...rest }) => rest),
+    }));
   assert.deepEqual(
     withoutCreatedAt(committed.bubbles),
     withoutCreatedAt(direct.bubbles),

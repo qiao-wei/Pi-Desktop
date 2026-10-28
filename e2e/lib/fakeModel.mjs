@@ -33,6 +33,17 @@ const TOOL_REQUESTS = {
       edits: [{ oldText: "alpha", newText: "beta" }],
     }),
   },
+  /**
+   * 嵌套目录里的文件：行要把「文件名 + 相对路径」分开显示，并且两个目标分工不同
+   * （点名字开右面板、点路径展开内联）。
+   */
+  "E2E-TOOL-EDIT-NESTED": {
+    name: "edit",
+    arguments: JSON.stringify({
+      path: "src/notes/demo.ts",
+      edits: [{ oldText: "alpha", newText: "beta" }],
+    }),
+  },
   "E2E-TOOL-BASH": {
     name: "bash",
     arguments: JSON.stringify({ command: "printf 'e2e-stdout-line\\n'" }),
@@ -46,6 +57,12 @@ const TOOL_REQUESTS = {
  */
 const THINKING_CHUNKS = ["先看这一段的前半句，", "然后这是思考的尾巴（最后一行）。"];
 
+/**
+ * 长思考流：展开态的吸底跟随只有在**正文超过限高（`max-h-60`）且还在继续追加**时才看得见。
+ * 一行一句、共 40 行，chunk 之间给一点延迟，好让用例有机会在流式途中点开它。
+ */
+const LONG_THINKING_CHUNKS = Array.from({ length: 40 }, (_, index) => `第 ${index + 1} 行：这是一段较长思考的正文。\n`);
+
 /** 本轮该先发思考流吗？ */
 function reasoningChunks(body) {
   const messages = Array.isArray(body?.messages) ? body.messages : [];
@@ -54,6 +71,10 @@ function reasoningChunks(body) {
     typeof lastUser?.content === "string"
       ? lastUser.content
       : JSON.stringify(lastUser?.content ?? "");
+  // 长的先判：`E2E-THINK-LONG` 里也含 `E2E-THINK`。
+  if (text.includes("E2E-THINK-LONG")) {
+    return LONG_THINKING_CHUNKS;
+  }
   return text.includes("E2E-THINK") ? THINKING_CHUNKS : null;
 }
 
@@ -78,10 +99,12 @@ function pendingToolCall(body) {
     typeof lastUser?.content === "string"
       ? lastUser.content
       : JSON.stringify(lastUser?.content ?? "");
-  for (const [marker, call] of Object.entries(TOOL_REQUESTS)) {
-    if (text.includes(marker)) return call;
-  }
-  return null;
+  // 最长匹配优先：`E2E-TOOL-EDIT` 是 `E2E-TOOL-EDIT-NESTED` 的前缀，按声明顺序取第一个
+  // 会把嵌套目录的用例静默变成「编辑根目录那个文件」。
+  const marker = Object.keys(TOOL_REQUESTS)
+    .filter((candidate) => text.includes(candidate))
+    .sort((a, b) => b.length - a.length)[0];
+  return marker ? TOOL_REQUESTS[marker] : null;
 }
 
 function sleep(ms) {

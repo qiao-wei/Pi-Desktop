@@ -18,6 +18,8 @@ code_refs:
   - src/components/assistant-ui/elements/thinking-row.tsx
   - src/features/chat/assistantUiParts.ts
   - src/shared/collapseGate.ts
+  - src/shared/chatTurnTiming.ts
+  - src/shared/scrollMask.ts
   - src/components/assistant-ui/elements/deferredCollapse.ts
   - src/app/tailwind.css
 tags: [ui, chat, rendering, tool-calls, tokens]
@@ -92,7 +94,48 @@ reviewers: ["@qiaowei"]
    （`whitespace-pre-wrap` + 限高），**不是 markdown**（逐 chunk 重跑 markdown 解析既有卡顿风险，
    也让思考具备正文的视觉重量）。时长客户端算：首个 delta → 落定，向上取整且下限 1 秒；重放出来的
    历史块没有起点，**不编时长**。
-8. **token 层按 ZCode 的名字与公式补**（`src/app/tailwind.css` 的 `@theme`）：`--text-ui-caption|base|sm|xs`、
+8. **动词来自工具身份，不来自 diff 形状**。`edit` 只插入几行时补丁里没有 `-` 行，而「`write`
+   覆盖成一个超集」的补丁形状与它**完全一样** —— 从形状反推动词，给已有文件追加几行就会显示成
+   「Write」（用户 2026-10-27 实测到）。所以 `editOperationOfTool(toolName)` 只认工具名；`Delete`
+   这个动词一并删掉（pi 没有删除工具，只删行也是 edit）。ZCode 同样从工具身份读
+   （`fileSummaryHeuristics.ts` 的 `readEditOperationCandidates`）。
+9. **文件名与路径是两个点击目标**（ZCode 的 `renderFileChip` / `renderFilePath`）：
+   点**文件名** → 右面板打开这个文件（只读预览，`onOpenFile` 由宿主注入）；点**路径**（以及行的
+   其余部分/chevron）→ 展开内联正文。名字是 `<button>`，`mousedown` 与 `click` 都要
+   `stopPropagation`，否则会顺手展开正文；**项目外路径、多文件行不给链接**（右面板只读项目内文件，
+   点了没反应比没有链接更糟）。
+10. **「已工作 N 秒」的来源是转录时间戳，不是客户端秒表**。`chatTurnTiming.ts` 用「本轮首条条目
+    → 末条条目」算真实时长，`chatBubbles` 把它挂到气泡的 `turnDurationMs` 上；拿不到时间戳时返回
+   `undefined` 而不是 0（「不知道」和「瞬间」是两回事），表头退回无时长的「思考过程」。**这正是历史
+   消息也显示时长的原因**：重放出来的一轮没有 delta，客户端秒表无从测起。
+11. **展开的思考正文吸底跟随，读者上滚即暂停**（ZCode 的 `autoFollowBottomRef`）：正文是限高滚动
+   区，新 token 必须把视野推到末尾；但读者自己往上滚之后继续拉回去等于抢滚动条，所以
+   `isScrolledToBottom`（4px 容差）是唯一的开关，滚回底部恢复。上下边缘的渐隐（`scrollMask.ts`）
+   与 ZCode 同一套几何：贴着底就不该淡下缘。
+12. **思考行的时长只有客户端测得到，而且必须活过「快照重建」**。pi 的转录里**没有逐块时间戳**
+   （一条消息只有一个 `timestamp`），所以「思考 · N 秒」只能来自看过这次流式的那一方：
+   投影边界在**首个 delta** 上写 `startedAt`、在块关闭（`thinking_end` / 下一块开始 / 整轮收尾）时写
+   `endedAt`。这两个数还必须跟过**落定后的快照重建** —— 整轮结束时快照会用转录把块重建一遍（不带
+   时长），而那正是行开始显示数字的时刻。所以 `thinkingTiming.ts` 把观测搬过去（按 `streamKey` 认块，
+   没有 key 的老转录按正文认），并且只在**两个端点都有**时才承认一次观测；重放出来的历史没有起点，
+   照旧不编数字。
+13. **路径永远是位置，不是空字符串**。行尾的路径段（`data-slot="tool-row-path"`）是「文件在哪」，
+   所以它不许为空：文件就在工作区根时，答案是**工作区自己的文件夹名**（`iej/`、`.PiDesktop/`），
+   而不是什么都没有 —— 用户 2026-10-27 实测到的 `编辑 hello.py` 后面空着，读起来像这个文件没有位置。
+   规则只有一处（`toolRowFolder`）：有目录用目录，没有就用根目录名，且**带尾斜杠**（ZCode 的
+   `packages/ui/src/settings/` 就是这个形态，尾斜杠让这段读作位置而不是文件名的一部分）；
+   项目外的绝对路径保留它自己的目录，不假装相对化；连工作区都不知道时返回空（宁可少一段，不编）。
+14. **整轮时长的两个坑都补上了**（`turnDurationMs`）：
+   - **问题的时刻不在 `pendingTurn` 里**。`buildChatBubbles` 把用户消息直接变成气泡，`pendingTurn`
+     从**它之后**才开始装条目 —— 于是一个「一问一答」的轮次里只有一个时间戳，`turnDurationOf`
+     如实返回 `undefined`，表头写「思考过程」。修法是把问题的时刻 prepend 进去
+     （`turnDurationOf([{timestamp: turnStartedAt}, ...pendingTurn])`）。**这是历史消息有时长、
+     刚落定那一轮反而没有的原因**。
+   - **落定瞬间快照可能还没描述这一轮**。此时能用的只有「这个客户端看了多久」
+     （`observedTurnDuration`：气泡的 `createdAt` → 落定时刻），它是一次真实测量；
+     一旦快照带上转录自己的时间戳，就换成快照的值（`carryObservedAnswerTiming` 只在快照没有值时
+     才搬本地的）。
+15. **token 层按 ZCode 的名字与公式补**（`src/app/tailwind.css` 的 `@theme`）：`--text-ui-caption|base|sm|xs`、
    `--foreground-subtle` / `--foreground-subtlest`（由**本主题**的 `--foreground` 按 60%/40% 混出，深色只把 subtlest 调到 30%）、
    `--color-diff-added/removed`、`--animate-collapsible-down/up`。深浅两档的差异只写在
    `src/themes/{default,codex}/theme.css` 的 `.dark` 里（组件里没有写死的深浅色）。
@@ -147,17 +190,17 @@ reviewers: ["@qiaowei"]
      要做得先定「行里显示什么」；随之未做的还有 ZCode 的 `SourceLabel`（`bg-surface` /
      `bg-background-alt` 两个 token 因此有定义暂无消费者）。
   3. 每行耗时（见上表）。
-  4. **每轮的真实时长**（表头的「已工作 N 秒」）。ZCode 的时长来自它自己的 turn 计时；本仓的
-     `useMessageTiming().totalStreamTime` **没有任何写入点**（assistant-ui 的 `message.metadata.timing`
-     在本仓是空的），所以表头实际走的是 ZCode 自己的无时长兜底文案（「思考过程」/Reasoning）。
-     要把它做实需要一个真实来源：更接近数据层 —— 转录里的消息时间戳（用户消息 → 末条助手消息），
-     而不是渲染层能补的。**没有来源就不编数字**（旧实现同样只在这里留空）。
+  4. **每轮时长的「真实耗时」语义**。今天的数字是**墙钟跨度**（首条条目 → 末条条目），包含排队与
+     工具执行；ZCode 记的是它自己 turn 的计时。两者对读者都是「这一轮花了多久」，但没有对齐到
+     「模型思考了多久」这种更细的语义 —— 要那样得让桥把每段耗时写进转录。
   5. **会话密度的三档**（紧凑 / 舒适 / 宽松）。ZCode 用 `data-conversation-density` 整体切换七个间距
      变量；本仓还没有这项设置，所以只落默认档（`--conversation-block-gap: 1rem`）。名字先对齐，将来加
      档位时不必再到处找 `gap-*` 数字。
 - **行为差异（有意的）**：行级无自动开合（区域级按 ZCode 自动折叠）；错误不再有 `Error: ` 前缀；
   `display` 是可选字段，兜底行是常态之一。
-- **测试**：新增 `tests/toolDisplay.test.ts`（23 条：信封读取、diff 派生、渲染行、截断、MCP 名解析）、
+- **测试**：新增 `tests/toolDisplay.test.ts`（24 条：信封读取、diff 派生、渲染行、截断、MCP 名解析、
+  路径段非空）、`tests/thinkingTiming.test.ts`（8 条：观测判定、秒数下限、按 key/正文搬过重建）、
+  `tests/chatTurnTiming.test.ts`（7 条：跨度、秒数、落定兜底）、
   `tests/toolRow.test.ts`（8 条：行语法与 token 契约）、`tests/thinkingRow.test.ts`
   （尾巴行/时长/不自动开合/不猜位置）；`tests/toolStreamingStatus.test.ts` 改成钉
   「部分输出走 `partialResult`」与「运行中不自动展开」；`tests/chatTypography.test.ts` 的前置
@@ -167,7 +210,8 @@ reviewers: ["@qiaowei"]
   diff/终端正文、思考行的收起态与时长，**并在浏览器里量出相邻行的间距 = 16px**（间距这种事只有真实
   布局能验）；另有一条专门钉**过程区的自动折叠**：运行中区域带 `data-live` 且行在 DOM 里，整轮落定后
   折成表头（行退场、答案不动），点一下又能打开。截图落 `e2e/.screenshots/`（浅色 + 深色、
-  折叠态与展开态）。
+  折叠态与展开态）。另有 3 条钉用户实测反馈：**历史消息（reload 之后）表头仍有真实时长**、
+  **点文件名开右面板 / 点路径展开内联**、**展开的思考正文在流式里吸底跟随、读者上滚后停止**。
 - **行的类名是逐字抄的**（`max-w-full cursor-pointer … text-ui-base`）。参考实现升级时这层要对照
   ZCode 的 `ToolCallBlocks`（`ToolSummaryRow` / `ToolLayout` / `lightweight-diff-preview`）再看一遍，
   所以 `tests/toolRow.test.ts` 把关键类名与 token 一起钉住了。
@@ -175,6 +219,16 @@ reviewers: ["@qiaowei"]
   时才有意义 —— 旧版是流式里逐 chunk 重跑解析。
 
 ## 修订记录
+
+- **2026-10-27（同日，第二轮）用户实测两处「没改完」**。
+  1. 「思考后面还是没有显示时间」——行自己的秒表在**行被卸载时就没了**（整轮结束过程区自动折叠，
+     行退场），而数字恰恰是落定后才有意义；同时快照重建块会把观测冲掉。修法见 §12（投影边界打点 +
+     `thinkingTiming.ts` 把观测搬过重建）。**教训**：一个值如果只在「组件活着的时候」存在，那它在
+     这个 UI 里等于不存在 —— 先找出组件在哪些时刻会被卸载/重建，再决定值放在哪一层。
+  2. 「编辑和写入文件后还是没有路径」——`edit hello.py` 这种**文件就在项目根**的行，目录部分为空，
+     于是整段路径被省略。修法见 §13。**教训**：「没有值」和「值为空串」在渲染上长得一样，都会变成
+     「这一段不渲染」；派生函数返回空串时，问一句「读者会不会以为这里本来就没有东西」。
+  另：整轮表头的时长这次才真正落到**刚落定的那一轮**上（§14），此前只有更早的轮次和重载后的历史有。
 
 - **2026-10-27（同日）修正一处丢错的行为**。第 3–8 条落地时，把过程区**整体**的自动折叠和「行级自动
   开合」当成一件事一起删了（§6、以及「被拒的方案」里的一行），理由是「ZCode 没有」——**这个前提是错的**：
@@ -187,7 +241,8 @@ reviewers: ["@qiaowei"]
 
 ## 相关文档
 
-- 词表：`CONTEXT.md`「会话过程区（聊天渲染）」——过程块 / 工具展示模型 / 行族 / ZCode 兼容 token 层
+- 词表：`CONTEXT.md`「会话过程区（聊天渲染）」——过程块 / 工具展示模型 / 行族 / ZCode 兼容 token 层 /
+  过程区表头
 - 参考实现：ZCode（Ada）`packages/ui/src/ToolCallBlocks/`（`ToolSummaryRow` / `ToolLayout` /
   `ToolCallBody` / renderers）与 `components/ui/lightweight-diff-preview.tsx`
 - 邻近决策：ADR-001（分层：`src/shared` 必须 bridge-safe，所以展示模型放在 `src/shared` 而不是组件目录）

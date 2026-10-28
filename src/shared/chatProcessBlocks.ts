@@ -235,7 +235,14 @@ function mergeThinkingProcessBlock(
       if (block.text === text || block.text.startsWith(text)) {
         return false;
       }
-      write(index, { kind: "thinking", text, streamKey: block.streamKey });
+      write(index, {
+        kind: "thinking",
+        text,
+        streamKey: block.streamKey,
+        // Keep what this client observed: the snapshot carries no timing.
+        ...(block.startedAt === undefined ? {} : { startedAt: block.startedAt }),
+        ...(block.endedAt === undefined ? {} : { endedAt: block.endedAt }),
+      });
       return true;
     }
     blocks.push({ kind: "thinking", text, streamKey: incoming.streamKey });
@@ -251,7 +258,12 @@ function mergeThinkingProcessBlock(
       return false;
     }
     if (text.startsWith(block.text)) {
-      write(index, { kind: "thinking", text });
+      write(index, {
+        kind: "thinking",
+        text,
+        ...(block.startedAt === undefined ? {} : { startedAt: block.startedAt }),
+        ...(block.endedAt === undefined ? {} : { endedAt: block.endedAt }),
+      });
       return true;
     }
   }
@@ -308,7 +320,7 @@ function closeOpenThinkingBefore<T extends MessageProcessBlock | MessageLiveBloc
     }
     if (block.kind === "thinking" && (block as { open?: boolean }).open) {
       changed = true;
-      return { ...block, open: false } as T;
+      return { ...block, open: false, endedAt: Date.now() } as T;
     }
     return block;
   });
@@ -407,7 +419,7 @@ export function closeOpenThinkingBlocks<T extends MessageLiveBlock | MessageProc
   }
   return blocks.map((block) =>
     block.kind === "thinking" && (block as { open?: boolean }).open
-      ? ({ ...block, open: false } as T)
+      ? ({ ...block, open: false, endedAt: Date.now() } as T)
       : block,
   );
 }
@@ -482,23 +494,33 @@ export function appendLiveThinkingBlock(
         text: `${block.text}${delta}`,
         streamKey: block.streamKey,
         open: block.open !== false,
+        // Same thought, same clock. `endedAt` is cleared: it is streaming again.
+        ...(block.startedAt === undefined ? { startedAt: Date.now() } : { startedAt: block.startedAt }),
       };
       return next;
     }
     return [
       ...closeOpenThinkingBlocks(blocks),
-      { kind: "thinking", text: delta, streamKey, open: true },
+      { kind: "thinking", text: delta, streamKey, open: true, startedAt: Date.now() },
     ];
   }
 
   const lastBlock = blocks[blocks.length - 1];
   if (lastBlock?.kind === "thinking") {
     const next = blocks.slice();
-    next[next.length - 1] = { kind: "thinking", text: `${lastBlock.text}${delta}`, open: true };
+    next[next.length - 1] = {
+      kind: "thinking",
+      text: `${lastBlock.text}${delta}`,
+      open: true,
+      ...(lastBlock.startedAt === undefined ? {} : { startedAt: lastBlock.startedAt }),
+    };
     return next;
   }
 
-  return [...closeOpenThinkingBlocks(blocks), { kind: "thinking", text: delta, open: true }];
+  return [
+    ...closeOpenThinkingBlocks(blocks),
+    { kind: "thinking", text: delta, open: true, startedAt: Date.now() },
+  ];
 }
 
 /** The block a streamed tool-call argument belongs to: last match wins. */
@@ -628,7 +650,14 @@ function mergeLiveTextualProcessBlock(
       return blocks;
     }
     const next = [...blocks];
-    next[matchIndex] = { kind: "thinking", text, streamKey: item.streamKey, open: item.open };
+    next[matchIndex] = {
+      kind: "thinking",
+      text,
+      streamKey: item.streamKey,
+      open: item.open,
+      ...(item.startedAt === undefined ? {} : { startedAt: item.startedAt }),
+      ...(item.endedAt === undefined ? {} : { endedAt: item.endedAt }),
+    };
     return next;
   }
 

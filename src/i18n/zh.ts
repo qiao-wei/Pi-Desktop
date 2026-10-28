@@ -525,8 +525,6 @@ export const zh = {
   "process.tool.write.done": "写入",
   "process.tool.edit.running": "正在编辑",
   "process.tool.edit.done": "编辑",
-  "process.tool.delete.running": "正在删除",
-  "process.tool.delete.done": "删除",
   "process.tool.execute.running": "执行中",
   "process.tool.execute.done": "终端",
   "process.tool.search.running": "正在搜索",

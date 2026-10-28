@@ -13,7 +13,10 @@ import {
   UserMessageInlineAttachmentProvider,
 } from "../../components/assistant-ui/elements/thread.aui";
 import { toAssistantUiParts, userMessageText } from "./assistantUiParts";
-import { ToolRowWorkspaceProvider } from "../../components/assistant-ui/elements/tool-row";
+import {
+  ToolRowFileOpenProvider,
+  ToolRowWorkspaceProvider,
+} from "../../components/assistant-ui/elements/tool-row";
 import {
   Profiler,
   memo,
@@ -243,6 +246,9 @@ export const ChatThread = memo(function ChatThread({
       <ChatThreadChangedFilesContext.Provider value={changedFileActions}>
       <ChatThreadEditContext.Provider value={editController}>
         <ToolRowWorkspaceProvider root={workspaceRoot}>
+        {/* 行里点文件名 → 右面板看这个文件（和「改动」面板里点文件是同一个动作：
+            相对项目根的路径、只读预览）。没有宿主时行里就不出现链接。 */}
+        <ToolRowFileOpenProvider onOpenFile={onChangedFileContent}>
         <UserMessageActionsProvider onEditMessage={onStartEditMessage}>
           <UserMessageInlineAttachmentProvider
             onAttachmentHoverStart={onAttachmentHoverStart}
@@ -263,6 +269,7 @@ export const ChatThread = memo(function ChatThread({
             </ThreadPrimitive.Root>
           </UserMessageInlineAttachmentProvider>
         </UserMessageActionsProvider>
+        </ToolRowFileOpenProvider>
         </ToolRowWorkspaceProvider>
       </ChatThreadEditContext.Provider>
       </ChatThreadChangedFilesContext.Provider>
@@ -1237,6 +1244,10 @@ function toAssistantUiMessage(message: ChatMessage): ThreadMessageLike {
     createdAt: new Date(message.createdAt),
     status: message.status === "streaming" ? { type: "running" } : { type: "complete", reason: "stop" },
     content,
+    metadata:
+      message.turnDurationMs === undefined
+        ? undefined
+        : { custom: { piDesktopTurnDurationMs: message.turnDurationMs } },
   };
 }
 

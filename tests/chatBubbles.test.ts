@@ -560,3 +560,41 @@ test("replaceTurnWithProvisional 顺手丢掉别的提交留下的、更靠后�
     provisionalBubbleId("c1", "assistant", 2),
   ]);
 });
+
+/**
+ * 「已工作 N 秒」的来源是**整轮**的跨度：问题的时刻 → 这一轮最后一条条目。
+ *
+ * 用户看到的病：刚落定的那一轮表头写「思考过程」（无时长），而更早的轮次都写着
+ * 「已工作 N 秒」。原因是 `pendingTurn` 只装用户消息**之后**的条目 —— 一个问题 +
+ * 一条回答答完的轮次里，一个时间戳就是一个点，`turnDurationOf` 如实返回 undefined。
+ */
+test("轮次时长从问题自己的时间戳算起，单个回答条目也有时长", () => {
+  const bubbles = buildChatBubbles(
+    [
+      { role: "user", content: "问", timestamp: 1_000 },
+      { role: "assistant", content: "答", timestamp: 4_500 },
+    ],
+    { isStreaming: false },
+  );
+  assert.equal(bubbles[1].turnDurationMs, 3_500, "不是 0、也不是 undefined：这是整轮的跨度");
+});
+
+test("工具往返也算在轮次里（最后一条条目决定结束时刻）", () => {
+  const bubbles = buildChatBubbles(
+    [
+      { role: "user", content: "问", timestamp: 1_000 },
+      { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "bash", arguments: {} }], timestamp: 2_000 },
+      { role: "toolResult", toolCallId: "t1", toolName: "bash", content: [], timestamp: 9_000 },
+    ],
+    { isStreaming: false },
+  );
+  assert.equal(bubbles[1].turnDurationMs, 8_000);
+});
+
+test("问题没有时间戳时不许编一个（退回无时长）", () => {
+  const bubbles = buildChatBubbles(
+    [{ role: "user", content: "问" }, { role: "assistant", content: "答", timestamp: 4_500 }],
+    { isStreaming: false },
+  );
+  assert.equal(bubbles[1].turnDurationMs, undefined);
+});

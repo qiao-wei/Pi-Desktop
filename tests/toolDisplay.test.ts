@@ -10,7 +10,8 @@ import test from "node:test";
 import {
   callToolDisplay,
   deriveToolDisplay,
-  editOperationOfDisplay,
+  editOperationOfTool,
+  toolRowFolder,
   parseMcpToolName,
   parseUnifiedPatch,
   pathDirectory,
@@ -230,37 +231,14 @@ test("文件名取最后一段，目录取它前面的部分（两者都不猜�
   assert.equal(pathDirectory("src/components/"), "src");
 });
 
-test("edit 的动词按 diff 形状分：全新增是写入，全删除是删除，其余是编辑", () => {
-  const added = deriveToolDisplay({
-    toolName: "edit",
-    args: { path: "a.ts" },
-    result: {
-      content: [{ type: "text", text: "ok" }],
-      details: { patch: "--- a.ts\n+++ a.ts\n@@ -0,0 +1 @@\n+x" },
-    },
-  });
-  assert.equal(editOperationOfDisplay(added), "write");
-
-  const removed = deriveToolDisplay({
-    toolName: "edit",
-    args: { path: "a.ts" },
-    result: {
-      content: [{ type: "text", text: "ok" }],
-      details: { patch: "--- a.ts\n+++ a.ts\n@@ -1 +0,0 @@\n-x" },
-    },
-  });
-  assert.equal(editOperationOfDisplay(removed), "delete");
-
-  const mixed = deriveToolDisplay({
-    toolName: "edit",
-    args: { path: "a.ts" },
-    result: {
-      content: [{ type: "text", text: "ok" }],
-      details: { patch: "--- a.ts\n+++ a.ts\n@@ -1 +1 @@\n-x\n+y" },
-    },
-  });
-  assert.equal(editOperationOfDisplay(mixed), "edit");
-  assert.equal(editOperationOfDisplay(undefined), "edit", "没有 diff 时退回最中性的动词");
+test("edit 的动词只看工具名，不看 diff 形状", () => {
+  // 用户实测的回归：给已有文件插入几行（没有 - 行）时，行说成了「Write」。
+  // diff 分不出「write 覆盖成超集」与「edit 只插不改」，所以形状不能当证据。
+  assert.equal(editOperationOfTool("edit"), "edit");
+  assert.equal(editOperationOfTool("write"), "write");
+  assert.equal(editOperationOfTool(" Write "), "write");
+  assert.equal(editOperationOfTool("mcp__fs__write"), "edit", "MCP 工具不走这一族");
+  assert.equal(editOperationOfTool(""), "edit");
 });
 
 test("diff 正文只剩内容行：文件头、git prelude、hunk 头都不出现", () => {
@@ -374,4 +352,16 @@ test("调用还没有结果时也能给出 read 的路径（行要在跑的时�
   });
   assert.equal(callToolDisplay("bash", { command: "ls" }), undefined, "只有 read 有前置正文");
   assert.equal(callToolDisplay("read", {}), undefined, "{kind:'read'} 没有路径时等于没有正文");
+});
+
+test("文件行的路径永远非空：有目录用目录，没有就用项目文件夹名", () => {
+  const root = "/Users/me/iej";
+  assert.equal(toolRowFolder("src/notes/demo.ts", root), "src/notes/");
+  assert.equal(toolRowFolder("src/demo.ts", root), "src/");
+  // 用户实测：「编辑 hello.py」后面什么都没有 —— 文件就在项目根时，位置由项目文件夹名回答。
+  assert.equal(toolRowFolder("hello.py", root), "iej/");
+  // 项目外的绝对路径保持它自己的目录（不做假的相对化）。
+  assert.equal(toolRowFolder("/elsewhere/x/a.ts", root), "/elsewhere/x/");
+  // 连工作区都不知道时就别编一个（空 = 不渲染那段）。
+  assert.equal(toolRowFolder("hello.py", ""), "");
 });

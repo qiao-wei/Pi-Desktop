@@ -429,19 +429,45 @@ export function pathDirectory(path: string): string {
   return index <= 0 ? "" : trimmed.slice(0, index);
 }
 
-/** Which verb an edit's diff represents: creating, deleting, or changing. */
-export type EditOperation = "write" | "delete" | "edit";
+/**
+ * The folder text after a file name in a tool row.
+ *
+ * A file can sit directly in the workspace, in which case its directory part is
+ * empty — and a row with no path at all reads as if the file had no location (that is
+ * what users saw for `Edit hello.py`). The workspace's own folder name is the honest
+ * answer there: it says "at the root of *this* project", in the same relative form as
+ * everything else in the row.
+ *
+ * ZCode keeps the trailing slash (`packages/ui/src/settings/`), and it is what makes
+ * the path read as a location rather than as part of the file name.
+ */
+export function toolRowFolder(relative: string, workspaceRoot: string): string {
+  const directory = pathDirectory(relative);
+  if (directory) {
+    return `${directory}/`;
+  }
+  const rootName = pathLeaf(workspaceRoot);
+  return rootName ? `${rootName}/` : "";
+}
 
-export function editOperationOfDisplay(display: ToolDisplay | undefined): EditOperation {
-  if (display?.kind !== "fileDiff" || display.files.length === 0) {
-    return "edit";
-  }
-  const everyFileAdded = display.files.every((file) => file.removed === 0 && file.added > 0);
-  if (everyFileAdded) {
-    return "write";
-  }
-  const everyFileRemoved = display.files.every((file) => file.added === 0 && file.removed > 0);
-  return everyFileRemoved ? "delete" : "edit";
+/** Which verb a file-writing tool row uses. */
+export type EditOperation = "write" | "edit";
+
+/**
+ * The verb comes from **the tool that ran**, never from the shape of its diff.
+ *
+ * Deriving it from the diff ("no removed lines ⇒ this must have been a write") reads
+ * an insertion-only `edit` as `Write` — which is exactly what users see when a turn
+ * appends a few lines to an existing file. The diff cannot tell the two apart: a
+ * `write` that happens to replace a file with a superset, and an `edit` that only
+ * inserts, produce the same patch shape. ZCode reads the operation from the tool
+ * identity for the same reason (`fileSummaryHeuristics.ts`).
+ *
+ * `delete` is not a case here because pi has no delete tool: a diff that only removes
+ * lines is still an edit of that file.
+ */
+export function editOperationOfTool(toolName: string): EditOperation {
+  return toolName.trim().toLowerCase() === "write" ? "write" : "edit";
 }
 
 /* -------------------------------------------------------------------------- */

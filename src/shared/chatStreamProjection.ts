@@ -35,6 +35,7 @@ import {
   type ChatBubbleRef,
   type PendingQueueState,
 } from "./chatBubbles.ts";
+import { observedTurnDuration } from "./chatTurnTiming.ts";
 import {
   appendLiveTextBlock,
   appendLiveThinkingBlock,
@@ -116,10 +117,10 @@ export function projectStreamEvent(view: ChatStreamView, event: PromptStreamEven
 }
 
 /** Mark every open bubble finished once a run stops (done / error / stop). */
-export function finalizeChatStreamView(view: ChatStreamView): ChatStreamView {
+export function finalizeChatStreamView(view: ChatStreamView, now: number = Date.now()): ChatStreamView {
   const bubbles = view.bubbles.map((bubble) =>
     bubble.status === "streaming" && !isProvisionalBubble(bubble)
-      ? { ...bubble, status: "done" as const }
+      ? { ...bubble, status: "done" as const, turnDurationMs: bubble.turnDurationMs ?? observedTurnDuration(bubble.createdAt, now) }
       : bubble,
   );
   const unchanged = bubbles.every((bubble, index) => bubble === view.bubbles[index]);

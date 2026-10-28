@@ -28,9 +28,7 @@
  */
 
 import {
-  CheckIcon,
   ChevronRightIcon,
-  CopyIcon,
   PencilIcon,
   PlugIcon,
   SearchIcon,
@@ -53,25 +51,20 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useT } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import {
-  editOperationOfDisplay,
+  editOperationOfTool,
   parseMcpToolName,
-  pathDirectory,
   pathLeaf,
   toolRowFamily,
+  toolRowFolder,
   type ToolDisplay,
 } from "@/shared/toolDisplay";
 import { toWorkspaceRelativePath } from "@/shared/turnChangedFiles";
 
 import { DiffBody, McpBody, PartsBody, TerminalBody } from "./tool-bodies";
+import { DiffCount, StatusWord } from "./tool-row-readouts";
 
 /* -------------------------------------------------------------------------- */
 /* Workspace-relative paths                                                   */
@@ -94,6 +87,34 @@ export function ToolRowWorkspaceProvider({
   children: ReactNode;
 }) {
   return <WorkspaceRootContext.Provider value={root}>{children}</WorkspaceRootContext.Provider>;
+}
+
+/**
+ * How a row opens the file it points at in the host's right panel.
+ *
+ * Provided by the chat host (`ChatThread`) like the workspace root, because a row has
+ * no idea whether a panel exists (a read-only replay has none) — with no provider the
+ * name simply stays plain text instead of becoming a button that does nothing.
+ */
+const FileOpenContext = createContext<((path: string) => void) | undefined>(undefined);
+
+export function ToolRowFileOpenProvider({
+  onOpenFile,
+  children,
+}: {
+  onOpenFile?: ((path: string) => void) | undefined;
+  children: ReactNode;
+}) {
+  return <FileOpenContext.Provider value={onOpenFile}>{children}</FileOpenContext.Provider>;
+}
+
+/**
+ * Whether the row's path can be opened by the host at all: the panel reads files
+ * relative to the project root and refuses anything outside it, so an absolute path
+ * from another checkout must not pretend to be clickable.
+ */
+function isPanelPath(path: string): boolean {
+  return path !== "" && !path.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(path);
 }
 
 const CONTENT_UNMOUNT_DELAY_MS = 300;
@@ -163,6 +184,7 @@ export function ToolRow({
       kindLabel={presentation.kindLabel}
       kindDetail={presentation.kindDetail}
       primaryText={presentation.primaryText}
+      filePath={presentation.filePath}
       secondaryText={presentation.secondaryText}
       separator={presentation.separator}
       diff={presentation.diff}
@@ -181,6 +203,8 @@ interface Presentation {
   kindLabel: ReactNode;
   kindDetail?: ReactNode;
   primaryText?: ReactNode;
+  /** Workspace-relative path of the single file this row points at, when there is one. */
+  filePath?: string;
   secondaryText?: ReactNode;
   separator?: ReactNode;
   diff?: { added: number; removed: number };
@@ -229,9 +253,10 @@ function resolvePresentation({
             {pathLeaf(relative)}
           </span>
         ) : null,
-        secondaryText: pathDirectory(relative) ? (
-          <span className={PATH_TEXT_CLASS} title={relative}>
-            {pathDirectory(relative)}
+        filePath: isPanelPath(relative) ? relative : undefined,
+        secondaryText: toolRowFolder(relative, workspaceRoot) ? (
+          <span data-slot="tool-row-path" className={PATH_TEXT_CLASS} title={relative}>
+            {toolRowFolder(relative, workspaceRoot)}
           </span>
         ) : null,
         title: relative || toolName,
@@ -246,19 +271,15 @@ function resolvePresentation({
       if (files.length === 0) {
         return fallbackPresentation({ t, toolName, running });
       }
-      const operation = editOperationOfDisplay(display);
+      const operation = editOperationOfTool(toolName);
       const key =
         operation === "write"
           ? running
             ? "process.tool.write.running"
             : "process.tool.write.done"
-          : operation === "delete"
-            ? running
-              ? "process.tool.delete.running"
-              : "process.tool.delete.done"
-            : running
-              ? "process.tool.edit.running"
-              : "process.tool.edit.done";
+          : running
+            ? "process.tool.edit.running"
+            : "process.tool.edit.done";
       const relativePaths = files.map((file) => toWorkspaceRelativePath(file.path, workspaceRoot));
       const totals = files.reduce(
         (sum, file) => ({ added: sum.added + file.added, removed: sum.removed + file.removed }),
@@ -282,10 +303,11 @@ function resolvePresentation({
             {pathLeaf(first)}
           </span>
         ),
+        filePath: !multiple && isPanelPath(first) ? first : undefined,
         secondaryText:
-          !multiple && pathDirectory(first) ? (
-            <span className={PATH_TEXT_CLASS} title={first}>
-              {pathDirectory(first)}
+          !multiple && toolRowFolder(first, workspaceRoot) ? (
+            <span data-slot="tool-row-path" className={PATH_TEXT_CLASS} title={first}>
+              {toolRowFolder(first, workspaceRoot)}
             </span>
           ) : null,
         diff: totals.added > 0 || totals.removed > 0 ? totals : undefined,
@@ -443,6 +465,7 @@ function ToolRowLayout({
   kindLabel,
   kindDetail,
   primaryText,
+  filePath,
   secondaryText,
   separator,
   diff,
@@ -458,6 +481,7 @@ function ToolRowLayout({
   kindLabel: ReactNode;
   kindDetail?: ReactNode;
   primaryText?: ReactNode;
+  filePath?: string;
   secondaryText?: ReactNode;
   separator?: ReactNode;
   diff?: { added: number; removed: number };
@@ -468,6 +492,8 @@ function ToolRowLayout({
   canToggle: boolean;
   renderBody: () => ReactNode;
 }) {
+  const t = useT();
+  const openFile = useContext(FileOpenContext);
   const [open, setOpen] = useState(false);
   const expanded = canToggle && open;
   // Radix reads `--radix-collapsible-content-height` during the close animation;
@@ -524,7 +550,30 @@ function ToolRowLayout({
           {separator !== undefined ? (
             <span className="shrink-0 text-foreground-subtlest">{separator}</span>
           ) : null}
-          {primaryText}
+          {primaryText && filePath && openFile ? (
+            // ZCode's `renderFileChip`: the *name* opens the file viewer, while the
+            // rest of the row (path, diff count, chevron) toggles the inline body.
+            // Both `stopPropagation` calls are load-bearing: the row is a Radix
+            // collapsible trigger, and a click that reached it would also expand.
+            <button
+              type="button"
+              data-slot="tool-row-file-link"
+              className="inline-flex min-w-0 max-w-full cursor-pointer items-center text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              title={filePath}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                openFile(filePath);
+              }}
+            >
+              {primaryText}
+            </button>
+          ) : (
+            primaryText
+          )}
           {secondaryText}
           {diff ? <DiffCount added={diff.added} removed={diff.removed} /> : null}
           {statusLabel ? <StatusWord label={statusLabel} tooltip={statusTooltip} /> : null}
@@ -542,8 +591,6 @@ function ToolRowLayout({
       )}
     />
   ) : null;
-
-  const t = useT();
 
   return (
     <Collapsible
@@ -596,89 +643,5 @@ function ToolRowLayout({
         </CollapsibleContent>
       ) : null}
     </Collapsible>
-  );
-}
-
-/** ZCode's animated `+N −M` (see `renderDiffCount`). */
-function DiffCount({ added, removed }: { added: number; removed: number }) {
-  return (
-    <span className="inline-flex items-center gap-1 font-mono leading-none whitespace-nowrap tabular-nums">
-      {added > 0 ? (
-        <span aria-label={`+${added}`} className="inline-flex items-center text-diff-added" role="text">
-          +{added}
-        </span>
-      ) : null}
-      {removed > 0 ? (
-        <span
-          aria-label={`-${removed}`}
-          className="inline-flex items-center text-diff-removed"
-          role="text"
-        >
-          −{removed}
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
-/**
- * The failure word: dotted underline, error in a tooltip, and a copy button.
- * ZCode only shows a status word when it carries information (failure / stopped),
- * which is why a successful run has no "Completed" on every row.
- */
-function StatusWord({ label, tooltip }: { label: string; tooltip?: string }) {
-  const t = useT();
-  const [copied, setCopied] = useState(false);
-  const resetTimer = useRef<number | null>(null);
-
-  useEffect(
-    () => () => {
-      if (resetTimer.current !== null) {
-        window.clearTimeout(resetTimer.current);
-      }
-    },
-    [],
-  );
-
-  if (!tooltip) {
-    return <span className="shrink-0 whitespace-nowrap">{label}</span>;
-  }
-
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="cursor-help shrink-0 whitespace-nowrap underline decoration-dotted underline-offset-2">
-            {label}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="top" align="start" className="max-w-96">
-          <div className="flex max-w-96 items-center gap-2">
-            <span className="line-clamp-3 min-w-0 flex-1 break-words whitespace-pre-wrap">
-              {tooltip}
-            </span>
-            <button
-              type="button"
-              className="shrink-0 text-background/70 hover:text-background"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                void navigator.clipboard.writeText(tooltip).then(() => {
-                  setCopied(true);
-                  if (resetTimer.current !== null) {
-                    window.clearTimeout(resetTimer.current);
-                  }
-                  resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
-                });
-              }}
-              title={t(copied ? "process.tool.copyError.copied" : "process.tool.copyError")}
-              aria-label={t(copied ? "process.tool.copyError.copied" : "process.tool.copyError")}
-            >
-              {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
-            </button>
-          </div>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
   );
 }

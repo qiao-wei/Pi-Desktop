@@ -68,3 +68,30 @@ test("正文是纯文本左导轨，不是 markdown、也不是面板", () => {
   );
   assert.doesNotMatch(thinkingRow, /MarkdownText|MessageResponse/, "思考正文不走 markdown 渲染");
 });
+/**
+ * 展开态的两个行为（用户 2026-10-27 实测的 bug）：正文是个限高滚动区，所以
+ *   1. 流式追加时必须**吸底跟随**，否则新 token 全在视野外；
+ *   2. 但读者自己往上滚之后必须**停止跟随**（继续拉回去等于抢滚动条），滚回底部恢复。
+ * 两条都是 ZCode `ReasoningContent` 的语义（它的 `autoFollowBottomRef`）。
+ */
+test("展开的正文吸底跟随，读者上滚后暂停、回到底部再恢复", () => {
+  assert.match(thinkingRow, /const autoFollow = useRef\(true\)/, "默认吸底");
+  assert.match(
+    thinkingRow,
+    /autoFollow\.current = isScrolledToBottom\(viewport\)/,
+    "跟随与否由读者当前的滚动位置决定",
+  );
+  assert.match(thinkingRow, /if \(autoFollow\.current\) \{\s*scrollToBottom\(\);/, "在底部时把新内容推到视野内");
+  // 内容增长有两个来源（新 token / 展开动画后的重测），两个节点都要观察。
+  assert.match(thinkingRow, /new ResizeObserver\(sync\)/);
+  assert.match(thinkingRow, /observer\.observe\(viewport\)/);
+  assert.match(thinkingRow, /observer\.observe\(contentRef\.current\)/);
+  // 折叠态卸载后回到「下次展开从最新一行开始」。
+  assert.match(thinkingRow, /autoFollow\.current = true;/, "重新打开时恢复跟随");
+});
+
+test("正文的上下渐隐跟着滚动位置走（ZCode 的 scroll mask）", () => {
+  assert.match(thinkingRow, /data-scroll-mask=\{/);
+  assert.match(thinkingRow, /style=\{scrollMaskStyle\(mask\)\}/);
+  assert.match(thinkingRow, /onScroll=\{handleScroll\}/);
+});
