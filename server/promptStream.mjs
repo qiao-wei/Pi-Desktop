@@ -11,7 +11,7 @@ import { DELIVERY_POLICY } from "./protocolVersion.mjs";
 import { rewindSessionToTurn, shouldGenerateInitialTitle } from "./sessionHelpers.mjs";
 import { diagnosticLog } from "./sessionStoreFactory.mjs";
 import { displayTranscript } from "./sessionTranscript.mjs";
-import { attachmentOnlyPrompt, capabilityOnlyPrompt, errorDetails, formatAgentError, partialToolCall, toolStreamId } from "./smallHelpers.mjs";
+import { attachmentOnlyPrompt, capabilityOnlyPrompt, errorDetails, partialToolCall, toolStreamId } from "./smallHelpers.mjs";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
@@ -95,7 +95,6 @@ async function streamPrompt(req, res, requestId, options = {}) {
   });
 
   let closed = false;
-  let finalAgentError = "";
   let assistantMessageStreamIndex = -1;
   // Bubble identity for this run, computed with the very same rule the snapshot
   // builder uses, so every event addresses the bubble the client already shows.
@@ -427,18 +426,6 @@ async function streamPrompt(req, res, requestId, options = {}) {
         errorMessage: typeof event.errorMessage === "string" ? event.errorMessage : undefined,
       });
     }
-
-    if (event.type === "auto_retry_end" && event.success === false && event.finalError) {
-      finalAgentError = formatAgentError(event.finalError);
-    }
-
-    if (event.type === "agent_end" && event.willRetry === false) {
-      const assistantError = deps.latestAssistantError(event.messages);
-      if (assistantError) {
-        finalAgentError = assistantError;
-      }
-    }
-
   });
 
   const onClientClose = () => {
@@ -486,10 +473,13 @@ async function streamPrompt(req, res, requestId, options = {}) {
           });
         }
         deps.updateSessionStoreFromRuntime(activeRuntime);
+        // 这一轮到底失败没有，**只在收尾时按转录的终局判定**：重试/压缩恢复中途的
+        // 失败尝试都还在消息里，按它们判会把这轮已经救回来的任务报成失败。
+        const finalAgentError = deps.latestAssistantError(activeSession.state?.messages);
         writeEvent({ type: "snapshot", snapshot: await deps.buildSnapshot(activeRuntime) });
-      }
-      if (finalAgentError) {
-        writeEvent(domainErrorFrame(finalAgentError));
+        if (finalAgentError) {
+          writeEvent(domainErrorFrame(finalAgentError));
+        }
       }
       // `lifecycle` tells the client whether this stream merely acknowledged a
       // queue insert (the run keeps going) or actually ended the run.

@@ -67,6 +67,17 @@ function sessionMessagePage(options = {}) {
   };
 }
 
+/**
+ * 这一轮的**终局**错误：只看最后一条 assistant 消息，不往前扫更早的。
+ *
+ * 为什么不能「找到一条错误就算失败」：同一轮 prompt 里 pi 会重试、溢出后压缩再继续、
+ * 压缩后重试——失败的那几次尝试仍然留在转录里（只是被 `context_edit` 从模型投影里
+ * 摘掉），后面跟着的才是真正的终局。按「有错误消息就算失败」判，任务明明跑完了，
+ * 桥也会给客户端补一帧 error：气泡标失败，系统提醒也是「任务失败」。
+ *
+ * 终局失败时 agent 循环在写下那条错误消息后立即结束，所以它必然是最后一条 assistant；
+ * 末尾的 toolResult / user 消息不影响判断，跳过即可。
+ */
 function latestAssistantError(messages) {
   if (!Array.isArray(messages)) {
     return "";
@@ -74,13 +85,17 @@ function latestAssistantError(messages) {
 
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message?.role === "assistant" && message.stopReason === "error" && message.errorMessage) {
+    if (message?.role !== "assistant") {
+      continue;
+    }
+    if (message.stopReason === "error" && message.errorMessage) {
       return formatAgentError(message.errorMessage);
     }
-
-    if (message?.role === "assistant" && message.stopReason === "aborted") {
+    if (message.stopReason === "aborted") {
       return formatAgentError(message.errorMessage || "Request aborted");
     }
+    // 最后一条 assistant 正常收尾：这一轮没有终局错误，更早的失败尝试只是历史。
+    return "";
   }
 
   return "";
