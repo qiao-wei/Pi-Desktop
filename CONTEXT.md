@@ -191,6 +191,7 @@ React、npm 这类通用词。
 - 是什么：一轮结束后、答案下面那张「N 个文件已更改」卡片，逐字照 ZCode 的 `ConversationFileSummaryPanel`。表头是 chevron + 标题 + 聚合 `+X -Y`；展开后每行「图标 + 文件名 + 目录 + 自己的 `+N -M`（只画非零那侧）+ `审查` / `打开 ⌄`（分段控件）」。
 - 点击语义：「审查」渲染**这一轮的补丁**（`RightPanelFileTab.patch`，来源标签「本轮改动」），不是现读 git —— 新建文件在 git 里还是 untracked、改完就 commit 的文件在 unstaged 里也是空的。「打开」走正文。两者都先把路径折成**相对项目根**（右面板拒绝绝对路径）。
 - 边界：**在消息正文列里、操作栏之前**（走消息内部的 `trailing` 槽位）；只在落定后出现（流式途中列表会一行行往外蹦）；默认收起（它是索引，不是正文）。数据只认 `write` / `edit` 两个工具 —— `bash` 改文件没有可信路径，宁可不列。
+- 展开：视口**跟着卡片上移**，展开后底部仍贴着视口底部（`ChatThread` 的跟随守卫只认滚动手势：`wheel` / `touchmove` / `keydown`，以及在会话表面或滚动条上的按下；点展开按钮是**点击**不是滚动，不能因此撤销跟随 —— 否则新展开的行会长到折叠线以外）。
 - _避免_：说成「git 改动」。它答的是「**这一轮**改了什么」，git 只知道「相对 HEAD 有什么改动」，两轮改同一个文件时会混在一起。
 - 代码：`src/features/chat/TurnChangedFiles.tsx`、数据 `src/shared/turnChangedFiles.ts` 的 `collectTurnChangedFilesWithCounts`（行数只从 `display.files` 读；同一文件取最后一次调用；`counted: false` = 数不出来，不显示数字）；补丁 tab 在 `src/features/workspace/{rightPanelTabs,useWorkspacePanelTabs}.ts`。
 - 样式：半径用**绝对**像素（卡片 `rounded-[12px]`、按钮 `rounded-[8px]`）—— `rounded-xl` 在本仓跟随主题 `--radius`（codex 16px → 20px），表头会变成胶囊。悬停用 `hover:bg-hover` / `hover:border-border-hover` —— 这两个 token 是后补的，缺了它们 Tailwind 会**静默丢弃**规则（类名对、界面没反馈）；按钮底色用 `bg-card` 而不是 `bg-input`（两仓同名不同义：那边的 input 是面、本仓是描边）。

@@ -237,6 +237,12 @@ test("the completion lock anchors on a surviving text block, not the message roo
     new URL("../src/features/chat/ChatThread.tsx", import.meta.url),
     "utf8",
   );
+  // 锁定逻辑本身在 2026-10-29 搬到了 `useCompletionScrollLock.ts`（ChatThread 撞上
+  // max-lines 棘轮）：快照仍由视口 owner 记录，补偿那一段跟着实现走。
+  const completionLock = readFileSync(
+    new URL("../src/features/chat/useCompletionScrollLock.ts", import.meta.url),
+    "utf8",
+  );
   // 锚点先细化到块，再退回消息根。
   assert.match(
     chatThread,
@@ -249,9 +255,9 @@ test("the completion lock anchors on a surviving text block, not the message roo
     "the block is chosen from the bubble's own top-level blocks",
   );
   // 块被重新包裹弄没了就先换回根，绝对偏移是最后手段。
-  const hold = chatThread.slice(
-    chatThread.indexOf("const holdPosition = ()"),
-    chatThread.indexOf("let active = true"),
+  const hold = completionLock.slice(
+    completionLock.indexOf("const holdPosition = () =>"),
+    completionLock.indexOf("let active = true"),
   );
   assert.ok(
     hold.indexOf("anchor?.isConnected") < hold.indexOf("anchorRoot?.isConnected"),
@@ -263,8 +269,8 @@ test("the completion lock anchors on a surviving text block, not the message roo
   );
   // 根锁仍然只能给「不在底部」的读者用（贴底时靠 clamp，不需要补偿）。
   assert.match(
-    chatThread,
-    /if \(!wasStreamingRef\.current \|\| isStreaming \|\| !previousSnapshot \|\| previousSnapshot\.wasAtBottom\)/,
+    completionLock,
+    /!wasStreamingRef\.current\s*\|\|\s*isStreaming\s*\|\|\s*!previousSnapshot\s*\|\|\s*previousSnapshot\.wasAtBottom/,
   );
 });
 

@@ -39,6 +39,7 @@ import type { ChatThreadProps, ViewportState } from "./chatThreadProps";
 export type { ViewportState } from "./chatThreadProps";
 import { CustomScrollToBottom } from "./ChatScrollToBottom";
 import { chatScrollToBottomBus } from "../../shared/chatScrollBus";
+import { absorbedByScrollableCard, isInteractiveTarget } from "../../shared/scrollGestures";
 import { useThreadSearch, type ThreadViewportController } from "./useThreadSearch";
 import { liveTextTailIndex } from "../../shared/liveTextTail";
 import {
@@ -50,6 +51,12 @@ import {
   pickAnchorBlock,
   resolveFollowing,
 } from "../../shared/chatScrollPolicy";
+import {
+  useCompletionScrollLock,
+  viewportRootCount,
+  type ViewportSnapshot,
+} from "./useCompletionScrollLock";
+import { useStreamingScrollPump } from "./useStreamingScrollPump";
 import type { ChatMessage } from "../../types";
 
 /**
@@ -57,15 +64,6 @@ import type { ChatMessage } from "../../types";
  * remains the source of truth; assistant-ui owns thread presentation, message
  * parts, streaming updates, and viewport behavior.
  */
-/**
- * How many message roots are inside the viewport container right now. Reported
- * with the entry-restoration and end-of-run lock windows so a long frame can be
- * attributed to the browser laying out a suddenly-larger subtree.
- */
-function viewportRootCount(viewport: HTMLElement): number {
-  return perfEnabled ? viewport.querySelectorAll("[data-message-id]").length : 0;
-}
-
 /**
  * Hoisted so its identity never changes.
  *
@@ -303,21 +301,10 @@ const USER_TAKEOVER_GRACE_MS = 400;
 const RESIZE_INPUT_GRACE_MS = 150;
 /** Distance from the end that still counts as "at the end" (see chatScrollPolicy). */
 const BOTTOM_TOLERANCE_PX = 4;
-const COMPLETION_LOCK_MS = 280;
 const PERSIST_INTERVAL_MS = 200;
 /** Disclosure roots inside a bubble - their height is what a run settles by. */
 const DISCLOSEURE_SELECTOR =
   '[data-slot="aui_process-group"], [data-slot="reasoning-root"], [data-slot="tool-call"], [data-slot="tool-group-root"]';
-
-type ViewportSnapshot = {
-  scrollTop: number;
-  wasAtBottom: boolean;
-  anchor: Element | null;
-  anchorTop: number | null;
-  /** The message root the anchor belongs to - the fallback if the block is gone. */
-  anchorRoot: Element | null;
-  anchorRootTop: number | null;
-};
 
 function useThreadViewportSync(
   viewportRef: RefObject<HTMLDivElement | null>,
@@ -412,6 +399,13 @@ function useThreadViewportSync(
     // offset we just wrote is mistaken for our write, "they left the bottom" is
     // never recorded, and the session keeps coming back scrolled to the end.
     let userInputAt = 0;
+    // When the reader last *scrolled* the thread, as opposed to merely clicking
+    // inside it. The two are different events: unfolding a disclosure (the
+    // end-of-turn 「N 个文件已更改」 card, a 过程 panel) is a click that grows the
+    // thread, and reading that pointerdown as "they left the bottom" left the
+    // expanded rows below the fold - the reader had to scroll down by hand to
+    // see what they had just opened.
+    let userScrollAt = 0;
     let programmaticAt = 0;
     let anchorRoot: HTMLElement | null = null;
 
@@ -710,11 +704,13 @@ function useThreadViewportSync(
       if (currentShouldFollow) {
         // Growing content moves the bottom away from us too, so "not at the
         // bottom" is only evidence of the reader leaving when they actually
-        // touched the thread a moment ago - and dragging them back down is the
-        // difference between following a run and fighting it. Their own scroll
-        // event is throttled, so settle the flag here.
+        // scrolled a moment ago - and dragging them back down is the difference
+        // between following a run and fighting it. Their own scroll event is
+        // throttled, so settle the flag here. A click is not a scroll: it must
+        // not revoke the follow, or unfolding the changed-files card at the end
+        // of a turn grows the thread and leaves the new rows out of sight.
         if (
-          performance.now() - userInputAt < USER_TAKEOVER_GRACE_MS &&
+          performance.now() - userScrollAt < USER_TAKEOVER_GRACE_MS &&
           viewport.scrollTop < maxScrollTop() - 1
         ) {
           persist(false);
@@ -907,36 +903,32 @@ function useThreadViewportSync(
     };
 
     viewport.addEventListener("scroll", handleScroll, { passive: true });
-    /**
-     * Would this wheel be absorbed by a scrollable card under the cursor (a
-     * 过程/思考 panel with its own `overflow-y`) instead of the thread? If it can
-     * still scroll that way, the thread itself is not moving and the reader is
-     * still following the run.
-     */
-    const absorbedByScrollableCard = (target: EventTarget | null, up: boolean) => {
-      let node = target instanceof Element ? target : null;
-      while (node && node !== viewport) {
-        const overflowY = getComputedStyle(node).overflowY;
-        if (
-          (overflowY === "auto" || overflowY === "scroll") &&
-          (up ? node.scrollTop > 0 : node.scrollHeight - node.scrollTop > node.clientHeight + 1)
-        ) {
-          return true;
-        }
-        node = node.parentElement;
-      }
-      return false;
-    };
+
     // Input outranks our own writes, and it also ends the entry window: the
     // reader is taking over the position. Deliberately *not* recording the
     // position here - a wheel event fires before the browser has scrolled, so
     // the geometry at this instant is where they were, not where they are going.
     // The scroll event that follows derives it.
     const onUserTakeover = (event: Event) => {
-      userInputAt = performance.now();
+      const now = performance.now();
+      userInputAt = now;
+      // Only gestures that can move the scrollport count as "the reader is
+      // driving the position" (see the follow guard in `sync`). Pressing a
+      // control - the unfold button of a card, a link - is a click, not a scroll;
+      // pressing the thread surface (or its scrollbar) may start a drag-scroll.
+      const type = event.type;
+      const scrollGesture =
+        type === "wheel" ||
+        type === "touchmove" ||
+        type === "keydown" ||
+        ((type === "pointerdown" || type === "touchstart") && !isInteractiveTarget(event.target));
+      if (scrollGesture) {
+        userScrollAt = now;
+      }
       const leaving =
         event.type === "wheel"
-          ? (event as WheelEvent).deltaY < 0 && !absorbedByScrollableCard(event.target, true)
+          ? (event as WheelEvent).deltaY < 0 &&
+            !absorbedByScrollableCard(event.target, true, viewport)
           : event.type === "keydown" &&
             ["PageUp", "Home", "ArrowUp"].includes((event as KeyboardEvent).key);
       stopRestoring("user");
@@ -959,7 +951,7 @@ function useThreadViewportSync(
        */
       persist(false);
     };
-    for (const type of ["pointerdown", "wheel", "touchstart", "keydown"] as const) {
+    for (const type of ["pointerdown", "wheel", "touchstart", "touchmove", "keydown"] as const) {
       viewport.addEventListener(type, onUserTakeover, { passive: true });
     }
 
@@ -1008,7 +1000,7 @@ function useThreadViewportSync(
       resizeObserver.disconnect();
       viewportResizeObserver.disconnect();
       viewport.removeEventListener("scroll", handleScroll);
-      for (const type of ["pointerdown", "wheel", "touchstart", "keydown"] as const) {
+      for (const type of ["pointerdown", "wheel", "touchstart", "touchmove", "keydown"] as const) {
         viewport.removeEventListener(type, onUserTakeover);
       }
       // Deliberately *not* persisting here. This cleanup runs after React has
@@ -1022,45 +1014,8 @@ function useThreadViewportSync(
     };
   }, [sessionPath, viewportRef, viewportStates]);
 
-  /**
-   * While a run streams and the reader is following, keeping the bottom pinned
-   * is a per-frame *invariant* rather than a reaction to an event.
-   *
-   * The observer-driven path alone is not enough: a thread can grow without
-   * mutating anything under the viewport and without resizing the content
-   * wrapper - a collapsed 过程/思考 panel releasing buffered markdown is the
-   * common one - and then the answer is written below the fold while the
-   * viewport sits still. Measured before this existed: the first ~1s of a run
-   * left the reader ~90px short of the bottom, and a growing thinking panel
-   * never followed at all.
-   */
-  useLayoutEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport || !isStreaming) {
-      return undefined;
-    }
-    let frame = 0;
-    let stopped = false;
-    const pump = () => {
-      if (stopped) {
-        return;
-      }
-      if (followRef.current) {
-        const max = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
-        const next = nextScrollTarget(viewport.scrollTop, max, max);
-        if (next !== null) {
-          perfCount("viewport.pumpFollow");
-          viewport.scrollTo({ top: next, behavior: "instant" as ScrollBehavior });
-        }
-      }
-      frame = requestAnimationFrame(pump);
-    };
-    frame = requestAnimationFrame(pump);
-    return () => {
-      stopped = true;
-      cancelAnimationFrame(frame);
-    };
-  }, [isStreaming, viewportRef]);
+  // 流式期间每帧吸底（实现见 useStreamingScrollPump）。
+  useStreamingScrollPump({ viewportRef, isStreaming, followRef });
 
   // A streamed token changes `messages` identity; nothing is measured here. The
   // commit itself is observed by the MutationObserver above, which schedules the
@@ -1069,100 +1024,14 @@ function useThreadViewportSync(
     perfCount("render.messages");
   }, [messages]);
 
-  // Completed-process grouping changes the DOM structure at the exact moment a
-  // run ends. Hold the reader's place through that reflow using the snapshot the
-  // throttled persistence already captured, so this stays off the per-token path.
-  useLayoutEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) {
-      return;
-    }
-    const previousSnapshot = snapshotRef.current;
-    if (!wasStreamingRef.current || isStreaming || !previousSnapshot || previousSnapshot.wasAtBottom) {
-      wasStreamingRef.current = isStreaming;
-      return;
-    }
-
-    completionCleanupRef.current?.();
-
-    const previousScrollBehavior = viewport.style.scrollBehavior;
-    const previousOverflowAnchor = viewport.style.overflowAnchor;
-    const previousScrollTo = viewport.scrollTo;
-    const previousScrollBy = viewport.scrollBy;
-    const anchor = previousSnapshot.anchor;
-    const anchorTop = previousSnapshot.anchorTop;
-    const anchorRoot = previousSnapshot.anchorRoot;
-    const anchorRootTop = previousSnapshot.anchorRootTop;
-    /**
-     * Push the surviving text back under the reader's eyes.
-     *
-     * The refined anchor is a paragraph of the answer: when the 过程 group above
-     * it releases its height, this delta is exactly that removal, so the visible
-     * line does not move. A block that the rewrap destroyed falls back to its
-     * message root (coarser, but it is what the previous behaviour had), and only
-     * if even that is gone do we restore the absolute offset.
-     */
-    const holdPosition = () => {
-      if (anchor?.isConnected && anchorTop !== null) {
-        viewport.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
-        return;
-      }
-      if (anchorRoot?.isConnected && anchorRootTop !== null) {
-        viewport.scrollTop += anchorRoot.getBoundingClientRect().top - anchorRootTop;
-        return;
-      }
-      viewport.scrollTop = previousSnapshot.scrollTop;
-    };
-    let active = true;
-    let frame = 0;
-
-    viewport.style.scrollBehavior = "auto";
-    viewport.dataset.viewportLocking = "true";
-    let lockSpan: ReturnType<typeof perfSpan> | null = perfSpan("viewport.cvLock");
-    viewport.style.overflowAnchor = "none";
-    viewport.scrollTo = (() => undefined) as typeof viewport.scrollTo;
-    viewport.scrollBy = (() => undefined) as typeof viewport.scrollBy;
-
-    const restore = () => {
-      if (!active) {
-        return;
-      }
-      holdPosition();
-      frame = requestAnimationFrame(restore);
-    };
-    restore();
-
-    const finish = () => {
-      active = false;
-      cancelAnimationFrame(frame);
-      holdPosition();
-      viewport.scrollTo = previousScrollTo;
-      viewport.scrollBy = previousScrollBy;
-      viewport.style.scrollBehavior = previousScrollBehavior;
-      viewport.style.overflowAnchor = previousOverflowAnchor;
-      delete viewport.dataset.viewportLocking;
-      endLockSpan();
-      completionCleanupRef.current = null;
-    };
-    const endLockSpan = () => {
-      lockSpan?.({ nodes: viewportRootCount(viewport) });
-      lockSpan = null;
-    };
-    const timeoutId = window.setTimeout(finish, COMPLETION_LOCK_MS);
-    completionCleanupRef.current = () => {
-      active = false;
-      cancelAnimationFrame(frame);
-      window.clearTimeout(timeoutId);
-      viewport.scrollTo = previousScrollTo;
-      viewport.scrollBy = previousScrollBy;
-      viewport.style.scrollBehavior = previousScrollBehavior;
-      viewport.style.overflowAnchor = previousOverflowAnchor;
-      delete viewport.dataset.viewportLocking;
-      endLockSpan();
-      completionCleanupRef.current = null;
-    };
-    wasStreamingRef.current = isStreaming;
-  }, [isStreaming, viewportRef]);
+  // 一轮结束时把阅读位置按快照 hold 住（实现见 useCompletionScrollLock）。
+  useCompletionScrollLock({
+    viewportRef,
+    isStreaming,
+    snapshotRef,
+    cleanupRef: completionCleanupRef,
+    wasStreamingRef,
+  });
 }
 
 function toAssistantUiMessage(message: ChatMessage): ThreadMessageLike {

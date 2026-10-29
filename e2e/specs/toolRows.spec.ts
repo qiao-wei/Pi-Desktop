@@ -617,6 +617,73 @@ test("一轮结束后出现变更文件卡片：聚合增删、单行增删、�
 });
 
 /**
+ * 展开一轮末尾的变更文件卡片时，视口要**跟着它上移**，展开后底部仍贴底。
+ *
+ * 用户 2026-10-29：「将 unfold 的时候，要自动上移，展开后底部还是 keep 在底部」。
+ * 根因不在卡片本身，在视口 owner 的「读者接管」判据：它拿 `userInputAt`（随手一次
+ * `pointerdown` 就会刷新）当“读者在滚”的证据，于是点开卡片的那一下就被当成「读者离开
+ * 了底部」，`sync()` 主动撤掉 follow —— 卡片下面的行直接长到折叠线以外，不滚就看不见。
+ * 判据改成只认**滚动**意图：wheel / touchmove / keydown，以及在会话表面（含滚动条）上的按下；
+ * 落在控件（展开按钮、行里的链接）上的点击不再算数。
+ *
+ * 必须用**长到真能滚**的会话：只有一两条消息时视口没有滚动空间，断言会变成空话。
+ */
+test("展开变更文件卡片：视口自动上移，展开后仍贴底", async ({ page, harness }) => {
+  writeFileSync(join(harness.workspaceDir, "demo.ts"), "const greek = 'alpha';\n");
+  await openProject(page, harness);
+
+  // 攒出足够长的会话（每条一轮真跑工具），末尾的卡片才落在折叠线附近。
+  for (let index = 0; index < 3; index += 1) {
+    await sendMessage(page, `E2E-TOOL-EDIT 改一下 demo.ts（第 ${index + 1} 轮）`);
+    await expect(page.locator("[data-message-id$='#assistant']").last()).toContainText("E2E-3 done", {
+      timeout: 30_000,
+    });
+    await turnFinished(page);
+  }
+
+  const viewport = page.locator(".aui-thread-viewport");
+  const card = page.locator('[data-slot="aui_turn-changed-files"]').last();
+  await expect(card).toBeVisible({ timeout: 15_000 });
+
+  // 先把视口放到真正的底部（等价于用户滚到最新一条），再量展开前的位置。
+  await viewport.evaluate((node: { scrollTop: number; scrollHeight: number }) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  await expect
+    .poll(async () =>
+      viewport.evaluate((node: { scrollTop: number; scrollHeight: number; clientHeight: number }) =>
+        Math.round(node.scrollHeight - node.clientHeight - node.scrollTop),
+      ),
+    )
+    .toBeLessThanOrEqual(1);
+
+  // 用 Playwright 的 `boundingBox` 量位置：e2e 的 tsconfig 没有 DOM lib，
+  // `document` / `HTMLElement` 在里面都是 TS2304（见上面那条用例的注释）。
+  const viewportBox = await viewport.boundingBox();
+  const before = await card.boundingBox();
+  assert.ok(viewportBox && before, "视口与变更文件卡片都必须可见");
+
+  await card.locator('[data-slot="aui_turn-changed-files-trigger"]').click();
+  await expect(card.locator('[data-slot="aui_turn-changed-file"]')).toHaveCount(1);
+
+  // 展开后底部仍贴底：只多出卡片本身的高度，而不是把行长到折叠线以外。
+  await expect
+    .poll(async () =>
+      viewport.evaluate((node: { scrollTop: number; scrollHeight: number; clientHeight: number }) =>
+        Math.round(node.scrollHeight - node.clientHeight - node.scrollTop),
+      ),
+    )
+    .toBeLessThanOrEqual(1);
+  const after = await card.boundingBox();
+  assert.ok(after, "展开后卡片必须还在 DOM 里");
+  assert.ok(after.y < before.y, `卡片没有随展开上移（top ${before.y} → ${after.y}）`);
+  assert.ok(
+    after.y + after.height <= viewportBox.y + viewportBox.height,
+    `展开后的卡片底部在折叠线以外（card ${after.y + after.height} > viewport ${viewportBox.y + viewportBox.height}）`,
+  );
+});
+
+/**
  * 「审查 / 打开」真的落到右面板 —— 而且工具参数给的是**绝对路径**（真实 agent 常这么写）。
  *
  * 两个都踩过：
