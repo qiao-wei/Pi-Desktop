@@ -152,6 +152,9 @@ export function ToolRow({
   // transcript has no `status`, and must never render as running.
   const isRunning = running ?? status?.type === "running";
   const resultText = result ?? partialResult ?? "";
+  // 依赖 `t` 就够：`useT()` 返回的引用随语言变化（`src/i18n/react.ts`），切语言时这段
+  // memo 会重算。曾经它只订阅、不换引用，于是思考行换成了中文、这一行的动作词还停在
+  // `Terminal`（2026-10-29 用户截图）。
   const presentation = useMemo(
     () =>
       resolvePresentation({ t, family, toolName, args, display, running: isRunning, workspaceRoot }),

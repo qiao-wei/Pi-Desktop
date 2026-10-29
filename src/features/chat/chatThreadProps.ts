@@ -28,7 +28,7 @@ export type ChatThreadProps = {
    * 「N 个文件已更改」面板里的文件动作。三个都是可选的：没有宿主（比如只读回放）时
    * 面板干脆不出现，而不是给几个点了没反应的按钮。
    */
-  onChangedFileDiff?: (path: string) => void;
+  onChangedFileDiff?: (path: string, patch?: string) => void;
   onChangedFileContent?: (path: string) => void;
   onChangedFileInIde?: (path: string) => void;
   /** 当前项目根（把工具参数里的绝对路径折成相对路径）。 */

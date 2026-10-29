@@ -132,6 +132,15 @@
    */
   --conversation-block-gap: 1rem;
 
+  /*
+   * 悬停底色与"悬停边框"。ZCode 的取值是 `--color-hover: var(--color-neutral-200)`、
+   * `--color-border-hover: neutral-950 @ 20%`；深色在主题的 `.dark` 里换成浅色叠加。
+   * 没有这两个 token 时，`hover:bg-hover` 这种类名在 Tailwind 里**静默失效** ——
+   * 类名看着对、界面就是没有悬停反馈（本仓库的变更文件卡片踩过）。
+   */
+  --color-hover: var(--color-neutral-200);
+  --color-border-hover: color-mix(in oklab, var(--color-neutral-950) 20%, transparent);
+
   /* 工具行内 diff 的增/删色（ZCode：亮色 600、暗色 500，在主题的 .dark 里换档）。 */
   --color-diff-added: var(--color-green-600);
   --color-diff-removed: var(--color-red-600);

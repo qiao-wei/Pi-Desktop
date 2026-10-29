@@ -155,6 +155,7 @@ export function RightPanel({
 
   return (
     <aside
+      data-slot="right-panel"
       className={cn(
         // 滚动的不是这一层：strip 要固定，各视图自己滚（滚动条仍在面板右边缘 —— 水平内边距
         // 在内层，所以位置和以前一致）。

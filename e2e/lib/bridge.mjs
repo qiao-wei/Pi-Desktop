@@ -75,12 +75,17 @@ function waitForUrl(child, urlPromise) {
  * @param {boolean} [options.fakeModel] 传 false 表示不起假模型，只借这份 `models.json` 配置。
  */
 export async function startE2E(options = {}) {
-  const model = options.fakeModel === false ? null : await startFakeModel(options.model ?? {});
   const runDir = mkdtempSync(join(tmpdir(), "pi-desktop-e2e-"));
   const agentDir = join(runDir, "agent");
   const workspaceDir = join(runDir, "workspace");
   mkdirSync(agentDir, { recursive: true });
   mkdirSync(workspaceDir, { recursive: true });
+  // 工作区要先存在：假模型有些用例要回**绝对路径**的工具参数（真实 agent 常给绝对路径），
+  // 那需要知道工作区在哪。
+  const model =
+    options.fakeModel === false
+      ? null
+      : await startFakeModel({ ...(options.model ?? {}), workspaceDir });
   writeModelsConfig(agentDir, model?.baseUrl ?? "http://127.0.0.1:1/v1");
 
   const seen = { stdout: "", stderr: "" };

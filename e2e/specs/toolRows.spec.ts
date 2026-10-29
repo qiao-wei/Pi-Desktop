@@ -584,11 +584,12 @@ test("一轮结束后出现变更文件卡片：聚合增删、单行增删、�
   });
   assert.deepEqual(order, { inContent: true, beforeFooter: true }, "卡片必须在正文列里、操作栏之前");
 
-  // 表头：标题 + 聚合增删（demo.ts 换一行 → +1 −1）。
+  // 表头：标题 + 聚合增删（demo.ts 换一行 → +1 -1）。破折号是 ASCII `-`：参考实现的表头
+  // 聚合就用连字符，不是排版用的 `−`（工具行的 `DiffCount` 才是 `−`）。
   const trigger = card.locator('[data-slot="aui_turn-changed-files-trigger"]');
   await expect(trigger).toContainText("1 个文件已更改");
   await expect(trigger).toContainText("+1");
-  await expect(trigger).toContainText("−1");
+  await expect(trigger).toContainText("-1");
   // 收起态：行不在 DOM 里（ZCode 默认收起）。
   await expect(card.locator('[data-slot="aui_turn-changed-file"]')).toHaveCount(0);
 
@@ -597,7 +598,7 @@ test("一轮结束后出现变更文件卡片：聚合增删、单行增删、�
   await expect(row).toHaveCount(1);
   await expect(row).toContainText("demo.ts");
   await expect(row).toContainText("+1");
-  await expect(row).toContainText("−1");
+  await expect(row).toContainText("-1");
   await expect(row.locator('[data-slot="aui_turn-changed-file-review"]')).toHaveText("审查");
   await expect(row.locator('[data-slot="aui_turn-changed-file-open"]')).toHaveText("打开");
 
@@ -613,4 +614,87 @@ test("一轮结束后出现变更文件卡片：聚合增删、单行增删、�
   // 「审查」把它在右面板打开（和工具行点文件名同一个落点）。
   await row.locator('[data-slot="aui_turn-changed-file-review"]').click();
   await expect(page.getByRole("tab", { name: /demo\.ts/ })).toHaveAttribute("aria-selected", "true");
+});
+
+/**
+ * 「审查 / 打开」真的落到右面板 —— 而且工具参数给的是**绝对路径**（真实 agent 常这么写）。
+ *
+ * 两个都踩过：
+ * - 卡片把工具参数里的原始路径直接交给右面板，而 `readWorkspaceFile` /
+ *   `normalizeRelativeDir` 对绝对路径一律回 `outside the project folder`，于是
+ *   「打开」看起来毫无反应、「审查」也拿不到 diff。卡片必须自己折一次相对路径。
+ * - `审查` 必须渲染**这一轮的补丁**，而不是现读 git：这个工作区不是仓库（`git diff` 只会回
+ *   一段 usage 文本），而 agent 新建的文件在 git 里本来就还是 untracked —— 那时 unstaged
+ *   diff 是空的，用户点的却是「审查这一轮」。参考实现（ZCode）同样是直接渲染补丁。
+ * - `打开` 走 `openContent`（正文）。两条都要验，否则「点哪个都没反应」这种回归没人拦。
+ */
+test("变更文件卡片：绝对路径也能审查（右面板 diff）与打开（右面板正文）", async ({ page, harness }) => {
+  writeFileSync(join(harness.workspaceDir, "demo.ts"), "const greek = 'alpha';\n");
+  await openProject(page, harness);
+
+  await sendMessage(page, "E2E-TOOL-EDIT-ABS 改一下 demo.ts");
+  await expect(page.locator("[data-message-id$='#assistant']").last()).toContainText("E2E-3 done", {
+    timeout: 30_000,
+  });
+  await turnFinished(page);
+
+  const card = page.locator('[data-slot="aui_turn-changed-files"]').last();
+  await card.locator('[data-slot="aui_turn-changed-files-trigger"]').click();
+  const row = card.locator('[data-slot="aui_turn-changed-file"]').first();
+  // 显示的是相对路径（绝对路径在行里会被折掉项目前缀）。
+  await expect(row).toContainText("demo.ts");
+  await expect(row).not.toContainText(harness.workspaceDir);
+
+  // 审查：右面板出这张文件的 diff（不是「不在项目里」的错误文案）。
+  await row.locator('[data-slot="aui_turn-changed-file-review"]').click();
+  const panel = page.locator('[data-slot="right-panel"]');
+  await expect(page.getByRole("tab", { name: /demo\.ts/ })).toHaveAttribute("aria-selected", "true");
+  await expect(panel).toContainText("beta", { timeout: 15_000 });
+  await expect(panel).toContainText("alpha");
+  // 来源标签说清这是「本轮改动」，而不是假装成 git 的未暂存改动。
+  await expect(panel).toContainText("本轮改动");
+  await expect(panel).not.toContainText("outside the project folder");
+  await expect(panel).not.toContainText("Not a git repository");
+
+  // 打开：右面板换成这份文件的正文。
+  await row.locator('[data-slot="aui_turn-changed-file-open"]').click();
+  await expect(panel).toContainText("const greek = 'beta';", { timeout: 15_000 });
+
+  // 「打开」右侧的箭头是「用什么打开」的下拉（ZCode 的 OpenSplitButton）。
+  await row.locator('[data-slot="aui_turn-changed-file-open-with"]').click();
+  await expect(page.getByRole("menuitem", { name: "在编辑器中打开" })).toBeVisible();
+  await page.keyboard.press("Escape");
+});
+
+/**
+ * 切语言时，已经在屏幕上的过程行必须跟着换 —— 不是新起一条会话才换。
+ *
+ * 用户 2026-10-29 的截图就是这条：思考行已经是中文（「思考 · 持续了几秒」），
+ * 下面 bash 行的动作词却还写着 `Terminal`。根因不在词表（两包都有 `终端`/`Terminal`），
+ * 而在 `ToolRow` 把 `resolvePresentation` 塞进了 `useMemo`：`t` 是模块级函数，
+ * 切语言时身份不变，`useT()` 虽然触发了重渲染，memo 的依赖却没变，动作词就冻结在
+ * 切换前那一门语言上。所以这条用例必须**在同一个 DOM 上切两次语言**，重新挂载会掩盖它。
+ */
+test("切语言时行上的文字当场跟着换（思考行 + 工具行动作词）", async ({ page, harness }) => {
+  await openProject(page, harness);
+
+  await sendMessage(page, "E2E-THINK E2E-TOOL-BASH 先想一下再跑命令");
+  await expect(page.locator("[data-message-id$='#assistant']").last()).toContainText("E2E-3 done", {
+    timeout: 30_000,
+  });
+  await turnFinished(page);
+  await expandProcessRegion(page);
+
+  const thinking = page.locator('[data-slot="thinking-trigger"]').last();
+  const kind = page.locator('[data-slot="tool-row-kind"]').last();
+  await expect(thinking).toContainText("思考");
+  await expect(kind).toHaveText("终端");
+
+  await page.getByRole("button", { name: "切换到 English" }).click();
+  await expect(thinking).toContainText("Thought");
+  await expect(kind).toHaveText("Terminal");
+
+  await page.getByRole("button", { name: "Switch to 中文" }).click();
+  await expect(thinking).toContainText("思考");
+  await expect(kind).toHaveText("终端");
 });

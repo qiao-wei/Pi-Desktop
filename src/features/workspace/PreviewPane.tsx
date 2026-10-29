@@ -77,7 +77,11 @@ export function PreviewPane({
           <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
             {subject.kind === "diff" ? (
               <>
-                <span>{t(workspaceDiffSourceLabelKey(subject.source))}</span>
+                <span>
+                  {subject.origin === "turn"
+                    ? t("git.source.turn")
+                    : t(workspaceDiffSourceLabelKey(subject.source))}
+                </span>
                 {diff && (diff.added > 0 || diff.removed > 0) ? (
                   <span className="font-mono tabular-nums">
                     {diff.added > 0 ? (

@@ -188,10 +188,12 @@ React、npm 这类通用词。
 - 代码：`src/shared/chatTurnTiming.ts`（`turnDurationOf` / `observedTurnDuration` / `settleStreamingAnswer`）、`src/shared/thinkingTiming.ts`（逐块观测与搬运）、消费方 `thread.aui.tsx` 的 `PiDesktopProcessGroup`。
 
 **change summary card（变更文件卡片）**
-- 是什么：一轮结束后、答案下面那张「N 个文件已更改」卡片（ZCode 的 `ConversationFileSummaryPanel`）。表头是 chevron + 标题 + 聚合 `+X −Y`，展开后每行「图标 + 文件名 + 目录 + 自己的 `+N −M` + 审查 / 打开」。
+- 是什么：一轮结束后、答案下面那张「N 个文件已更改」卡片，逐字照 ZCode 的 `ConversationFileSummaryPanel`。表头是 chevron + 标题 + 聚合 `+X -Y`；展开后每行「图标 + 文件名 + 目录 + 自己的 `+N -M`（只画非零那侧）+ `审查` / `打开 ⌄`（分段控件）」。
+- 点击语义：「审查」渲染**这一轮的补丁**（`RightPanelFileTab.patch`，来源标签「本轮改动」），不是现读 git —— 新建文件在 git 里还是 untracked、改完就 commit 的文件在 unstaged 里也是空的。「打开」走正文。两者都先把路径折成**相对项目根**（右面板拒绝绝对路径）。
 - 边界：**在消息正文列里、操作栏之前**（走消息内部的 `trailing` 槽位）；只在落定后出现（流式途中列表会一行行往外蹦）；默认收起（它是索引，不是正文）。数据只认 `write` / `edit` 两个工具 —— `bash` 改文件没有可信路径，宁可不列。
 - _避免_：说成「git 改动」。它答的是「**这一轮**改了什么」，git 只知道「相对 HEAD 有什么改动」，两轮改同一个文件时会混在一起。
-- 代码：`src/features/chat/TurnChangedFiles.tsx`、数据 `src/shared/turnChangedFiles.ts` 的 `collectTurnChangedFilesWithCounts`（行数只从 `display.files` 读；同一文件取最后一次调用；`counted: false` = 数不出来，不显示数字）。
+- 代码：`src/features/chat/TurnChangedFiles.tsx`、数据 `src/shared/turnChangedFiles.ts` 的 `collectTurnChangedFilesWithCounts`（行数只从 `display.files` 读；同一文件取最后一次调用；`counted: false` = 数不出来，不显示数字）；补丁 tab 在 `src/features/workspace/{rightPanelTabs,useWorkspacePanelTabs}.ts`。
+- 样式：半径用**绝对**像素（卡片 `rounded-[12px]`、按钮 `rounded-[8px]`）—— `rounded-xl` 在本仓跟随主题 `--radius`（codex 16px → 20px），表头会变成胶囊。悬停用 `hover:bg-hover` / `hover:border-border-hover` —— 这两个 token 是后补的，缺了它们 Tailwind 会**静默丢弃**规则（类名对、界面没反馈）；按钮底色用 `bg-card` 而不是 `bg-input`（两仓同名不同义：那边的 input 是面、本仓是描边）。
 
 **process block（过程块）**
 - 是什么：助手气泡里 `kind` 不是 `text` 的那些块 —— `thinking` / `tool` / `notice`。它们有顺序、可合并（流式里同一块会被反复重算），是过程区的**唯一数据形状**。
@@ -209,6 +211,13 @@ React、npm 这类通用词。
 扫光基于 `currentColor`，所以运行态标签**不许再叠淡色**；短标签用 `shimmer-spread-30 shimmer-angle-0`
 收窄扫光带，否则整行长期落在软色带里，看起来就是一行淡灰字。兜底行（`display` 还没派生）按 family 取同一组
 词表，只有未知工具才显示它自己的名字。
+
+**translator reference（翻译函数引用）**：`useT()` 返回的是**按语言分键的固定引用**，不是模块级 `t`
+（`src/i18n/react.ts` 的 `translators`）。模块级 `t` 的引用永远不变，`useMemo(..., [t])` 在切语言时
+不会重算 —— 过程行就会停在切换前那一门语言（用户 2026-10-29 的截图：思考行已经是「思考」，
+bash 行还写着 `Terminal`）。让引用跟着语言换，所有已经依赖 `t` 的派生值自动失效。
+_避免_：把 `useT` 改回 `return t`；或在每个 `useMemo` 里额外挂一个 `[locale]` 去绕（那是补丁，
+不是契约）。回归用例：`e2e/specs/toolRows.spec.ts`「切语言时行上的文字当场跟着换」。
 
 **diff second pass（diff 的第二遍高亮）**：内联 diff 的第一帧永远是**纯文本**；Shiki token 由
 `useDiffHighlight` 异步补（复用右侧面板的 `shiki-wasm` shared highlighter，语言名来自

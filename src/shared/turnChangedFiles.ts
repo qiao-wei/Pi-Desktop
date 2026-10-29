@@ -40,6 +40,8 @@ export interface TurnChangedFile {
   removed: number;
   /** 这条数字是不是真的来自 diff（false 时界面上只显示文件名）。 */
   counted: boolean;
+  /** 这一轮这个文件的 unified patch（右面板「审查」直接渲染它，而不是现读 git）。 */
+  patch?: string;
 }
 
 function pathFromArgs(args: unknown): string {
@@ -152,6 +154,8 @@ export function collectTurnChangedFilesWithCounts(
       added: file?.added ?? 0,
       removed: file?.removed ?? 0,
       counted: file !== undefined,
+      // 正文被预算裁掉时 patch 是空串：右面板会退回「按 git 现读」，至少不是一张假 diff。
+      ...(file?.patch ? { patch: file.patch } : {}),
     });
   }
   return [...byPath.values()];

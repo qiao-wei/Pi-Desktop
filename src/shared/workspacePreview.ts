@@ -13,6 +13,14 @@ export interface WorkspaceDiffSubject {
   path: string;
   source: WorkspaceDiffSource;
   base?: string;
+  /**
+   * 补丁从哪来：`git`（默认，按来源现读工作区）还是 `turn`（**这一轮工具自己的补丁**）。
+   *
+   * 有区别是因为「本轮改动」在 git 里可能根本查不到：agent 新建的文件还没被跟踪，
+   * 或者它已经 commit 过了 —— 那时 unstaged diff 是空的，而用户点的明明是「审查这一轮」。
+   * 参考实现（ZCode `ConversationFileSummaryPanel`）走的就是补丁本身。
+   */
+  origin?: "git" | "turn";
 }
 
 /** 看文件正文（没有改动、或者用户就是想看整个文件时走这条）。 */
@@ -23,8 +31,19 @@ export interface WorkspaceContentSubject {
 
 export type WorkspacePreviewSubject = WorkspaceDiffSubject | WorkspaceContentSubject;
 
-export function diffSubject(input: { path: string; source: WorkspaceDiffSource; base?: string }): WorkspaceDiffSubject {
-  return { kind: "diff", path: input.path, source: input.source, base: input.base };
+export function diffSubject(input: {
+  path: string;
+  source: WorkspaceDiffSource;
+  base?: string;
+  origin?: "git" | "turn";
+}): WorkspaceDiffSubject {
+  return {
+    kind: "diff",
+    path: input.path,
+    source: input.source,
+    base: input.base,
+    origin: input.origin,
+  };
 }
 
 export function contentSubject(path: string): WorkspaceContentSubject {

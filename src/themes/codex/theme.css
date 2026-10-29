@@ -245,6 +245,8 @@
   color-scheme: dark;
 
   /* ZCode 兼容 token（见 tailwind.css）：深色下「最淡」那档要更淡。 */
+  --color-hover: color-mix(in oklab, var(--color-neutral-50) 8%, transparent);
+  --color-border-hover: color-mix(in oklab, var(--color-neutral-50) 30%, transparent);
   --foreground-subtlest: color-mix(in oklab, var(--foreground) 30%, transparent);
   --color-diff-added: var(--color-green-500);
   --color-diff-removed: var(--color-red-500);

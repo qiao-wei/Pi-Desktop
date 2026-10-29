@@ -53,6 +53,13 @@ export interface RightPanelFileTab {
   /** 只有 `mode === "diff"` 才有。 */
   source?: WorkspaceDiffSource;
   base?: string;
+  /**
+   * 直接渲染的补丁（「这一轮改了什么」卡片点「审查」时给的）。
+   *
+   * 有它就不去读 git：agent 新建的文件在 git 里还是 untracked、改完就 commit 的文件在
+   * unstaged 里也是空的 —— 那两种情况下现读 git 会得到一张空白页，而用户点的是「审查这一轮」。
+   */
+  patch?: string;
   /** 打开时间（总览里显示成「3 分钟前」）。 */
   openedAt?: number;
 }

@@ -332,3 +332,28 @@ test("复用同一个文件时保留 openedAt（总览里的「3 分钟前」不
   assert.equal(again.tabs.length, 1);
   assert.equal(again.tabs[0]!.openedAt, 111, "复用的是身份：打开时间留在原来那张上");
 });
+
+test("带补丁的审查 tab 与同一个文件的正文 tab 是同一张（按路径复用，补丁随内容替换）", () => {
+  const opened = openPanelTab([toolTab("git")], "git", {
+    kind: "file",
+    id: fileTabId("src/a.ts"),
+    path: "src/a.ts",
+    mode: "diff",
+    source: "unstaged",
+    patch: "@@ -1 +1 @@\n-a\n+b\n",
+    openedAt: 1,
+  });
+  const reused = openPanelTab(opened.tabs, opened.activeTabId, {
+    kind: "file",
+    id: fileTabId("src/a.ts"),
+    path: "src/a.ts",
+    mode: "content",
+    openedAt: 2,
+  });
+  // 一个文件一个 tab：换模式不再多一张。
+  assert.equal(reused.tabs.length, 2);
+  const fileTab = reused.tabs.find((tab) => tab.kind === "file");
+  assert.equal(fileTab?.kind === "file" ? fileTab.mode : "", "content");
+  // 复用时不重置打开时间（总览里的「3 分钟前」）。
+  assert.equal(fileTab?.openedAt, 1);
+});

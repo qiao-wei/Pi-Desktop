@@ -192,13 +192,18 @@ export function useAppWiring(deps: ReturnType<typeof useAppCore> & Later) {
    * 面板此刻可能是收起的、或者窄屏下抽屉是关着的 —— 那样点一行看起来就像没反应，
    * 所以这里要随手把面板打开（和标题栏那个开关同一套窄屏判断）。
    */
-  function openWorkspacePreview(path: string, source: WorkspaceDiffSource, base?: string) {
+  function openWorkspacePreview(
+    path: string,
+    source: WorkspaceDiffSource,
+    base?: string,
+    patch?: string,
+  ) {
     if (window.innerWidth <= 920) {
       setShowPanel(true);
     } else {
       setRightPanelCollapsed(false);
     }
-    panelTabs.openDiff({ path, source, base });
+    panelTabs.openDiff({ path, source, base, patch });
   }
 
   /** 在右面板里看某个文件的正文（文件树单击、右键「查看文件内容」）。 */

@@ -94,9 +94,18 @@ test("PI_DESKTOP_LOCALE 环境变量优先于系统探测", async () => {
 
 test("useT 必须经 useSyncExternalStore 订阅 locale（钉住切换语言后组件重渲染的契约）", () => {
   const source = readFileSync(new URL("../src/i18n/react.ts", import.meta.url), "utf8");
+  // 2026-10-29：订阅挪进了 `useLocale()`，`useT()` 必须走它 —— 丢了订阅，切语言后
+  // 组件不会重渲染，翻译全部停在旧语言。
+  const localeBody = source.slice(source.indexOf("export function useLocale"));
+  assert.match(localeBody, /useSyncExternalStore\(subscribeLocale, getLocale\)/,
+    "useLocale 丢了订阅：切换语言后界面不会重渲染，翻译全部停在旧语言");
   const body = source.slice(source.indexOf("export function useT"));
-  assert.match(body, /useSyncExternalStore\(subscribeLocale, getLocale\)/,
-    "useT 丢了订阅：切换语言后界面不会重渲染，翻译全部停在旧语言");
+  assert.match(body, /useLocale\(\)/, "useT 必须经由 useLocale 订阅语言变化");
+  // 反向契约：`useT()` 不能直接返回模块级 `t`。它的引用永远不变，`useMemo(..., [t])`
+  // 在切语言时不会重算 —— 工具行的动作词就是这样停在 `Terminal` 的。按语言分键，
+  // 让引用跟着语言换，依赖 `t` 的派生值才会失效。
+  assert.match(source, /const translators: Record<Locale, Translator>/,
+    "useT 必须返回按语言区分的翻译函数引用（模块级 t 的引用不会变）");
 });
 
 test("slash menu 与侧栏新增文案两包齐备，count 插值生效", () => {

@@ -297,6 +297,8 @@ export const zh = {
   "message.copyCode": "复制代码",
   "chat.changedFiles.title": "{count} 个文件已更改",
   "chat.changedFiles.review": "审查",
+  "chat.changedFiles.expand": "展开本轮更改的文件",
+  "chat.changedFiles.openWith": "选择打开方式",
   "chat.changedFiles.open": "打开",
   "chat.changedFiles.openInIde": "在编辑器中打开",
   "chat.loadOlder.action": "加载更早的消息",
@@ -943,6 +945,7 @@ export const zh = {
   "git.openDiffHint": "单击在右侧面板看改动，双击用默认 IDE 打开 diff",
   "git.openDiffFailed": "打开 diff 失败：{reason}",
   /* 右面板内置的改动预览 */
+  "git.source.turn": "本轮改动",
   "git.source.unstaged": "未暂存改动",
   "git.source.staged": "已暂存改动",
   "git.source.branch": "相对分叉点",

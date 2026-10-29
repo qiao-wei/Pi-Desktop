@@ -78,3 +78,9 @@ test("两条查询串与服务端路由逐字对账（改一处忘另一处就�
     "/api/projects/git/files?projectId=p&source=branch&sessionPath=%2Ftmp%2Fwt",
   );
 });
+test("「本轮补丁」与「git 的未暂存改动」不是同一件事（同一个文件也要重读）", () => {
+  const gitDiff = diffSubject({ path: "src/a.ts", source: "unstaged" });
+  const turnPatch = diffSubject({ path: "src/a.ts", source: "unstaged", origin: "turn" });
+  assert.equal(sameWorkspacePreviewSubject(gitDiff, turnPatch), false);
+  assert.equal(sameWorkspacePreviewSubject(turnPatch, diffSubject({ path: "src/a.ts", source: "unstaged", origin: "turn" })), true);
+});

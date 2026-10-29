@@ -292,6 +292,8 @@ export const en = {
   "message.copyCode": "Copy code",
   "chat.changedFiles.title": "{count} files changed",
   "chat.changedFiles.review": "Review",
+  "chat.changedFiles.expand": "Expand changed files",
+  "chat.changedFiles.openWith": "Choose how to open",
   "chat.changedFiles.open": "Open",
   "chat.changedFiles.openInIde": "Open in editor",
   "chat.loadOlder.action": "Load earlier messages",
@@ -935,6 +937,7 @@ export const en = {
   "git.openDiffHint": "Click to view the diff in the panel, double-click to open it in your default IDE",
   "git.openDiffFailed": "Could not open the diff: {reason}",
   /* In-panel change preview */
+  "git.source.turn": "This turn",
   "git.source.unstaged": "Unstaged changes",
   "git.source.staged": "Staged changes",
   "git.source.branch": "Changes since branch point",

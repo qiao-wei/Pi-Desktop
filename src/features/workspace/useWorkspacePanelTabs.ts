@@ -4,6 +4,7 @@ import { fetchJson } from "../../lib/api";
 import { t } from "../../i18n";
 import {
   buildWorkspaceDiffQuery,
+  diffStatsFromPatch,
   normalizeWorkspaceDiffResponse,
   type WorkspaceDiff,
   type WorkspaceDiffSource,
@@ -34,6 +35,10 @@ export interface WorkspacePreviewRequest {
   path: string;
   source: WorkspaceDiffSource;
   base?: string;
+  /**
+   * 直接渲染的补丁（本轮工具产出的那份）。给了它就不查 git —— 见 `RightPanelFileTab.patch`。
+   */
+  patch?: string;
 }
 
 export interface WorkspaceFileTabData {
@@ -144,6 +149,28 @@ export function useWorkspacePanelTabs({
       patchData(tab.id, { isLoading: true, error: "" });
 
       try {
+        if (tab.mode === "diff" && typeof tab.patch === "string") {
+          // 这一轮的补丁就是答案：不再问 git（新建文件在 git 里还是 untracked）。
+          const stats = diffStatsFromPatch(tab.patch);
+          patchData(tab.id, {
+            diff: {
+              path: tab.path,
+              source: tab.source ?? "unstaged",
+              availability: "patch",
+              patch: tab.patch,
+              beforeContent: null,
+              afterContent: null,
+              added: stats.added,
+              removed: stats.removed,
+              summary: null,
+            },
+            content: null,
+            isLoading: false,
+            error: "",
+          });
+          return;
+        }
+
         if (tab.mode === "diff") {
           const raw = await fetchJson<unknown>(
             buildWorkspaceDiffQuery({
@@ -212,6 +239,7 @@ export function useWorkspacePanelTabs({
         mode: "diff",
         source: request.source,
         base: request.base,
+        patch: request.patch,
         openedAt: Date.now(),
       });
     },

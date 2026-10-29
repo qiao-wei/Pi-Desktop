@@ -225,7 +225,9 @@ export function ComposerRegion({ view }: { view: AppModel }) {
             searchQuery={inTaskSearch.open ? inTaskSearch.query : ""}
             searchActiveIndex={inTaskSearch.activeIndex}
             onSearchCountChange={handleInTaskSearchCount}
-            onChangedFileDiff={(path) => openWorkspacePreview(path, "unstaged")}
+            // 第二个参数是这一轮的补丁：有它右面板直接渲染那份 diff（新建文件在 git 里
+            // 还是 untracked，现读 unstaged 会是空白页）。
+            onChangedFileDiff={(path, patch) => openWorkspacePreview(path, "unstaged", undefined, patch)}
             onChangedFileContent={openWorkspaceContent}
             onChangedFileInIde={(path) => void projectGit.openFile(path)}
             workspaceRoot={activeProject.cwd}

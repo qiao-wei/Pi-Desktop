@@ -59,7 +59,7 @@ test("分支来源展开时要把 base 原样交回去（否则服务端解不�
   // 右键菜单里「在标签页打开」那一档也要带上同一个 base。
   assert.match(gitPaneSource, /onOpenDiff\(path, source, branchBaseForTab\)/);
   assert.match(appSourceText, /onOpenDiff=\{\(path, source, base\) => openWorkspacePreview\(path, source, base\)\}/);
-  assert.match(appSourceText, /panelTabs\.openDiff\(\{ path, source, base \}\)/);
+  assert.match(appSourceText, /panelTabs\.openDiff\(\{ path, source, base, patch \}\)/);
   // 就地展开也要语法高亮，明暗档跟着应用主题走。
   assert.match(appSourceText, /themeMode=\{theme\}\s+onRefresh=\{\(\) => void projectGit\.refresh\(\)\}/);
 });

@@ -78,7 +78,7 @@ export function UserMessageSlot() {
 /** 「这一轮改了哪些文件」面板里那三个动作。 */
 export type ChangedFileActions = {
   workspaceRoot: string;
-  onOpenDiff: (path: string) => void;
+  onOpenDiff: (path: string, patch?: string) => void;
   onOpenContent: (path: string) => void;
   onOpenInIde: (path: string) => void;
 };
@@ -136,7 +136,7 @@ export function useChangedFileActions({
   onChangedFileInIde,
   workspaceRoot,
 }: {
-  onChangedFileDiff?: (path: string) => void;
+  onChangedFileDiff?: (path: string, patch?: string) => void;
   onChangedFileContent?: (path: string) => void;
   onChangedFileInIde?: (path: string) => void;
   workspaceRoot: string;
@@ -145,7 +145,7 @@ export function useChangedFileActions({
   const hasChangedFileActions = Boolean(onChangedFileDiff && onChangedFileContent && onChangedFileInIde);
   changedFileActionsRef.current = hasChangedFileActions
     ? {
-        onOpenDiff: onChangedFileDiff as (path: string) => void,
+        onOpenDiff: onChangedFileDiff as (path: string, patch?: string) => void,
         onOpenContent: onChangedFileContent as (path: string) => void,
         onOpenInIde: onChangedFileInIde as (path: string) => void,
       }
@@ -157,7 +157,7 @@ export function useChangedFileActions({
         ? {
             // 项目根是字符串（只在切项目时变），可以直接进 value；三个回调走 ref 保持恒定。
             workspaceRoot,
-            onOpenDiff: (path: string) => changedFileActionsRef.current?.onOpenDiff(path),
+            onOpenDiff: (path: string, patch?: string) => changedFileActionsRef.current?.onOpenDiff(path, patch),
             onOpenContent: (path: string) => changedFileActionsRef.current?.onOpenContent(path),
             onOpenInIde: (path: string) => changedFileActionsRef.current?.onOpenInIde(path),
           }

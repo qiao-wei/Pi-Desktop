@@ -66,6 +66,18 @@ const TOOL_REQUESTS = {
    * 嵌套目录里的文件：行要把「文件名 + 相对路径」分开显示，并且两个目标分工不同
    * （点名字开右面板、点路径展开内联）。
    */
+  /**
+   * 绝对路径版本：真实 agent 常常把工作区里的文件写成绝对路径，而右面板的接口只认
+   * 相对项目根的路径。行里的显示要折成相对路径，"审查/打开"也要能用。
+   */
+  "E2E-TOOL-EDIT-ABS": {
+    name: "edit",
+    absolutePath: true,
+    arguments: JSON.stringify({
+      path: "demo.ts",
+      edits: [{ oldText: "alpha", newText: "beta" }],
+    }),
+  },
   "E2E-TOOL-EDIT-NESTED": {
     name: "edit",
     arguments: JSON.stringify({
@@ -179,9 +191,12 @@ function sendJson(res, status, value) {
  * @param {string[]} [options.chunks] 流式分块（顺序即到达顺序）。
  * @param {number} [options.chunkDelayMs] 分块之间的间隔，默认 120ms：够慢到能看见中间态，又不拖慢用例。
  * @param {number} [options.firstTokenDelayMs] 首块之前的等待，默认 80ms（模拟真实的思考停顿）。
+ * @param {string} [options.workspaceDir] 工作区绝对路径：带 `absolutePath` 的 marker 用它展开路径。
  * @returns {Promise<{baseUrl: string, port: number, requests: Array<{path: string, body: any}>, stop: () => Promise<void>, reset: () => void}>}
  */
 export async function startFakeModel(options = {}) {
+  const { join } = await import("node:path");
+  const workspaceDir = String(options.workspaceDir ?? "");
   const chunks = options.chunks ?? DEFAULT_CHUNKS;
   const chunkDelayMs = options.chunkDelayMs ?? 120;
   const firstTokenDelayMs = options.firstTokenDelayMs ?? 80;
@@ -270,9 +285,22 @@ export async function startFakeModel(options = {}) {
         ],
       });
       await sleep(chunkDelayMs);
+      // 需要绝对路径的 marker：把相对路径按工作区展开（转义交给 JSON.stringify）。
+      let toolArguments = toolCall.arguments;
+      if (toolCall.absolutePath && workspaceDir) {
+        try {
+          const parsed = JSON.parse(toolCall.arguments);
+          if (typeof parsed?.path === "string") {
+            parsed.path = join(workspaceDir, parsed.path);
+            toolArguments = JSON.stringify(parsed);
+          }
+        } catch {
+          toolArguments = toolCall.arguments;
+        }
+      }
       // 参数**分块**发：真实 provider 就是这样逐 token 吐 `arguments` 的，而「行里的 +N 会不会
       // 跟着涨」只有在参数真的分段到达时才验得出来（一次性发完就等于跳过整段流式形态）。
-      for (const chunk of chunkText(toolCall.arguments, toolCall.chunkSize ?? 32)) {
+      for (const chunk of chunkText(toolArguments, toolCall.chunkSize ?? 32)) {
         delta({ tool_calls: [{ index: 0, function: { arguments: chunk } }] });
         await sleep(chunkDelayMs);
       }

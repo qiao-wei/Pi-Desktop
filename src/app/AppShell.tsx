@@ -314,7 +314,13 @@ export function AppShell({ view }: { view: AppModel }) {
                   <PreviewPane
                     subject={
                       tab.mode === "diff"
-                        ? diffSubject({ path: tab.path, source: tab.source ?? "unstaged", base: tab.base })
+                        ? diffSubject({
+                            path: tab.path,
+                            source: tab.source ?? "unstaged",
+                            base: tab.base,
+                            // 补丁来自这一轮的工具结果，不是现读的 git（见 RightPanelFileTab.patch）。
+                            origin: typeof tab.patch === "string" ? "turn" : "git",
+                          })
                         : contentSubject(tab.path)
                     }
                     diff={data?.diff ?? null}

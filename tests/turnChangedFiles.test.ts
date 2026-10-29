@@ -167,3 +167,26 @@ test("行数统计也吃空输入", () => {
     assert.deepEqual(collectTurnChangedFilesWithCounts(value as never), []);
   }
 });
+
+test("补丁随行数一起带出来：右面板「审查」直接渲染它，而不是现读 git", () => {
+  const patch = "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-alpha\n+beta\n";
+  const parts = [
+    {
+      type: "tool-call",
+      toolName: "edit",
+      args: { path: "src/a.ts" },
+      display: { kind: "fileDiff", files: [{ path: "src/a.ts", added: 1, removed: 1, patch }] },
+    },
+    // 正文被预算裁掉 / 没有 patch：不许造一个空补丁出来。
+    {
+      type: "tool-call",
+      toolName: "write",
+      args: { path: "src/b.ts" },
+      display: { kind: "fileDiff", files: [{ path: "src/b.ts", added: 8000, removed: 0 }] },
+    },
+  ];
+
+  const files = collectTurnChangedFilesWithCounts(parts);
+  assert.equal(files[0]?.patch, patch);
+  assert.equal(files[1]?.patch, undefined, "没有 patch 就不要这个字段（undefined 不等于空补丁）");
+});

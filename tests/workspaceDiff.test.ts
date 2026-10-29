@@ -32,6 +32,7 @@ import {
   toPatchPath,
 } from "../server/workspaceDiff.mjs";
 import { isReadOnlyGitArgs, runReadOnlyGit } from "../server/gitInfo.mjs";
+import { diffStatsFromPatch } from "../src/shared/workspaceDiff.ts";
 
 /** 假 `execFile`：记录调用，按 argv 返回计划好的结果（callback 风格，和真的一样）。 */
 function fakeExecFile(plan) {
@@ -845,4 +846,24 @@ test("分支文件清单：numstat 失败不算列不出来，只是没有统计
     listing.files.map((file) => [file.path, file.added, file.removed]),
     [["src/a.ts", 0, 0]],
   );
+});
+
+/**
+ * 「本轮改动」tab 头部的 `+N −M` 必须由**它自己那份补丁**数出来（见 `RightPanelFileTab.patch`）。
+ * 文件头（`--- a/x` / `+++ b/x`）不算增删 —— 否则每个文件都会白送一行 `+` 和一行 `−`。
+ */
+test("diffStatsFromPatch：只数 hunk 里的增删行", () => {
+  const patch = [
+    "--- a/src/a.ts",
+    "+++ b/src/a.ts",
+    "@@ -1,1 +1,2 @@",
+    "-const greek = 'alpha';",
+    "+const greek = 'beta';",
+    "+const extra = 1;",
+    "",
+  ].join("\n");
+  assert.deepEqual(diffStatsFromPatch(patch), { added: 2, removed: 1 });
+  // 空输入 / 非补丁：0/0，不抛。
+  assert.deepEqual(diffStatsFromPatch(""), { added: 0, removed: 0 });
+  assert.deepEqual(diffStatsFromPatch(undefined as never), { added: 0, removed: 0 });
 });

@@ -37,6 +37,28 @@ export interface WorkspaceDiff {
   summary: string | null;
 }
 
+/**
+ * 从一段 unified diff 数出增删行（`+++` / `---` 文件头不算）。
+ *
+ * 给「本轮改动」用：那张 tab 的正文是工具自己产出的补丁，头部的 `+N −M` 必须由**同一份**
+ * 文本数出来，否则数字和下面的行会对不上。
+ */
+export function diffStatsFromPatch(patch: string): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  for (const line of String(patch ?? "").split("\n")) {
+    if (line.startsWith("+++") || line.startsWith("---")) {
+      continue;
+    }
+    if (line.startsWith("+")) {
+      added += 1;
+    } else if (line.startsWith("-")) {
+      removed += 1;
+    }
+  }
+  return { added, removed };
+}
+
 export function isWorkspaceDiffSource(value: unknown): value is WorkspaceDiffSource {
   return WORKSPACE_DIFF_SOURCES.includes(value as WorkspaceDiffSource);
 }
@@ -206,8 +228,8 @@ export function canRenderRichWorkspaceDiff(
  * （用户看到的是上上轮的差异）。便宜的是重读几百毫秒，贵的是看到假的差异。
  */
 export function sameWorkspaceDiffSubject(
-  previous: { path: string; source?: unknown; base?: string } | null,
-  next: { path: string; source?: unknown; base?: string },
+  previous: { path: string; source?: unknown; base?: string; origin?: string } | null,
+  next: { path: string; source?: unknown; base?: string; origin?: string },
 ): boolean {
   if (!previous) {
     return false;
@@ -216,7 +238,9 @@ export function sameWorkspaceDiffSubject(
   return (
     String(previous.path ?? "") === String(next.path ?? "") &&
     normalizeWorkspaceDiffSource(previous.source) === normalizeWorkspaceDiffSource(next.source) &&
-    String(previous.base ?? "").trim() === String(next.base ?? "").trim()
+    String(previous.base ?? "").trim() === String(next.base ?? "").trim() &&
+    // 「本轮补丁」和「git 的未暂存改动」是两份**不同**的内容，同一个文件也要重读。
+    String(previous.origin ?? "git") === String(next.origin ?? "git")
   );
 }
 
