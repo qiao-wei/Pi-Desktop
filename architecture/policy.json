@@ -367,7 +367,7 @@
     {
       "rule": "max-lines",
       "file": "src/app/Sidebar.tsx",
-      "ceiling": 1188,
+      "ceiling": 1175,
       "owner": "@qiaowei",
       "deadline": "2026-12-31",
       "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"
@@ -375,7 +375,7 @@
     {
       "rule": "max-lines",
       "file": "src/components/assistant-ui/elements/thread.aui.tsx",
-      "ceiling": 1132,
+      "ceiling": 1103,
       "owner": "@qiaowei",
       "deadline": "2026-12-31",
       "reason": "存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。"

@@ -31,12 +31,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 
 import { cn } from "@/lib/utils";
-import { ChevronLeft, ChevronRight, FolderOpen, GitFork, Moon, Plus, Settings, Sun, Trash2, Wrench } from "lucide-react";
+import { ChevronLeft, ChevronRight, FolderOpen, GitFork, Plus, Settings, Trash2, Wrench } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { SidebarSessionRow } from "./SidebarSessionRow";
 import { SidebarDialog, SidebarDialogView, lastPathPart, projectDialogWithCwd, statusBannerStyles, toolToggleOptions } from "./SidebarDialogs";
+import { SidebarFooter } from "./SidebarFooter";
+import { SidebarSessionRow } from "./SidebarSessionRow";
 
 function ProjectSidebar({
   isOpen = false,
@@ -1082,21 +1083,7 @@ function ProjectSidebar({
         document.body,
       ) : null}
 
-      <footer className="flex flex-none justify-end gap-1 border-t border-border/70 px-3.5 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))]">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          onClick={onToggleTheme}
-          aria-label={theme === "dark" ? t("titlebar.toLightTheme") : t("titlebar.toDarkTheme")}
-          title={theme === "dark" ? t("titlebar.toLightTheme") : t("titlebar.toDarkTheme")}
-        >
-          {theme === "dark" ? <Sun className="size-[18px]" /> : <Moon className="size-[18px]" />}
-        </Button>
-        <Button type="button" variant="ghost" size="icon-sm" onClick={onOpenSettings} aria-label={t("common.openSettings")} title={t("common.openSettings")}>
-          <Settings className="size-[18px]" />
-        </Button>
-      </footer>
+      <SidebarFooter theme={theme} onToggleTheme={onToggleTheme} onOpenSettings={onOpenSettings} />
 
       {dialog ? (
         <SidebarDialogView

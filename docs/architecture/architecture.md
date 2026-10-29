@@ -125,8 +125,8 @@ ZCode 的 UI 包与 agent 包之间没有这种共享内核；我们把它变成
 | --- | --- | --- | --- | --- |
 | `max-lines` | `server/customModels.mjs` | 1080 行（只降不升） | 2026-12-31 | 存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。 |
 | `max-lines` | `server/gitInfo.mjs` | 1177 行（只降不升） | 2026-12-31 | 存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。 |
-| `max-lines` | `src/app/Sidebar.tsx` | 1188 行（只降不升） | 2026-12-31 | 存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。 |
-| `max-lines` | `src/components/assistant-ui/elements/thread.aui.tsx` | 1132 行（只降不升） | 2026-12-31 | 存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。 |
+| `max-lines` | `src/app/Sidebar.tsx` | 1175 行（只降不升） | 2026-12-31 | 存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。 |
+| `max-lines` | `src/components/assistant-ui/elements/thread.aui.tsx` | 1103 行（只降不升） | 2026-12-31 | 存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。 |
 | `max-lines` | `src/components/GitStatusBadge.tsx` | 939 行（只降不升） | 2026-12-31 | 存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。 |
 | `max-lines` | `src/features/chat/ChatThread.tsx` | 1248 行（只降不升） | 2026-12-31 | 存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。 |
 | `max-lines` | `src/features/chat/MessageEditBox.tsx` | 845 行（只降不升） | 2026-12-31 | 存量超大文件：先冻结增长（棘轮），拆分后 ceiling 自动收紧，拆到上限以下时此例外必须删除。 |

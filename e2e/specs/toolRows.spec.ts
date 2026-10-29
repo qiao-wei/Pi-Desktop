@@ -678,6 +678,23 @@ test("变更文件卡片：绝对路径也能审查（右面板 diff）与打开
 test("切语言时行上的文字当场跟着换（思考行 + 工具行动作词）", async ({ page, harness }) => {
   await openProject(page, harness);
 
+  // 语言切换住在左下角工具条里、明暗切换的左边（2026-10-29 从标题栏右格搬来）。
+  // 这里按**屏幕上的横向位置**验，而不是按类名/DOM 顺序 —— 用户要的就是视觉顺序。
+  const titlebar = page.locator(".app-titlebar");
+  await expect(titlebar.getByRole("button", { name: "切换到 English" })).toHaveCount(0);
+  const sidebarFooter = page.locator(".project-sidebar-surface footer");
+  const languageToggle = sidebarFooter.getByRole("button", { name: "切换到 English" });
+  const themeToggle = sidebarFooter.getByRole("button", { name: /切换到(深色|浅色)主题/ });
+  const [languageBox, themeBox] = await Promise.all([
+    languageToggle.boundingBox(),
+    themeToggle.boundingBox(),
+  ]);
+  assert.ok(languageBox && themeBox, "语言切换与明暗切换都要在侧栏底部可见");
+  assert.ok(
+    languageBox.x < themeBox.x,
+    `语言切换必须在明暗切换左边（x=${languageBox.x} vs ${themeBox.x}）`,
+  );
+
   await sendMessage(page, "E2E-THINK E2E-TOOL-BASH 先想一下再跑命令");
   await expect(page.locator("[data-message-id$='#assistant']").last()).toContainText("E2E-3 done", {
     timeout: 30_000,

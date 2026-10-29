@@ -6,8 +6,7 @@
  * 从 `src/app/App.tsx` 搬出来的自包含一簇（只依赖 import 进来的东西，不碰模块状态）——
  * 大文件被 `max-lines` 棘轮冻着不许再长，所以按「一簇一文件」往外搬，调用点零改动。
  */
-import { setLocale } from "../i18n/index.ts";
-import { useLocale, useT } from "../i18n/react";
+import { useT } from "../i18n/react";
 import { hasHostShell, invokeHostQuietly } from "../lib/shell/host.ts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -34,7 +33,6 @@ function TitleBar({
   onOpenSearch: () => void;
 }) {
   const t = useT();
-  const locale = useLocale();
   const isDesktopRuntime = hasHostShell();
   const isMac = isMacPlatform();
   const titlebarToggleAtRef = useRef(0);
@@ -141,13 +139,6 @@ function TitleBar({
         <span className="block truncate">{title}</span>
       </div>
       <div className="flex min-w-0 items-center justify-end gap-2" data-tauri-drag-region>
-        <TitleBarIconButton
-          onClick={() => setLocale(locale === "zh" ? "en" : "zh")}
-          active={locale === "en"}
-          label={locale === "zh" ? t("titlebar.switchToEnglish") : t("titlebar.switchToChinese")}
-        >
-          <span className="text-[11px] font-bold tracking-wide">{locale === "zh" ? "EN" : "中"}</span>
-        </TitleBarIconButton>
         {showContextPanel ? (
           <TitleBarIconButton
             onClick={onToggleRight}
