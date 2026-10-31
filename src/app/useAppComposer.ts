@@ -56,7 +56,7 @@ export function useAppComposer(deps: ReturnType<typeof useAppCore> & ReturnType<
   // 前面几段已经写进 deps 的值。
   const {
     activeSlashIndex, attachmentPreviewUrlsRef, attachments, bootstrap, canSubmitPrompt, capabilities,
-    clearBuiltinNotice, composerAttachmentMapRef, composerCapabilityMapRef, composerEditorRef, composerSelectionRef, conversation,
+    clearBuiltinNotice, composerAttachmentMapRef, composerCapabilityMapRef, composerDraftsRef, composerEditorRef, composerSelectionRef, conversation,
     dragDepthRef, followLatestScroll, isPreparingAttachments, modelConfig, pendingPreviewUrlsRef, runBuiltinCommand,
     runPackageCommand, setAttachments, setComposerError, setComposerText, setIsDraggingFiles, setIsPreparingAttachments,
     setSessionSkill, setShowCapabilityPicker, setSlashArgumentArmed, setSlashCommandContext, setSlashHighlight, setSlashQuery,
@@ -641,6 +641,7 @@ export function useAppComposer(deps: ReturnType<typeof useAppCore> & ReturnType<
     });
     composerAttachmentMapRef.current.clear();
     composerCapabilityMapRef.current.clear();
+    composerDraftsRef.current.delete(visibleSessionPath);
     setAttachments([]);
     setComposerText("");
     setShowCapabilityPicker(false);

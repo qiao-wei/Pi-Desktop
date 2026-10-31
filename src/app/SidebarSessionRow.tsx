@@ -69,6 +69,7 @@ export function SidebarSessionRow({
       onMouseLeave={onHoverEnd}
       title={projectName ? `${projectName} / ${session.title}` : session.path}
       role="button"
+      data-session-path={session.path}
       tabIndex={0}
       aria-busy={isPending || undefined}
       onKeyDown={(event) => {

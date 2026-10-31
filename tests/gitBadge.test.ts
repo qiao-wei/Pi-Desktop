@@ -570,8 +570,11 @@ test("冲突入口：双击开文件（不是 diff），另有「打开冲突文
   assert.match(serverSource, /buildConflictPrompt\(\{ locale: body\?\.locale, context: \{ \.\.\.context, projectCwd: project\.cwd \} \}\)/, "prompt 由服务端按 locale 拼");
   assert.match(appSourceText, /onOpenFile=\{projectGit\.openFile\}/, "App.tsx 要接上 openFile");
   assert.match(appSourceText, /onAutoResolveConflicts=\{autoResolveConflicts\}/, "App.tsx 要接上自动解决冲突");
-  assert.match(appSourceText, /await createSession\(projectId\);\s*setDraft\(prompt\);/, "自动解决：新建会话后把 prompt 填进 composer");
-  assert.match(appSourceText, /setDraft,/, "App 要从 hook 拿到 setDraft");
+  // 草稿改成了会话级：prompt 必须落到**新会话**的草稿里（切会话的 layout effect 会
+  // 取出来装进编辑器），不能再写进没有消费者的 `state.draft`。
+  assert.match(appSourceText, /const nextSessionPath = await createSession\(projectId\);/, "自动解决：新建会话后拿到新会话路径");
+  assert.match(appSourceText, /composerDraftsRef\.current\.save\(nextSessionPath, promptParts\)/, "自动解决：prompt 存进新会话的草稿");
+  assert.match(appSourceText, /composerDraftsRef,/, "App 要从 hook 拿到会话草稿仓储");
 });
 
 /* ------------------------------------------------------------------ 界面接线 */

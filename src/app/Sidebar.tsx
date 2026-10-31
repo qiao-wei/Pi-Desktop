@@ -90,7 +90,7 @@ function ProjectSidebar({
   onReorderProjects: (projectIds: string[]) => Promise<void>;
   onRemoveProject: (projectId: string) => Promise<void>;
   onRevealProject: (projectId: string) => Promise<void>;
-  onCreateSession: (projectId?: string, name?: string, options?: { worktree?: boolean }) => Promise<void>;
+  onCreateSession: (projectId?: string, name?: string, options?: { worktree?: boolean }) => Promise<string | undefined>;
   onUpdateSession: (projectId: string, sessionPath: string, name: string) => Promise<void>;
   onPinSession: (projectId: string, sessionPath: string, pinned: boolean) => Promise<void>;
   onArchiveSession: (projectId: string, sessionPath: string) => Promise<void>;

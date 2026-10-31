@@ -2300,7 +2300,7 @@ export function usePiDesktopApp() {
   );
 
   const createSession = useCallback(
-    async (projectId = bootstrap.activeProjectId, name?: string, options?: { worktree?: boolean }) => {
+    async (projectId = bootstrap.activeProjectId, name?: string, options?: { worktree?: boolean }): Promise<string | undefined> => {
       if (!projectId) {
         return;
       }
@@ -2315,7 +2315,7 @@ export function usePiDesktopApp() {
         });
         activeSessionPathRef.current = next.activeSessionPath;
         replaceBootstrap(next);
-        dispatch({ type: "set-draft", draft: "" });
+        return next.activeSessionPath;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         dispatch({ type: "bootstrap-error", error: message });

@@ -11,8 +11,9 @@ import {
 import {
   sidebarStreamingSessionPaths,
 } from "../features/chat/sidebarStreaming";
-import { isCustomExtensionUiRequest, isDialogExtensionUiRequest, isWebExtensionUiRequest, normalizePercent } from "./AppComposerHelpers";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { isCustomExtensionUiRequest, isDialogExtensionUiRequest, isWebExtensionUiRequest, normalizePercent, capabilityBadgeKey } from "./AppComposerHelpers";
+import type { ComposerPart } from "./AppComposerHelpers";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { modelKey } from "../features/models/customModelForm";
 import { chatScrollToBottomBus } from "../shared/chatScrollBus";
 import { compactionNotice } from "../shared/compactionNotice";
@@ -34,7 +35,7 @@ import type { WorkspaceDiffSource } from "../shared/workspaceDiff";
  * 所以 `deps.X` 读到的是当前 render 的值（比原来的闭包捕获更难过期）。
  */
 type Later =
-  Pick<AppForwarded, "syncComposerState">;
+  Pick<AppForwarded, "createAttachmentBadgeNode" | "createCapabilityBadgeNode" | "hideAttachmentHover" | "readComposerParts" | "syncComposerState">;
 
 
 /**
@@ -51,13 +52,13 @@ export function useAppWiring(deps: ReturnType<typeof useAppCore> & Later) {
   // 前面几段已经写进 deps 的值。
   const {
     appearance, attachmentPreviewUrlsRef, attachments, bootstrap, builtinNoticeTimerRef, composerAttachmentMapRef,
-    composerCapabilityMapRef, composerEditorRef, composerSelectionRef, conversation, createSession, extensionStatusRef,
+    composerCapabilityMapRef, composerDraftsRef, composerEditorRef, composerSelectionRef, conversation, createSession, extensionStatusRef,
     initialRightPanelTab,
     leftSidebarCollapsed, leftSidebarWidth, loadPackageCommandArguments, modelConfig, pendingPreviewUrlsRef, projectCommandTerminal, projects,
     replaceBootstrap, reportError, rightPanelCollapsed, rightPanelWidth, scrollStateRef, selectComposerModel, selectSession,
     selectedComposerModel, selectedModel, selectedProvider, setActiveMainView, setAttachments, setBuiltinNotice, setCapabilitiesDialogProjectId, setComposerError,
-    setDraft, setRightPanelCollapsed, setShowCapabilityPicker, setShowExtensionStatus, setShowPanel, setShowUsagePopover, setSidebarFileTreeProjectId, setSlashArgumentArmed, setSlashArgumentItems,
-    setSlashHighlight, showExtensionStatus, showUsagePopover, slashCommandContext, state, stats,
+    setRightPanelCollapsed, setShowCapabilityPicker, setShowExtensionStatus, setShowPanel, setShowUsagePopover, setSidebarFileTreeProjectId, setSlashArgumentArmed, setSlashArgumentItems,
+    setSlashCommandContext, setSlashHighlight, setSlashQuery, showExtensionStatus, showUsagePopover, slashCommandContext, state, stats,
     theme, usagePopoverRef,
   } = deps;
 
@@ -160,6 +161,93 @@ export function useAppWiring(deps: ReturnType<typeof useAppCore> & Later) {
   });
 
   const visibleSessionPath = bootstrap.activeSessionPath ?? conversation.sessionFile ?? "local-bootstrap";
+
+  /** 上一次真正渲染过的会话：切会话的 layout effect 靠它判断「离开的是谁」。 */
+  const previousSessionPathRef = useRef(visibleSessionPath);
+
+  /**
+   * 把一份完整草稿（正文 + 附件/技能徽标）重新装回编辑器。
+   *
+   * 徽标节点不保存 DOM：`innerHTML` 能还原外形却带不回事件监听（悬停预览、× 删除），
+   * 所以用工厂重新造节点，并同步填回两张 id → 数据的 Map，否则 `readComposerParts`
+   * 会把徽标当成无法识别的节点丢掉。
+   */
+  function applyComposerDraft(parts: ComposerPart[]) {
+    const editor = composerEditorRef.current;
+    if (!editor) {
+      return;
+    }
+
+    composerAttachmentMapRef.current.clear();
+    composerCapabilityMapRef.current.clear();
+    const fragment = document.createDocumentFragment();
+    for (const part of parts) {
+      if (part.kind === "text") {
+        if (part.text) {
+          fragment.appendChild(document.createTextNode(part.text));
+        }
+        continue;
+      }
+      if (part.kind === "attachment") {
+        composerAttachmentMapRef.current.set(part.attachment.id, part.attachment);
+        if (part.attachment.previewUrl) {
+          attachmentPreviewUrlsRef.current.set(part.attachment.id, part.attachment.previewUrl);
+        }
+        fragment.appendChild(deps.createAttachmentBadgeNode(part.attachment));
+        continue;
+      }
+      // 与 readComposerParts 同口径：编辑器里只还原技能徽标。
+      if (part.capability.kind !== "skill") {
+        continue;
+      }
+      composerCapabilityMapRef.current.set(capabilityBadgeKey(part.capability), part.capability);
+      fragment.appendChild(deps.createCapabilityBadgeNode(part.capability));
+    }
+
+    editor.replaceChildren(fragment);
+    composerSelectionRef.current = null;
+    deps.hideAttachmentHover();
+    deps.syncComposerState();
+
+    // 切回一段会话十有八九是要接着打字：光标放到草稿末尾（外层随后会 focus composer）。
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
+
+  // composer 里是 DOM（contentEditable），切会话时不会卸载 —— 不在这里存取的话，
+  // A 会话的草稿会原样留在 B 会话的输入框里（用户反馈的「composer 内容是全局的」）。
+  // 用 layout effect：新会话的 bootstrap 已经落地但还没绘制，切过去不会闪一下旧文字。
+  useLayoutEffect(() => {
+    const previous = previousSessionPathRef.current;
+    previousSessionPathRef.current = visibleSessionPath;
+    if (previous === visibleSessionPath) {
+      return;
+    }
+    // 还没有会话时的输入不算任何会话的草稿：进入第一个会话时原样留着。
+    if (previous === "local-bootstrap") {
+      return;
+    }
+    const editor = composerEditorRef.current;
+    if (!editor) {
+      return;
+    }
+
+    composerDraftsRef.current.save(previous, deps.readComposerParts(editor));
+    applyComposerDraft(composerDraftsRef.current.take(visibleSessionPath) ?? []);
+
+    // 输入面的瞬时状态不属于任何会话：菜单、错误带、/ 参数上下文都收掉。
+    setComposerError("");
+    setShowCapabilityPicker(false);
+    setSlashQuery("");
+    setSlashCommandContext(null);
+    setSlashArgumentArmed(false);
+  }, [visibleSessionPath]);
 
   // 会话头部右侧的 git 徽标：只读、可失败、非轮询（切项目 / 切会话 / 一轮结束 / 窗口重新聚焦时刷新）。
   // 带上 sessionPath：worktree 会话看到、提交的就是 worktree 自己那份状态。
@@ -442,8 +530,14 @@ export function useAppWiring(deps: ReturnType<typeof useAppCore> & Later) {
     const referencedUrls = new Set(
       [
         ...attachments.map((attachment) => attachment.previewUrl),
+        // 必须同时读 map：切会话的恢复发生在 layout effect 里，本 commit 的 passive
+        // effect 跑的还是旧 `attachments` 闭包 —— 只看 state 会把刚恢复的草稿附件
+        // 当成「没人用了」直接 revoke（回归：切回会话后缩略图裂开）。
+        ...[...composerAttachmentMapRef.current.values()].map((attachment) => attachment.previewUrl),
         ...conversation.messages.flatMap((message) => message.attachments?.map((attachment) => attachment.previewUrl) ?? []),
         ...pendingPreviewUrlsRef.current,
+        // 停在别的会话里的草稿：切回来时徽标还要显示缩略图，URL 不能被回收。
+        ...composerDraftsRef.current.previewUrls(),
       ].filter((url): url is string => Boolean(url)),
     );
 
@@ -454,6 +548,42 @@ export function useAppWiring(deps: ReturnType<typeof useAppCore> & Later) {
       }
     }
   }, [attachments, conversation.messages]);
+
+  // 会话被删除 / 归档后，它的草稿（连同附件的 blob URL）不该继续留在内存里。
+  // 只按「服务端还承认的会话」裁剪；项目列表为空时（冷启动/加载中）不裁剪，
+  // 否则一次空快照会把所有草稿清掉。
+  useEffect(() => {
+    const known = new Set<string>();
+    for (const project of bootstrap.projects) {
+      for (const session of project.sessions) {
+        known.add(session.path);
+      }
+    }
+    for (const session of bootstrap.archivedSessions ?? []) {
+      known.add(session.path);
+    }
+    if (bootstrap.activeSessionPath) {
+      known.add(bootstrap.activeSessionPath);
+    }
+    if (conversation.sessionFile) {
+      known.add(conversation.sessionFile);
+    }
+    if (!known.size) {
+      return;
+    }
+
+    for (const part of composerDraftsRef.current.prune(known)) {
+      const url = part.kind === "attachment" ? part.attachment.previewUrl : undefined;
+      if (!url) {
+        continue;
+      }
+      const entry = [...attachmentPreviewUrlsRef.current.entries()].find(([, value]) => value === url);
+      if (entry) {
+        URL.revokeObjectURL(entry[1]);
+        attachmentPreviewUrlsRef.current.delete(entry[0]);
+      }
+    }
+  }, [bootstrap.projects, bootstrap.archivedSessions, bootstrap.activeSessionPath, conversation.sessionFile]);
 
   useEffect(() => {
     const editor = composerEditorRef.current;
@@ -513,8 +643,18 @@ export function useAppWiring(deps: ReturnType<typeof useAppCore> & Later) {
     if (!projectId) {
       return;
     }
-    await createSession(projectId);
-    setDraft(prompt);
+    const nextSessionPath = await createSession(projectId);
+    if (!nextSessionPath) {
+      return;
+    }
+    // 预填走「会话草稿」而不是 `state.draft`（后者没有消费者）：
+    // 切会话的 layout effect 会把这份草稿取出来装进编辑器；如果它已经跑过了
+    // （bootstrap 抢在 await 恢复之前提交），这里就直接装。两条路互斥且幂等。
+    const promptParts: ComposerPart[] = [{ kind: "text", text: prompt }];
+    composerDraftsRef.current.save(nextSessionPath, promptParts);
+    if (previousSessionPathRef.current === nextSessionPath) {
+      applyComposerDraft(composerDraftsRef.current.take(nextSessionPath) ?? promptParts);
+    }
     focusComposerQuietly();
   }
 

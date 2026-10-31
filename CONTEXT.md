@@ -42,6 +42,12 @@ React、npm 这类通用词。
 - _避免_：说成「聊天」「conversation」。`ChatThread` 是渲染组件名，不是领域对象。
 - 代码：`server/index.mjs` 的 runtime 管理、`src/features/chat/`。
 
+**composer draft（会话草稿）**
+- 是什么：**某个会话**输入框里还没发出去的内容，含正文、附件徽标、技能徽标。切走时停到该会话名下，切回原样恢复；提交只清当前会话的。
+- _避免_：说成「全局输入框内容」。composer 的 DOM 只有一份且切会话不卸载，所以草稿必须显式按 `sessionPath` 存取（`useAppWiring` 的切会话 layout effect），否则 A 的字会留在 B 里。
+- 代码：`src/app/composerDrafts.ts`（纯仓储 + 单测）、`src/app/useAppWiring.ts`（存取与 blob URL 保活/回收）、`src/app/useAppComposer.ts`（提交时清当前会话草稿）。
+- 注意：只存在内存里（关 App 即丢），附件 `previewUrl` 在停放期间必须计入引用计数，否则缩略图会被 revoke。
+
 **turn（一轮）**
 - 是什么：用户一次提交 → 模型跑完（含工具调用）为止，这一整段。`turn_end` 埋点、通知（「一轮跑完了」）、错误上报都以它为单位。
 - _避免_：说成「消息」。一轮里可以有几十条消息与多个工具调用。
