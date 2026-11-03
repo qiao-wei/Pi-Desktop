@@ -205,3 +205,20 @@ reducer）一起换掉，测到的东西更少，还得为"生产不许打开"�
 - **拆分（第 3 项）**：`src/features/models/customModelForm.ts` 716 → 560，拆出 `composerModelOptions.ts`(161)/`thinkingLevelDraft.ts`(48)，调用点零改动；max-lines 例外 13 → **12**。
 - **修掉自己的脆 tripwire**：`tests/domainAssembly.test.ts` 的 deps 填充检测改为整份文件匹配（跨行 `const { … } = scope;` 原先静默少记 → 假红），并验证注入假名字仍会变红。
 - **验证**：`npm test` 2118+34 pass/0 fail；`lint` 0 error；`tsc -b` 0；`typecheck:node` 0；`architecture:check` clean；`upstream:check` ok；e2e 4 passed (53.2s)；oxfmt 默认宽度已不再匹配任何文件。
+
+## [2026-10-31] fix | 对话进行中选技能：徽标能挂上，不再弹 `Stop the running response…`
+
+- **现象**（用户实测截图）：流式回复还在跑时，在 composer 里从 `/` 菜单选技能，徽标插进去了，输入框里同时
+  出现红字 `Stop the running response before changing this session's skills.`；随后选命令时红字还挂着，
+  看起来像命令也失败。
+- **根因**：徽标插入/粘贴后客户端立刻 `POST /api/capabilities/session/skill`，而服务端
+  `setSessionSkillCapability` 的 `isSessionBusy()`（流式 / 压缩 / 停止中 / pi 队列未消化）会拒绝。
+  徽标本身只是「这条消息要用这个技能」的意图，提交时 `normalizePromptMessageParts` 才统一使能。
+- **修法**：①`useAppWiring` 加 `sessionRuntimeLocked`（`isSessionBusy` 同口径，不含 isBootstrapping），
+  插入 / 退格删除 / 徽标删除 / 粘贴四处忙时跳过会话开关；②`usePiDesktopApp` 抽出 `sessionBusyNow()`
+  给三处运行态桥调用（换模型 / 改思考 / 技能开关）做竞态兜底；③`selectSlashItem` 先清旧红字；
+  ④服务端 `manualSkillPrefixFor(allSkills, requestedSkills, selection.skills)`：本轮使能不了的技能
+  （流式中途）按 TUI `/skill:<name>` 的语义展开正文，否则徽标是个空操作。空闲时仍走「使能 + 模型按需读」。
+- **棘轮**：`usePiDesktopApp.ts` 2889 / `useAppWiring.ts` 700 两条 max-lines 都没抬，靠把手写三次的
+  isSessionBusy 对象收成 `sessionBusyNow()` 抵消新增行数。
+- **验证**：`npm test` 全绿（parallel + serial）；`tsc -b` 0；`oxlint` 0 error；`architecture:check` clean。

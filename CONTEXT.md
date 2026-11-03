@@ -84,7 +84,7 @@ React、npm 这类通用词。
 - _避免_：说成「白名单」。白名单是永久的，这里会过期并失败。
 
 **冻结表面（frozen surface）**
-- 是什么：`architecture/generated/bridge-surface.json` 里 101 条路由；桥实际应答的路由与渲染进程命名的路径必须与它**双向**一致。它**由路由表生成**（不是手抄的），所以差异只有两种：有人改了表没跑 `architecture:write`，或有人绕过了表。
+- 是什么：`architecture/generated/bridge-surface.json` 里那份**由路由表生成**的路由清单；桥实际应答的路由与渲染进程命名的路径必须与它**双向**一致。（具体条数以生成文件为准——不要在这里写死数字，写死的那份迟早会漂：这里曾经写「101 条」，而路由表已经是 104 行 / 102 个模式。）它**不是手抄的**，所以差异只有两种：有人改了表没跑 `architecture:write`，或有人绕过了表。
 - 代码：生成器 `scripts/architecture/lib/surface.mjs`；规则 `protocol-surface`。
 
 ---

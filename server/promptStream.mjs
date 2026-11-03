@@ -655,7 +655,9 @@ async function normalizePromptMessageParts(activeRuntime, parts, displayInput, a
   });
   return {
     parts: activeParts,
-    manualSkillPrefix: deps.manualSkillPrefixFor(context.allSkills, requestedSkills),
+    // 流式中途改不了 pi 的运行态：这一轮没被使能的技能（`active: false`）只能在 prompt 里
+    // 展开正文，否则徽标看上去挂上了、模型却看不到它。空闲时它们已经在 selection 里。
+    manualSkillPrefix: deps.manualSkillPrefixFor(context.allSkills, requestedSkills, selection.skills),
   };
 }
 

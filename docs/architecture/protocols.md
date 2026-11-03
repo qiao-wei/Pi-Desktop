@@ -88,6 +88,17 @@ preload 白名单、`host-commands.js` 处理器、渲染进程调用点三处�
 **换实现**：调用点只认 `src/lib/shell/host.ts` 的 `invokeHost(id, args?)` / `invokeHostQuietly()`，
 参数类型来自协议。加第三个宿主 = 实现这 9 个 id 的 ipc 面 + 调用 `invokeHost`，组件不动。
 
+**端 profile（能力面）**：同一份契约里还有 `HostProfile`（`id` + `commands` + `capabilities`）。
+「有没有宿主」与「这个宿主能不能做 X」是两个问题：`hasHostShell()` 回答前者，
+`supportsHostCommand(id)` / `supportsHostCapability(id)` 回答后者。壳通过 preload 写入的
+`__PI_HOST_PROFILE__` 声明它是谁、提供哪些功能级地基 —— 渲染进程**不嗅 Electron**
+（Electron 的 preload 本来就把 `__TAURI_INTERNALS__` 伪装成 Tauri，嗅也嗅不出来）。
+
+两条缺省语义故意相反：命令表缺省 = 全部（现有 shim 真的都实现了）；能力缺省 = **没有**
+（一个能力解锁一整块界面，默认开就退回了猜）。目前只有 `embedded_browser` 一个：Electron 声明它，
+Tauri 与纯 Web 没有，所以内置浏览器只出现在能真的画出来的壳里，代码里不需要
+`if (platform === ...)`。
+
 ## 3. kernel-adapter：桥 ↔ pi 内核
 
 **契约**：`server/piKernel.mjs` —— 桥对 `@earendil-works/*` 的**唯一**引用点

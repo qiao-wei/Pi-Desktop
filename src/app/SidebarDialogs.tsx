@@ -8,7 +8,7 @@
  */
 
 import { useT } from "../i18n/react";
-import { hasHostShell, invokeHost } from "../lib/shell/host.ts";
+import { invokeHost, supportsHostCommand } from "../lib/shell/host.ts";
 import { findProjectByCwd } from "../shared/projectPaths";
 import type { ProjectSummary, ToolToggleState } from "../types";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -110,7 +110,7 @@ function SidebarDialogView({
     );
   }
 
-  const canChooseFolder = hasHostShell();
+  const canChooseFolder = supportsHostCommand("choose_project_folder");
   // Projects are keyed by folder, so an existing folder is not a new project:
   // say which project already owns it and let the user confirm the switch.
   const existingProject =

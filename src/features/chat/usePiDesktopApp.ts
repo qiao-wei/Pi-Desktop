@@ -2005,6 +2005,14 @@ export function usePiDesktopApp() {
     }
   }
 
+  // 服务端 isSessionBusy() 的客户端同口径快照：三个「会打到 pi 运行态」的桥调用共用。
+  const sessionBusyNow = useCallback(() => isSessionBusy({
+    isStreaming: state.isStreaming,
+    isCompacting: state.isCompacting,
+    isStopping: state.isStopping,
+    pendingQueues: bootstrap.pendingQueues,
+  }), [bootstrap.pendingQueues, state.isCompacting, state.isStreaming, state.isStopping]);
+
   /**
    * 输入框旁切换模型。
    *
@@ -2020,14 +2028,7 @@ export function usePiDesktopApp() {
       }
       // 与服务端 `setModelConfiguration` 的 isSessionBusy() 对齐：点了停止仍在 abort、
       // pi 队列里还压着插话/跟进时，服务端会拒绝换模型。
-      if (
-        isSessionBusy({
-          isStreaming: state.isStreaming,
-          isCompacting: state.isCompacting,
-          isStopping: state.isStopping,
-          pendingQueues: bootstrap.pendingQueues,
-        })
-      ) {
+      if (sessionBusyNow()) {
         return;
       }
 
@@ -2045,7 +2046,7 @@ export function usePiDesktopApp() {
         dispatch({ type: "set-error", error: error instanceof Error ? error.message : String(error) });
       }
     },
-    [bootstrap.activeSessionPath, bootstrap.pendingQueues, conversation.sessionFile, state.isCompacting, state.isStreaming, state.isStopping, state.selectedThinkingLevel],
+    [bootstrap.activeSessionPath, conversation.sessionFile, sessionBusyNow, state.selectedThinkingLevel],
   );
 
   /** 自定义模型改了之后重新拉一次可用模型列表（bootstrap 里带着 `availableModels`）。 */
@@ -2076,14 +2077,7 @@ export function usePiDesktopApp() {
       const sessionPath = bootstrap.activeSessionPath ?? conversation.sessionFile;
       // 与服务端 `setSessionThinkingLevel` 的 isSessionBusy() 对齐。控件本身已经按同一
       // 口径禁用；这里是防「禁用态落地前点进来」的竞态。
-      if (
-        isSessionBusy({
-          isStreaming: state.isStreaming,
-          isCompacting: state.isCompacting,
-          isStopping: state.isStopping,
-          pendingQueues: bootstrap.pendingQueues,
-        })
-      ) {
+      if (sessionBusyNow()) {
         return;
       }
       dispatch({ type: "set-thinking-level", thinkingLevel });
@@ -2105,14 +2099,7 @@ export function usePiDesktopApp() {
         dispatch({ type: "set-error", error: message });
       }
     },
-    [
-      bootstrap.activeSessionPath,
-      bootstrap.pendingQueues,
-      conversation.sessionFile,
-      state.isCompacting,
-      state.isStreaming,
-      state.isStopping,
-    ],
+    [bootstrap.activeSessionPath, conversation.sessionFile, sessionBusyNow],
   );
 
   const compactContext = useCallback(
@@ -2529,9 +2516,15 @@ export function usePiDesktopApp() {
   );
 
   const setSessionSkill = useCallback(
-    (id: string, enabled: boolean) =>
-      updateCapability("/api/capabilities/session/skill", { id, enabled }),
-    [updateCapability],
+    (id: string, enabled: boolean) => {
+      // 服务端 `setSessionSkillCapability` 忙时会拒；控件侧已按同一口径跳过
+      // （composer 的 `sessionRuntimeLocked`），这里防「禁用态落地前点进来」的竞态。
+      if (sessionBusyNow()) {
+        return Promise.resolve(null);
+      }
+      return updateCapability("/api/capabilities/session/skill", { id, enabled });
+    },
+    [sessionBusyNow, updateCapability],
   );
 
   const setSessionPackage = useCallback(

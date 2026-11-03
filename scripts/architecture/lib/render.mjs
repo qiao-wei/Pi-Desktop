@@ -21,7 +21,34 @@ function codeList(values) {
   return values.map((value) => `\`${value}\``).join(", ");
 }
 
+/**
+ * 实时计数：`check.mjs` 必须交过来的三个数。
+ *
+ * 写成待校验的名字，是因为它们**曾经漂过**：`check.mjs` 把 `bridgeRoutes.size` 改名成
+ * `routeCount`，而这里还在读 `stats.bridgeRoutes`，于是生成的文档写下了
+ * “bridge 实际应答：**undefined** 条”。更糟的是 `docs-regions` 比的是「生成结果 vs 文档」，
+ * 两边都是 `undefined`，校验一直是绿的 —— 一个生成器的 bug 被自己的产物固定成了真源。
+ *
+ * 所以现在：缺任何一个数就**抛**（`architecture:check` 当场红），不再往文档里写 `undefined`。
+ */
+const REQUIRED_STATS = ["routeCount", "clientPathCount", "frozenRouteCount"];
+
+function assertStats(stats) {
+  const version = stats?.protocolVersion?.declared;
+  if (typeof version !== "number" || !Number.isFinite(version)) {
+    throw new Error(
+      'render.mjs: stats.protocolVersion.declared is missing (docs would say "undefined")',
+    );
+  }
+  for (const key of REQUIRED_STATS) {
+    if (typeof stats[key] !== "number" || !Number.isFinite(stats[key])) {
+      throw new Error(`render.mjs: stats.${key} is missing (docs would say "undefined")`);
+    }
+  }
+}
+
 export function renderDocRegions(policy, stats) {
+  assertStats(stats);
   const layers = table(
     ["层", "序号", "职责", "允许导入"],
     [...policy.layers]
@@ -37,7 +64,9 @@ export function renderDocRegions(policy, stats) {
   const modules = table(
     ["模块", "层", "目录", "负责人", "进 bridge sidecar"],
     [...policy.modules]
-      .sort((a, b) => (a.layer === b.layer ? a.id.localeCompare(b.id) : a.layer.localeCompare(b.layer)))
+      .sort((a, b) =>
+        a.layer === b.layer ? a.id.localeCompare(b.id) : a.layer.localeCompare(b.layer),
+      )
       .map((module) => [
         `\`${module.id}\``,
         `\`${module.layer}\``,
@@ -102,7 +131,7 @@ export function renderDocRegions(policy, stats) {
   const surface = [
     `- 边界协议版本：**v${stats.protocolVersion.declared}**（渲染进程与 bridge 两侧各有一个字面量，检查器要求相等）`,
     `- 冻结的协议表面：**${stats.frozenRouteCount}** 条路由（\`architecture/generated/bridge-surface.json\`）`,
-    `- bridge 实际应答：**${stats.bridgeRoutes}** 条；渲染进程命名：**${stats.clientPathCount}** 条`,
+    `- bridge 实际应答：**${stats.routeCount}** 条；渲染进程命名：**${stats.clientPathCount}** 条`,
     `- 扫描范围：${policy.scanRoots.map((root) => `\`${root}\``).join(", ")}`,
   ].join("\n");
 

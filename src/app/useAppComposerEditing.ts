@@ -42,7 +42,7 @@ export function useAppComposerEditing(deps: ReturnType<typeof useAppCore> & Retu
   // 前面几段已经写进 deps 的值。
   const {
     attachmentHoverGateRef, attachmentPreviewUrlsRef, capabilities, composerAttachmentMapRef, composerCapabilityMapRef, composerEditorRef,
-    composerSelectionRef, hideAttachmentHover, removeAttachment, removeBadgeNode, setActiveMainView, setComposerError,
+    composerSelectionRef, hideAttachmentHover, removeAttachment, removeBadgeNode, sessionRuntimeLocked, setActiveMainView, setComposerError,
     setSessionSkill, setShowCapabilityPicker, setSlashArgumentArmed, setSlashArgumentItems, setSlashCommandContext, setSlashHighlight,
     setSlashQuery, showAttachmentHover, slashCommandContext, syncComposerState, t,
   } = deps;
@@ -219,6 +219,8 @@ export function useAppComposerEditing(deps: ReturnType<typeof useAppCore> & Retu
    * 执行只发生在表单提交（handleSubmit）——命令文本写完后回车才跑。
    */
   function selectSlashItem(item: SlashMenuItem) {
+    // 上一次失败的红字跟这次选择无关，别让用户以为选技能/命令又报错了。
+    setComposerError("");
     setShowCapabilityPicker(false);
     setSlashQuery("");
     setSlashArgumentArmed(false);
@@ -326,7 +328,11 @@ export function useAppComposerEditing(deps: ReturnType<typeof useAppCore> & Retu
     }
     composerSelectionRef.current = range.cloneRange();
     syncComposerState();
-    if (selectedCapability.kind === "skill") {
+    // 会话忙（流式 / 压缩 / 停止中 / pi 队列未消化）时**不要**发这个开关：服务端
+    // `isSessionBusy()` 会直接拒绝，红字会挂在输入框里，而徽标其实已经插进去了。
+    // 徽标是「这条消息要用这个技能」的意图，提交时由服务端 `normalizePromptMessageParts`
+    // 统一使能（空闲）或展开正文（流式中途，见 `manualSkillPrefixFor`），所以这里跳过不丢功能。
+    if (selectedCapability.kind === "skill" && !sessionRuntimeLocked) {
       const capabilityUpdate = setSessionSkill(selectedCapability.id, true);
       deps.trackPendingCapabilitySync(capabilityUpdate);
       void capabilityUpdate.catch((error) => {
@@ -498,7 +504,7 @@ export function useAppComposerEditing(deps: ReturnType<typeof useAppCore> & Retu
     composerCapabilityMapRef.current.delete(capabilityKey);
     deps.restoreComposerCaret(parent, offset);
     syncComposerState();
-    if (capability?.kind === "skill" && !deps.hasComposerCapability(capability)) {
+    if (capability?.kind === "skill" && !sessionRuntimeLocked && !deps.hasComposerCapability(capability)) {
       const capabilityUpdate = setSessionSkill(capability.id, false);
       deps.trackPendingCapabilitySync(capabilityUpdate);
       void capabilityUpdate.catch((error) => {
@@ -517,7 +523,7 @@ export function useAppComposerEditing(deps: ReturnType<typeof useAppCore> & Retu
     if (deps.hasComposerCapability(capability)) {
       return;
     }
-    if (capability.kind === "skill") {
+    if (capability.kind === "skill" && !sessionRuntimeLocked) {
       const capabilityUpdate = setSessionSkill(capability.id, false);
       deps.trackPendingCapabilitySync(capabilityUpdate);
       void capabilityUpdate.catch((error) => {

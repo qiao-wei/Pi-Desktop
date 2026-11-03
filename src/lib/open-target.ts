@@ -1,4 +1,4 @@
-import { hasHostShell, invokeHost } from "./shell/host.ts";
+import { supportsHostCommand, invokeHost } from "./shell/host.ts";
 
 const supportedLinkProtocol = /^(https?:|mailto:)/i;
 const absoluteFilePath = /^(?:\/|[a-z]:[\\/]|\\\\)/i;
@@ -16,7 +16,7 @@ export async function openTarget(target: string) {
     throw new Error("Only local files and http, https, or mailto links can be opened.");
   }
 
-  if (hasHostShell()) {
+  if (supportsHostCommand("open_target")) {
     await invokeHost("open_target", { target });
     return;
   }

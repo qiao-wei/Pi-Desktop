@@ -20,7 +20,11 @@ import type { WorkspaceDiffSource } from "@/shared/workspaceDiff";
  * 面板自带的工具视图（`+` 下拉和空状态里能开的东西）。顺序 = 列表顺序。
  *
  * 只有「改动」在右面板里：**文件树在左侧栏**、**技能/包/MCP 是项目条目上的弹窗**
- * （2026-10-12 用户按 ZCode 的布局定的），终端与浏览器之后从这里加。
+ * （2026-10-12 用户按 ZCode 的布局定的），终端之后从这里加。
+ *
+ * 「浏览器」是**宿主能力**驱动的视图（`supportsHostCapability("embedded_browser")`）：它出现在
+ * 每一端，但只有声明了这个能力的壳（目前是 Electron）真的能画出来；其余宿主由面板自己说明原因，
+ * 不在列表里按端分支 —— 端差异是数据，不是 `if`。
  */
 export const RIGHT_PANEL_TOOL_TABS = [
   {
@@ -28,6 +32,12 @@ export const RIGHT_PANEL_TOOL_TABS = [
     labelKey: "rightPanel.tab.git",
     hintKey: "rightPanel.gitAria",
     descriptionKey: "rightPanel.launcher.gitHint",
+  },
+  {
+    id: "browser",
+    labelKey: "rightPanel.tab.browser",
+    hintKey: "rightPanel.browserAria",
+    descriptionKey: "rightPanel.launcher.browserHint",
   },
 ] as const;
 

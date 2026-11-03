@@ -36,6 +36,17 @@ function sanitizeArgs(args) {
   return result;
 }
 
+// 端 profile：**壳自己说它是谁、它能提供什么功能级地基**。
+//
+// 渲染进程不去嗅「我是不是跑在 Electron 里」—— 那会让同一个问题有两份实现（而且 Electron 的
+// preload 本来就把 `__TAURI_INTERNALS__` 伪装成 Tauri）。要开一个需要宿主地基的功能（内置
+// 浏览器、托盘…），先在这里声明，再在 `src/lib/shell/host.ts` 里用
+// `supportsHostCapability()` 查。Tauri 壳不声明这条，所以它拿不到内置浏览器 —— 这是设计，不是遗漏。
+contextBridge.exposeInMainWorld("__PI_HOST_PROFILE__", {
+  id: "electron",
+  capabilities: ["embedded_browser"],
+});
+
 // Dropped-folder support: the renderer is sandboxed, so the only place `webUtils`
 // is reachable is this preload. `getPathForFile` throws on anything that is not a
 // real on-disk File; both that and an empty result mean "no path" to the renderer,

@@ -494,18 +494,34 @@ function getSkillVersionDir(project, scope, skillName, versionId) {
 }
 
 /**
- * 用户显式附上的 manual-only 技能 → 要拼进这条 prompt 的 skill block 前缀。
+ * 用户显式附上的技能 → 要拼进这条 prompt 的 skill block 前缀。
+ *
+ * 两类进来：
+ *   1. manual-only（`disable-model-invocation: true`）—— pi 会把它们从 `<available_skills>`
+ *      里整条过滤掉，使能也没用，只能像 TUI 的 `/skill:<name>` 一样展开正文；
+ *   2. 这一轮**使能不了**的技能（`activeSkillIds` 里没有）—— 会话正在流式时服务端不能改
+ *      pi 的运行态（见 `normalizePromptMessageParts`），徽标只能靠正文生效。
+ * 其它技能保持原样：它们走徽标使能，由模型按需读，不白烧上下文。
  *
  * 读不到 SKILL.md 就跳过这一个（pi 的 `_expandSkillCommand` 同样放弃展开并上报），
- * 不能让一条附件把整次提交打挂。注意这里不依赖 pi 的 loaded skills：服务端自己读文件，
- * 所以流式中途附上一个没使能的 manual-only 技能也照样能展开。
+ * 不能让一条附件把整次提交打挂。注意这里不依赖 pi 的 loaded skills：服务端自己读文件。
+ *
+ * @param {Array<object>} allSkills 已发现的全部技能
+ * @param {Array<{ id?: string }>} requestedSkills 用户显式附上的技能徽标
+ * @param {string[] | null | undefined} activeSkillIds 本轮生效的技能 id；`undefined` 表示
+ *   无从得知（旧调用方），此时只有 manual-only 技能展开，维持原行为
  */
-function manualSkillPrefixFor(allSkills, requestedSkills) {
+function manualSkillPrefixFor(allSkills, requestedSkills, activeSkillIds) {
   const byId = new Map((allSkills ?? []).map((skill) => [skillCapabilityId(skill), skill]));
+  const active = activeSkillIds ? new Set(activeSkillIds) : null;
   const entries = [];
   for (const capability of requestedSkills ?? []) {
-    const skill = byId.get(normalizeCapabilityId(capability?.id));
-    if (!skill || skill.disableModelInvocation !== true) {
+    const id = normalizeCapabilityId(capability?.id);
+    const skill = byId.get(id);
+    if (!skill) {
+      continue;
+    }
+    if (skill.disableModelInvocation !== true && (active === null || active.has(id))) {
       continue;
     }
     try {

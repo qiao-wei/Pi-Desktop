@@ -75,11 +75,49 @@ test("输入框旁三个控件都用 composerSessionBusy（不再各自手写三
 });
 
 test("桥调用前有同一口径的竞态守卫（禁用态落地前点进来也拦得住）", () => {
-  // 两处：换模型与改思考等级。
+  // 一个 sessionBusyNow()，三处桥调用共用：换模型、改思考等级、技能会话开关。
   assert.equal(
     (hook.match(/isSessionBusy\(\{/g) ?? []).length,
-    2,
-    "selectComposerModel / updateSessionThinkingLevel 都要用 isSessionBusy 兜底",
+    1,
+    "口径快照应只有一份（sessionBusyNow），不要在每处再手写一遍",
+  );
+  assert.match(hook, /const sessionBusyNow = useCallback\(\(\) => isSessionBusy\(\{/);
+  assert.equal(
+    (hook.match(/if \(sessionBusyNow\(\)\)/g) ?? []).length,
+    3,
+    "selectComposerModel / updateSessionThinkingLevel / setSessionSkill 都要用它兜底",
   );
   assert.match(hook, /import \{ isSessionBusy \} from "\.\.\/\.\.\/shared\/sessionBusy";/);
+});
+
+// 2026-10-31 真机反馈：对话进行中在 composer 里选技能，输入框里立刻出现
+// 「Stop the running response before changing this session's skills.」。徽标已经插进去了，
+// 报错的只是那一刻的会话开关。忙时不该发这个请求：徽标是「这条消息要用这个技能」的意图，
+// 提交时由服务端统一处理（空闲→使能；流式中途→展开正文）。
+test("会话忙时技能徽标不发会话开关，红字不再挂在输入框里", () => {
+  assert.match(
+    appTsx,
+    /const sessionRuntimeLocked = isSessionBusy\(\{/,
+    "App 缺 sessionRuntimeLocked 派生（必须包含 pendingQueues，和服务端 isSessionBusy 同口径）",
+  );
+  assert.match(
+    appTsx,
+    /sessionRuntimeLocked = isSessionBusy\(\{[\s\S]{0,200}pendingQueues: bootstrap\.pendingQueues/,
+    "sessionRuntimeLocked 必须把 bootstrap.pendingQueues 算进去",
+  );
+  // 技能插入 / 退格删除 / 徽标删除 / 粘贴徽标 四处都要上同一道闸。
+  const guards = [
+    /if \(selectedCapability\.kind === "skill" && !sessionRuntimeLocked\)/,
+    /if \(capability\?\.kind === "skill" && !sessionRuntimeLocked && !deps\.hasComposerCapability\(capability\)\)/,
+    /if \(capability\.kind === "skill" && !sessionRuntimeLocked\)/,
+    /if \(!sessionRuntimeLocked\) \{\n\s+const capabilityUpdate = setSessionSkill\(capability\.id, true\);/,
+  ];
+  for (const guard of guards) {
+    assert.match(appTsx, guard, `技能开关少了忙时闸：${guard}`);
+  }
+  assert.equal(
+    (appTsx.match(/setSessionSkill\(/g) ?? []).length,
+    4,
+    "插入 / 退格删除 / 徽标删除 / 粘贴 共四处调用 setSessionSkill；多出来的地方很可能没上闸",
+  );
 });

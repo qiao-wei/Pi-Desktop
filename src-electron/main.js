@@ -39,6 +39,10 @@ const WINDOW_OPTIONS = {
     contextIsolation: true,
     sandbox: true,
     nodeIntegration: false,
+    // 内置浏览器（右面板的 browser tab）用 `<webview>` guest 渲染。它是一台**独立进程**的
+    // 浏览器，不是加固过的 iframe：真正的边界在 `will-attach-webview`（见 `hardenWebviewGuest`），
+    // 这里只是把 DOM 元素打开。Tauri 壳不提供这个能力（见 host profile 的 capabilities）。
+    webviewTag: true,
   },
 };
 
@@ -58,6 +62,59 @@ let mainWindow = null;
 let bridgeChild = null;
 let rendererRegistered = false;
 let startupReported = false;
+
+/** 内置浏览器的 guest 用固定分区：网页的 cookie 不跟应用自身存储混在一起，也不跨会话串。 */
+const EMBEDDED_BROWSER_PARTITION = "persist:pi-embedded-browser";
+
+/**
+ * 能在内置浏览器里打开的东西：只有 http(s) 和空白页。
+ *
+ * `file:` / `javascript:` / `data:` 一律拒绝 —— guest 拿到的是真实网页权限，而这些 scheme
+ * 会把“浏览”变成“读取本机文件”或“在页面上下文执行任意脚本”。
+ * @param {string} src
+ */
+function isAllowedBrowserSrc(src) {
+  if (src === "about:blank") {
+    return true;
+  }
+  try {
+    const { protocol } = new URL(src);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 每次挂载 `<webview>` 时重写它的 webPreferences。
+ *
+ * 这是内置浏览器的**安全边界**，不是可选项：渲染进程里的一个 `<webview>` 默认会继承宿主的
+ * 一部分能力，而网页内容来自互联网。所以这里做两件事 ——
+ *
+ * 1. **剥掉继承来的东西**：preload、Node、webviewTag；打开 contextIsolation / sandbox /
+ *    webSecurity。网页主世界因此没有 Node、没有任意 IPC，只有普通浏览器能力。
+ * 2. **白名单 scheme**：非 http(s) 的 src 直接 `preventDefault()`，连 guest 都不创建。
+ * @param {import("electron").WebContents} contents
+ */
+function hardenWebviewGuest(contents) {
+  contents.on("will-attach-webview", (event, webPreferences, params) => {
+    delete webPreferences.preload;
+    webPreferences.nodeIntegration = false;
+    webPreferences.nodeIntegrationInSubFrames = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    webPreferences.webSecurity = true;
+    webPreferences.allowRunningInsecureContent = false;
+    webPreferences.webviewTag = false;
+
+    if (!isAllowedBrowserSrc(String(params.src ?? ""))) {
+      event.preventDefault();
+      return;
+    }
+
+    params.partition = EMBEDDED_BROWSER_PARTITION;
+  });
+}
 // Discovered from the bridge's own announcement; the renderer is told about it through the
 // preload, because a port baked into the bundle is how a busy 6474 became an empty window.
 let bridgeApiBase = "";
@@ -154,6 +211,8 @@ function windowOptions() {
 
 function createWindow() {
   mainWindow = new BrowserWindow(windowOptions());
+
+  hardenWebviewGuest(mainWindow.webContents);
 
   mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
     // -3 = ERR_ABORTED, which vite's HMR full reload emits on every edit.

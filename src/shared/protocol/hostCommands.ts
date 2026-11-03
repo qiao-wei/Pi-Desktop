@@ -90,6 +90,93 @@ export function isHostCommandId(value: unknown): value is HostCommandId {
 /** Arguments a host command may carry. Opaque on purpose: each command documents its own shape. */
 export type HostCommandArgs = Record<string, unknown>;
 
+/** Used when a host does not name itself; only ever surfaces in diagnostics. */
+export const DEFAULT_HOST_ID = "host";
+
+/**
+ * Features a host can have that are **not** a single command.
+ *
+ * Commands are verbs ("open a folder", "notify"); capabilities are the ground a whole feature
+ * needs in order to exist at all. "Can this shell render a native guest view?" is not a verb a
+ * caller invokes - it is the precondition for drawing a browser pane in the first place.
+ *
+ * Kept deliberately tiny: anything that is one call should be a command, and anything that is
+ * per-URL policy should be ordinary code, not a capability bit.
+ */
+export const HOST_CAPABILITIES = ["embedded_browser"] as const;
+
+export type HostCapability = (typeof HOST_CAPABILITIES)[number];
+
+export function isHostCapability(value: unknown): value is HostCapability {
+  return typeof value === "string" && (HOST_CAPABILITIES as readonly string[]).includes(value);
+}
+
+/**
+ * Resolve a host's declared capabilities.
+ *
+ * Unlike {@link normalizeHostCommands}, **absence means none**: a command list can default to
+ * "the whole surface" because the built-in shim really does implement it, but a capability
+ * unlocks an entire feature surface. Defaulting that to on would make the declaration
+ * meaningless and turn "should this UI exist?" back into a guess.
+ *
+ * Unknown values are dropped for the same forward-compatibility reason as commands.
+ */
+export function normalizeHostCapabilities(declared?: readonly string[]): readonly HostCapability[] {
+  if (!declared) {
+    return [];
+  }
+  return [...new Set(declared.filter(isHostCapability))];
+}
+
+/**
+ * An **端 profile**: which host this is, and which commands it actually implements.
+ *
+ * Why a profile instead of `hasHostShell(): boolean`: "does a host exist" and "can this host do
+ * X" are different questions, and only the second one may decide UI. A browser host that can
+ * open links but has no folder picker must not make the UI render a picker it cannot honour, and
+ * a fully capable host must not be asked to `try/catch` its way to an answer.
+ *
+ * The declaration is the single source of truth for that question: `invokeHost()` refuses an
+ * undeclared command **before** the transport sees it, so a partial host fails at the seam with a
+ * named command instead of deep inside a native call.
+ */
+export interface HostProfile {
+  /** Label for diagnostics (`"tauri"`, `"electron"`, `"web"`, `"test"`…). Never used for branching. */
+  readonly id: string;
+  /** Commands this host implements. `HOST_COMMAND_IDS` = the whole declared surface. */
+  readonly commands: readonly HostCommandId[];
+  /** Feature-level ground this host provides (see {@link HOST_CAPABILITIES}). */
+  readonly capabilities: readonly HostCapability[];
+}
+
+/**
+ * Resolve a host's declared command list.
+ *
+ * - absent declaration = **the whole surface** (the built-in Tauri/Electron shim implements every
+ *   command, and so does anything written before this field existed);
+ * - unknown ids are dropped rather than thrown: a renderer newer than its host must degrade to
+ *   "that command is unsupported", not crash at startup.
+ */
+export function normalizeHostCommands(declared?: readonly string[]): readonly HostCommandId[] {
+  if (!declared) {
+    return HOST_COMMAND_IDS;
+  }
+  return [...new Set(declared.filter(isHostCommandId))];
+}
+
+/** The capability question, as a pure function so it is testable without any host at all. */
+export function hostProfileSupports(profile: HostProfile | null | undefined, command: HostCommandId): boolean {
+  return profile !== null && profile !== undefined && profile.commands.includes(command);
+}
+
+/** The feature-level question. False for a missing profile, like {@link hostProfileSupports}. */
+export function hostProfileSupportsCapability(
+  profile: HostProfile | null | undefined,
+  capability: HostCapability,
+): boolean {
+  return profile !== null && profile !== undefined && profile.capabilities.includes(capability);
+}
+
 /**
  * The shell as the renderer sees it: one method, `invoke`, exactly the shape Tauri exposes and
  * `src-electron/preload.js` implements over `ipcRenderer`.
@@ -101,5 +188,23 @@ export type HostCommandArgs = Record<string, unknown>;
  * no way to install anything else.
  */
 export interface HostShell {
+  /** Optional label for diagnostics; see {@link HostProfile.id}. */
+  readonly id?: string;
+  /**
+   * Commands this host implements. Absent = all of them.
+   *
+   * Electron's preload is the runtime authority for the commands it will serve (it refuses
+   * anything outside `HOST_COMMAND_IDS`); this field is how a *different* host - a browser, a
+   * headless runner, a test double - states its subset up front so the UI never offers what it
+   * cannot do.
+   */
+  readonly commands?: readonly HostCommandId[];
+  /**
+   * Feature-level ground this host provides; absent = none. See {@link HOST_CAPABILITIES}.
+   *
+   * This is where a shell says "I can host a guest view" instead of the renderer probing for a
+   * DOM element that may never upgrade.
+   */
+  readonly capabilities?: readonly HostCapability[];
   invoke<T = unknown>(command: HostCommandId, args?: HostCommandArgs): Promise<T>;
 }

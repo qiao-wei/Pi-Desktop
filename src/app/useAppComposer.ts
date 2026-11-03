@@ -61,7 +61,7 @@ export function useAppComposer(deps: ReturnType<typeof useAppCore> & ReturnType<
     runPackageCommand, setAttachments, setComposerError, setComposerText, setIsDraggingFiles, setIsPreparingAttachments,
     setSessionSkill, setShowCapabilityPicker, setSlashArgumentArmed, setSlashCommandContext, setSlashHighlight, setSlashQuery,
     showBuiltinNotice, showCapabilityPicker, slashArgumentArmed, slashCommandContext, slashItems, slashQuery,
-    state, submitTurn, t, visibleSessionPath,
+    sessionRuntimeLocked, state, submitTurn, t, visibleSessionPath,
   } = deps;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -372,11 +372,14 @@ export function useAppComposer(deps: ReturnType<typeof useAppCore> & ReturnType<
         instanceId: createCapabilityInstanceId(),
       };
       composerCapabilityMapRef.current.set(capabilityBadgeKey(capability), capability);
-      const capabilityUpdate = setSessionSkill(capability.id, true);
-      deps.trackPendingCapabilitySync(capabilityUpdate);
-      void capabilityUpdate.catch((error) => {
-        setComposerError(error instanceof Error ? error.message : String(error));
-      });
+      // 流式中途粘一个技能徽标：不发会话开关（服务端会拒），提交时由服务端统一使能/展开。
+      if (!sessionRuntimeLocked) {
+        const capabilityUpdate = setSessionSkill(capability.id, true);
+        deps.trackPendingCapabilitySync(capabilityUpdate);
+        void capabilityUpdate.catch((error) => {
+          setComposerError(error instanceof Error ? error.message : String(error));
+        });
+      }
       return deps.createCapabilityBadgeNode(capability);
     }
 

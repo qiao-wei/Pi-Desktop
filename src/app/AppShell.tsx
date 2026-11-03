@@ -36,6 +36,7 @@ import { TitleBar } from "./TitleBarChrome";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FilesPane } from "../features/workspace/FilesPane";
+import { EmbeddedBrowserPane } from "../features/browser/EmbeddedBrowserPane";
 import { GitPane } from "../features/workspace/GitPane";
 import { LauncherPane } from "../features/workspace/LauncherPane";
 import { PreviewPane } from "../features/workspace/PreviewPane";
@@ -285,6 +286,8 @@ export function AppShell({ view }: { view: AppModel }) {
           onReopenClosedTab={panelTabs.reopenClosedTab}
           onMoveTab={panelTabs.moveTab}
           views={{
+            // 内置浏览器：能力由宿主声明（Electron = 有，Tauri/Web = 没有），面板自己负责说明。
+            browser: <EmbeddedBrowserPane />,
             // 完整的改动 review 面（按来源切）；提交这种写操作仍在 git 徽标里。
             git: (
               <GitPane

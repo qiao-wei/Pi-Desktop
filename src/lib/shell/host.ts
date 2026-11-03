@@ -18,7 +18,20 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import type { HostCommandArgs, HostCommandId, HostShell } from "../../shared/protocol/hostCommands.ts";
+import type {
+  HostCapability,
+  HostCommandArgs,
+  HostCommandId,
+  HostProfile,
+  HostShell,
+} from "../../shared/protocol/hostCommands.ts";
+import {
+  DEFAULT_HOST_ID,
+  hostProfileSupports,
+  hostProfileSupportsCapability,
+  normalizeHostCapabilities,
+  normalizeHostCommands,
+} from "../../shared/protocol/hostCommands.ts";
 
 /** The real thing: Tauri's `invoke`, which Electron's preload re-implements. */
 function tauriShell(): HostShell {
@@ -34,10 +47,33 @@ function tauriShell(): HostShell {
  * over the callers. Two of them did that sniff themselves (`systemNotification`, `open-target`), which
  * meant a second implementation of the same question - and the question has a right answer the moment
  * a fake shell is installed, which is exactly what the swap test needs.
+ *
+ * The shell may also **declare its end profile** (`__PI_HOST_PROFILE__`, written by
+ * `src-electron/preload.js`): which host it is and which feature-level ground it provides. The
+ * renderer reads that declaration instead of sniffing for Electron - Electron's preload deliberately
+ * imitates Tauri, so sniffing could not tell them apart anyway.
  */
+const HOST_PROFILE_KEY = "__PI_HOST_PROFILE__";
+
+interface DeclaredHostProfile {
+  readonly id?: unknown;
+  readonly capabilities?: readonly unknown[];
+}
+
+function declaredProfile(): DeclaredHostProfile {
+  const declared = (window as unknown as Record<string, unknown>)[HOST_PROFILE_KEY];
+  return declared !== null && typeof declared === "object" ? (declared as DeclaredHostProfile) : {};
+}
+
 function defaultShell(): HostShell | null {
   if (typeof window === "undefined") return null;
-  return "__TAURI_INTERNALS__" in window ? tauriShell() : null;
+  if (!("__TAURI_INTERNALS__" in window)) return null;
+  const declared = declaredProfile();
+  return {
+    ...tauriShell(),
+    ...(typeof declared.id === "string" ? { id: declared.id } : {}),
+    ...(declared.capabilities ? { capabilities: normalizeHostCapabilities(declared.capabilities as string[]) } : {}),
+  };
 }
 
 /**
@@ -60,6 +96,43 @@ export function hasHostShell(): boolean {
   return getHostShell() !== null;
 }
 
+function profileOf(shell: HostShell): HostProfile {
+  return {
+    id: shell.id?.trim() || DEFAULT_HOST_ID,
+    commands: normalizeHostCommands(shell.commands),
+    capabilities: normalizeHostCapabilities(shell.capabilities),
+  };
+}
+
+/**
+ * The current host's profile, or null when there is no host.
+ *
+ * This is the **capability** answer, and the one UI should branch on: `hasHostShell()` says a host
+ * exists, `supportsHostCommand(id)` says this host can actually do the thing. A browser host that
+ * can open links but has no native folder picker is the case that makes the difference visible.
+ */
+export function getHostProfile(): HostProfile | null {
+  const shell = getHostShell();
+  return shell ? profileOf(shell) : null;
+}
+
+/** Can the current host perform `command`? False when there is no host at all. */
+export function supportsHostCommand(command: HostCommandId): boolean {
+  const shell = getHostShell();
+  return shell ? hostProfileSupports(profileOf(shell), command) : false;
+}
+
+/**
+ * Does the current host provide `capability`?
+ *
+ * Ask this **before rendering** a feature that needs host ground (an embedded browser view, a
+ * tray…) - a host that did not declare it has no way to honour it.
+ */
+export function supportsHostCapability(capability: HostCapability): boolean {
+  const shell = getHostShell();
+  return shell ? hostProfileSupportsCapability(profileOf(shell), capability) : false;
+}
+
 /**
  * Install a different host (a second shell, or a test double).
  * Pass `null` to install *no* host (plain browser), `undefined` to go back to the default.
@@ -69,13 +142,25 @@ export function setHostShell(next: HostShell | null | undefined): void {
 }
 
 /**
- * Ask the host to perform a shell-level command. Rejects if the host does not implement it
- * (Electron's preload refuses anything outside the declared protocol).
+ * Ask the host to perform a shell-level command. Rejects if the host does not implement it.
+ *
+ * Two distinct refusals, deliberately worded differently because they mean different things:
+ *
+ * - `no host shell installed` - there is no host at all (plain browser);
+ * - `host "x" does not implement "y"` - there **is** a host, and it declared a narrower surface.
+ *   This fires before `invoke()` is reached, so the failure is a named capability gap rather than
+ *   whatever the native side happens to do with an unknown command.
+ *
+ * Electron's preload refuses anything outside the declared protocol as a second line of defence.
  */
 export async function invokeHost<T = unknown>(command: HostCommandId, args?: HostCommandArgs): Promise<T> {
   const shell = getHostShell();
   if (!shell) {
     throw new Error(`no host shell installed; cannot invoke ${command}`);
+  }
+  const profile = profileOf(shell);
+  if (!hostProfileSupports(profile, command)) {
+    throw new Error(`host "${profile.id}" does not implement "${command}"`);
   }
   return shell.invoke<T>(command, args);
 }

@@ -53,14 +53,15 @@ function ids(tabs: readonly RightPanelTab[]): string[] {
 }
 
 test("工具表：默认是「改动」，id 不重复，且每个都在 isToolTabId 的范围内", () => {
-  // 2026-10-12：能力面板搬到项目条目上的弹窗、文件树搬到左侧栏，右面板只剩「改动」
-  // （终端 / 浏览器之后从这张表里加）。
+  // 2026-10-12：能力面板搬到项目条目上的弹窗、文件树搬到左侧栏。
+  // 2026-10-31：「浏览器」进表 —— 它是宿主能力驱动的视图（Electron 能画，Tauri/Web 由面板
+  // 自己说明不可用），所以它属于“工具 tab 的声明”，不属于“按端分支”。
   assert.equal(DEFAULT_RIGHT_PANEL_TAB, "git");
   assert.equal(RIGHT_PANEL_TOOL_TABS[0].id, DEFAULT_RIGHT_PANEL_TAB);
   assert.deepEqual(
     RIGHT_PANEL_TOOL_TABS.map((tool) => tool.id),
-    ["git"],
-    "右面板自带的视图只有「改动」：文件树在左侧栏、技能/包是弹窗",
+    ["git", "browser"],
+    "右面板自带的视图：改动 + 内置浏览器（文件树在左侧栏、技能/包是弹窗）",
   );
 
   const toolIds = RIGHT_PANEL_TOOL_TABS.map((tool) => tool.id);

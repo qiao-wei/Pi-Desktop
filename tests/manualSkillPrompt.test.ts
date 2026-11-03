@@ -18,6 +18,7 @@ import test from "node:test";
 import { AgentSession, parseSkillBlock } from "@earendil-works/pi-coding-agent";
 
 import { formatManualSkillBlock, manualSkillPromptPrefix } from "../server/manualSkillPrompt.mjs";
+import { createSkillLeaves } from "../server/skillLeaves.mjs";
 import { SKILL_COMMAND_PREFIX } from "../src/features/chat/slashMenu.ts";
 import {
   ATTACHMENT_CONTEXT_END,
@@ -137,6 +138,44 @@ test("没有可用 block 时前缀是空串（prompt 保持原样）", () => {
   assert.equal(manualSkillPromptPrefix([{ ...ENTRY, filePath: "" }]), "");
 });
 
+/* ----------------- 流式中途挂上的技能：使能不了就把正文展开 ----------------- */
+
+// 用户实测（2026-10-31）：对话进行中在 composer 里选技能会报
+// 「Stop the running response before changing this session's skills.」。徽标其实插进去了，
+// 只是那时的会话开关被服务端拒绝。现在客户端忙时跳过开关、服务端在本轮使能不了时按
+// TUI `/skill:<name>` 的语义展开正文 —— 否则徽标挂着、模型却看不到它。
+test("manualSkillPrefixFor：已使能的普通技能不内联，本轮使能不了的才展开", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-skill-selection-"));
+  const filePath = join(dir, "SKILL.md");
+  writeFileSync(
+    filePath,
+    ["---", "name: arch-review", "description: Review the architecture.", "---", "", "Read the ADRs.", ""].join("\n"),
+  );
+  try {
+    const { manualSkillPrefixFor } = createSkillLeaves({}, {});
+    const skill = { name: "arch-review", filePath, baseDir: dir, disableModelInvocation: false };
+    const requested = [{ id: "arch-review" }];
+
+    assert.equal(
+      manualSkillPrefixFor([skill], requested, ["arch-review"]),
+      "",
+      "本轮已使能：走 available_skills 让模型按需读，不白烧上下文",
+    );
+    assert.match(
+      manualSkillPrefixFor([skill], requested, []),
+      /<skill name="arch-review"/,
+      "本轮使能不了（流式中途）：必须展开正文，否则徽标是个空操作",
+    );
+    assert.equal(
+      manualSkillPrefixFor([skill], requested, undefined),
+      "",
+      "拿不到 selection 时保持旧行为：只有 manual-only 技能展开",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 /* ------------------------------- the wiring ------------------------------- */
 
 test("拼好之后界面拿到的仍是用户原文 + 徽标（pi 那边多了 skill block 也不漏出来）", () => {
@@ -169,12 +208,13 @@ test("服务端喂给预览器的 baseDir 是内核字段，不是自己 dirname
   );
 });
 
-test("只有 disable-model-invocation 的技能被内联，且服务端自己读文件", () => {
+test("普通技能：本轮使能了就按需读，使能不了才展开正文（流式中途）", () => {
   const select = functionBody(server, "manualSkillPrefixFor");
+  // manual-only 永远展开；其余技能看本轮 selection。这条 gate 丢了就等于「所有徽标都烧上下文」。
   assert.match(
     select,
-    /skill\.disableModelInvocation !== true/,
-    "判断条件变了：别的技能不该被硬塞正文",
+    /skill\.disableModelInvocation !== true && \(active === null \|\| active\.has\(id\)\)/,
+    "已经使能的普通技能不该被硬塞正文",
   );
   assert.match(
     select,
@@ -222,6 +262,7 @@ test("normalizePromptMessageParts 两条出口都带上 manualSkillPrefix", () =
   );
   assert.match(
     normalize,
-    /manualSkillPrefix: deps\.manualSkillPrefixFor\(context\.allSkills, requestedSkills\)/,
+    /manualSkillPrefix: deps\.manualSkillPrefixFor\(context\.allSkills, requestedSkills, selection\.skills\)/,
+    "要把本轮生效的技能集合传进去：没生效的才需要展开正文",
   );
 });

@@ -1,4 +1,4 @@
-import { hasHostShell, invokeHost } from "./shell/host.ts";
+import { supportsHostCommand, invokeHost } from "./shell/host.ts";
 import type { HostCommandId } from "../shared/protocol/hostCommands.ts";
 
 /**
@@ -32,13 +32,14 @@ export interface SystemNotificationOutcome {
 export type SystemNotificationChannel = "shell" | "browser" | "none";
 
 /**
- * Electron / Tauri 是否在场。
+ * 宿主能不能发系统通知。
  *
- * 问 shell 端口（`hasHostShell()`），不再自己嗅 `__TAURI_INTERNALS__`：宿主是否存在是 shell 协议的
- * 一部分，嗅探会让「装上的假宿主仍然被判定为不存在」，也会让同一个问题有两份实现。
+ * 问的是**能力**（`supportsHostCommand("notify_turn_complete")`）而不只是“有没有宿主”：一个只有
+ * 文件选择器的宿主（或声明了窄命令集的 Web 宿主）不该把界面切成「走 shell 通道」，然后发不出去。
+ * 宿主是否存在仍然是 shell 协议的一部分，不再自己嗅 `__TAURI_INTERNALS__`。
  */
 export function hasShellBridge(): boolean {
-  return hasHostShell();
+  return supportsHostCommand(SHELL_COMMAND);
 }
 
 function browserNotificationApi(): typeof Notification | undefined {

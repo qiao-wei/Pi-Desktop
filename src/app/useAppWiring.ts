@@ -18,7 +18,7 @@ import { modelKey } from "../features/models/customModelForm";
 import { chatScrollToBottomBus } from "../shared/chatScrollBus";
 import { compactionNotice } from "../shared/compactionNotice";
 import { saveUiPreferences } from "../lib/ui-preferences";
-import { sessionControlsDisabled } from "../shared/sessionBusy";
+import { isSessionBusy, sessionControlsDisabled } from "../shared/sessionBusy";
 import { stripTerminalSequences } from "../shared/terminalText.ts";
 import { syncShellAppearance } from "../lib/shell-appearance";
 import { useProjectCommands } from "../features/chat/useProjectCommands";
@@ -150,8 +150,14 @@ export function useAppWiring(deps: ReturnType<typeof useAppCore> & Later) {
   const canSubmitPrompt = !state.isStopping && (bootstrap.canPrompt || canQueueFollowUp || hasConfiguredModel);
 
   // 思考 / 模型这些「改动会打到 pi 运行态」的控件，禁用口径必须和服务端 isSessionBusy()
-  // 一致：光看 isStreaming/isCompacting 会在「点了停止仍在 abort」与「pi 队列里还压着
-  // 插话/跟进」时把下拉框留成可点的，点下去必被服务端拒绝。
+  // 一致（含 isStopping 与 pi 队列），否则点下去必被服务端拒。`sessionRuntimeLocked` 是同一
+  // 口径但不含 isBootstrapping：技能徽标只看服务端会不会拒，切会话时也能挂。
+  const sessionRuntimeLocked = isSessionBusy({
+    isStreaming: state.isStreaming,
+    isCompacting: state.isCompacting,
+    isStopping: state.isStopping,
+    pendingQueues: bootstrap.pendingQueues,
+  });
   const composerSessionBusy = sessionControlsDisabled({
     isStreaming: state.isStreaming,
     isCompacting: state.isCompacting,
@@ -689,5 +695,5 @@ export function useAppWiring(deps: ReturnType<typeof useAppCore> & Later) {
     }
   }, []);
 
-  return { activeCustomExtensionUiRequest, activeExtensionUiRequest, activeWebExtensionUiRequest, activeFileTabPath, autoAppliedModelRef, autoResolveConflicts, canQueueFollowUp, canSubmitPrompt, changedFilesByPath, clearBuiltinNotice, compactionNoticeView, composerSessionBusy, contextPercent, extensionAboveWidgets, extensionBelowWidgets, focusComposerQuietly, followLatestScroll, getScrollState, handleComposerModelChange, hasConfiguredModel, openProjectCapabilities, openProjectFileTree, openWorkspaceContent, openWorkspacePreview, panelTabs, projectCommands, projectGit, restoreComposerFocusRing, sessionWorktree, showBuiltinNotice, streamingSessionPaths, visibleSessionPath, workspaceFiles };
+  return { activeCustomExtensionUiRequest, activeExtensionUiRequest, activeWebExtensionUiRequest, activeFileTabPath, autoAppliedModelRef, autoResolveConflicts, canQueueFollowUp, canSubmitPrompt, changedFilesByPath, clearBuiltinNotice, compactionNoticeView, composerSessionBusy, contextPercent, extensionAboveWidgets, extensionBelowWidgets, focusComposerQuietly, followLatestScroll, getScrollState, handleComposerModelChange, hasConfiguredModel, openProjectCapabilities, openProjectFileTree, openWorkspaceContent, openWorkspacePreview, panelTabs, projectCommands, projectGit, restoreComposerFocusRing, sessionRuntimeLocked, sessionWorktree, showBuiltinNotice, streamingSessionPaths, visibleSessionPath, workspaceFiles };
 }
